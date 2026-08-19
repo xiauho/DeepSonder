@@ -1,0 +1,30 @@
+# Python and isolated environments
+__pycache__/
+*.py[cod]
+.venv/
+.env
+.env.*
+config.json
+
+# Build outputs
+build/
+dist/
+*.spec.bak
+
+# Local editor and operating-system state
+.vscode/
+.idea/
+.pytest_cache/
+.ruff_cache/
+.DS_Store
+Thumbs.db
+
+# Local source artwork (the canonical application assets live in assets/)
+图标.png
+新图标.png
+
+# Personal writing projects (keep only the public demo)
+文本文件/
+projects/*
+!projects/demo_novel/
+!projects/demo_novel/**
