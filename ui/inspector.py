@@ -4,13 +4,25 @@ import html
 import json
 import re
 
-from PySide6.QtWidgets import QLabel, QTabWidget, QTextBrowser, QVBoxLayout, QWidget
+from PySide6.QtCore import Signal
+from PySide6.QtWidgets import (
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QTabWidget,
+    QTextBrowser,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from core.project import NovelProject
 
 
 class Inspector(QWidget):
     """Right-hand story intelligence panel."""
+
+    toggle_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -20,12 +32,25 @@ class Inspector(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 16, 14, 12)
         layout.setSpacing(10)
+        header = QFrame()
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        title_box = QVBoxLayout()
+        title_box.setSpacing(1)
         title = QLabel("故事雷达")
         title.setObjectName("panelTitle")
         subtitle = QLabel("上下文、记忆与检查结果")
         subtitle.setObjectName("mutedLabel")
-        layout.addWidget(title)
-        layout.addWidget(subtitle)
+        title_box.addWidget(title)
+        title_box.addWidget(subtitle)
+        header_layout.addLayout(title_box, 1)
+        toggle_btn = QToolButton()
+        toggle_btn.setObjectName("panelToggleButton")
+        toggle_btn.setText("×")
+        toggle_btn.setToolTip("收起故事雷达（Ctrl+Shift+I 可恢复）")
+        toggle_btn.clicked.connect(self.toggle_requested)
+        header_layout.addWidget(toggle_btn)
+        layout.addWidget(header)
 
         self.tabs = QTabWidget()
         self.tabs.setObjectName("inspectorTabs")
@@ -45,12 +70,12 @@ class Inspector(QWidget):
         browser.document().setDefaultStyleSheet(
             "body{font-family:'Microsoft YaHei UI';line-height:1.65;}"
             "h2{font-size:18px;margin:5px 0 10px;}h3{font-size:14px;margin:16px 0 7px;}"
-            ".eyebrow{font-size:11px;color:#D79A52;letter-spacing:1px;}"
-            ".muted{color:#929AA7;}.good{color:#74B38A;}"
-            ".card{background:#1B2027;border:1px solid #2A3039;border-radius:8px;padding:9px;margin:5px 0;}"
-            ".chip{background:#3A3026;color:#E3B77F;border-radius:9px;padding:3px 7px;margin-right:4px;}"
-            ".metric{display:inline-block;background:#1B2027;border:1px solid #2A3039;padding:7px;margin:3px;}"
-            ".metric b{font-size:17px;color:#D79A52;}.metric span{font-size:10px;color:#929AA7;margin-left:4px;}"
+            ".eyebrow{font-size:11px;color:#58A6FF;letter-spacing:1px;}"
+            ".muted{color:#8B949E;}.good{color:#3FB950;}"
+            ".card{background:#151A21;border:1px solid #30363D;border-radius:7px;padding:9px;margin:5px 0;}"
+            ".chip{background:#1C2A39;color:#58A6FF;border-radius:8px;padding:3px 7px;margin-right:4px;}"
+            ".metric{display:inline-block;background:#151A21;border:1px solid #30363D;padding:7px;margin:3px;}"
+            ".metric b{font-size:17px;color:#58A6FF;}.metric span{font-size:10px;color:#8B949E;margin-left:4px;}"
             ".report{line-height:1.75;}li{margin-bottom:5px;}"
         )
         return browser

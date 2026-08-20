@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 DARK_COLORS = {
-    "background_color": "#111419",
-    "panel_color": "#181C22",
-    "field_color": "#14181E",
-    "border_color": "#2A3039",
-    "text_color": "#E8E5DE",
-    "muted_text_color": "#929AA7",
-    "accent_color": "#D79A52",
-    "selection_color": "#3A3026",
-    "hover_color": "#232933",
+    "background_color": "#0D1117",
+    "panel_color": "#151A21",
+    "field_color": "#0F141A",
+    "border_color": "#30363D",
+    "text_color": "#E6EDF3",
+    "muted_text_color": "#8B949E",
+    "accent_color": "#58A6FF",
+    "selection_color": "#1C2A39",
+    "hover_color": "#1B222B",
 }
 
 LIGHT_COLORS = {
@@ -73,12 +73,27 @@ QLabel#aiStatus, QLabel#aiStatusBusy {
 }
 QLabel#aiStatus { color: #74B38A; background: __FIELD__; }
 QLabel#aiStatusBusy { color: __ACCENT__; background: __SELECTION__; }
+QToolButton#panelToggleButton {
+    background: transparent;
+    color: __MUTED__;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    min-width: 24px; max-width: 24px;
+    min-height: 24px; max-height: 24px;
+    padding: 0;
+    font-size: 17px;
+}
+QToolButton#panelToggleButton:hover {
+    background: __HOVER__;
+    color: __TEXT__;
+    border-color: __BORDER__;
+}
 
 QWidget#navigationPanel, QWidget#inspectorPanel { background: __PANEL__; }
 QWidget#navigationPanel { border-right: 1px solid __BORDER__; }
 QWidget#inspectorPanel { border-left: 1px solid __BORDER__; }
 QLineEdit#navigationSearch {
-    border-radius: 10px;
+    border-radius: 7px;
     padding: 9px 11px;
 }
 QTreeWidget#projectTree {
@@ -89,7 +104,7 @@ QTreeWidget#projectTree {
 }
 QTreeWidget#projectTree::item {
     min-height: __TREE_ITEM_HEIGHT__px;
-    border-radius: 7px;
+    border-radius: 5px;
     padding: 1px 6px;
     margin: 1px 0;
 }
@@ -106,7 +121,7 @@ QFrame#findBar {
 QPlainTextEdit#writingEditor {
     background: __FIELD__;
     border: 1px solid __BORDER__;
-    border-radius: 12px;
+    border-radius: 8px;
     padding: 24px 32px;
     selection-background-color: __ACCENT__;
     selection-color: __ACCENT_TEXT__;
@@ -123,7 +138,7 @@ QFrame#outputContainer {
 QPlainTextEdit#outputPanel, QTextBrowser#inspectorBrowser {
     background: __FIELD__;
     border: 1px solid __BORDER__;
-    border-radius: 9px;
+    border-radius: 7px;
     padding: 10px;
     selection-background-color: __ACCENT__;
 }
@@ -140,8 +155,8 @@ QLineEdit:focus, QSpinBox:focus, QComboBox:focus { border-color: __ACCENT__; }
 QPushButton, QToolButton {
     background: __PANEL__;
     border: 1px solid __BORDER__;
-    border-radius: 8px;
-    padding: 7px 12px;
+    border-radius: 6px;
+    padding: 6px 11px;
     min-height: 18px;
 }
 QPushButton:hover, QToolButton:hover { background: __HOVER__; border-color: __ACCENT__; }
@@ -187,7 +202,7 @@ QTabBar::tab:selected { color: __ACCENT__; border-bottom-color: __ACCENT__; }
 QMenuBar { background: __PANEL__; border-bottom: 1px solid __BORDER__; padding: 2px 8px; }
 QMenuBar::item { padding: 5px 9px; border-radius: 5px; }
 QMenuBar::item:selected { background: __HOVER__; }
-QMenu { background: __PANEL__; border: 1px solid __BORDER__; border-radius: 8px; padding: 6px; }
+QMenu { background: __PANEL__; border: 1px solid __BORDER__; border-radius: 6px; padding: 6px; }
 QMenu::item { padding: 7px 28px 7px 12px; border-radius: 5px; }
 QMenu::item:selected { background: __SELECTION__; }
 QStatusBar { background: __PANEL__; border-top: 1px solid __BORDER__; padding: 3px 10px; }
@@ -196,6 +211,16 @@ QProgressBar { background: __FIELD__; border: none; border-radius: 4px; }
 QProgressBar::chunk { background: __ACCENT__; border-radius: 4px; }
 QSplitter::handle { background: __BORDER__; width: 1px; height: 1px; }
 QSplitter::handle:hover { background: __ACCENT__; }
+QSplitter#mainSplitter::handle {
+    background: __BORDER__;
+    width: 5px;
+}
+QSplitter#mainSplitter::handle:hover { background: __ACCENT__; }
+QSplitter#outerSplitter::handle {
+    background: __BORDER__;
+    height: 5px;
+}
+QSplitter#outerSplitter::handle:hover { background: __ACCENT__; }
 
 QDialog { background: __BG__; }
 QGroupBox {

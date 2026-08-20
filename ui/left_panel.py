@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QTreeWidget,
     QTreeWidgetItem,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -21,6 +22,7 @@ from core.project import NovelProject
 class LeftPanel(QWidget):
     file_selected = Signal(str, str)
     new_chapter_requested = Signal()
+    toggle_requested = Signal()
 
     PATH_ROLE = int(Qt.ItemDataRole.UserRole)
     CATEGORY_ROLE = PATH_ROLE + 1
@@ -40,7 +42,7 @@ class LeftPanel(QWidget):
         header_layout.setContentsMargins(0, 0, 0, 0)
         title_box = QVBoxLayout()
         title_box.setSpacing(1)
-        title = QLabel("故事资料库")
+        title = QLabel("工作区")
         title.setObjectName("panelTitle")
         self.project_label = QLabel("尚未打开项目")
         self.project_label.setObjectName("mutedLabel")
@@ -52,6 +54,12 @@ class LeftPanel(QWidget):
         add_btn.clicked.connect(self.new_chapter_requested)
         header_layout.addLayout(title_box, 1)
         header_layout.addWidget(add_btn)
+        toggle_btn = QToolButton()
+        toggle_btn.setObjectName("panelToggleButton")
+        toggle_btn.setText("×")
+        toggle_btn.setToolTip("收起工作区面板（Ctrl+Shift+L 可恢复）")
+        toggle_btn.clicked.connect(self.toggle_requested)
+        header_layout.addWidget(toggle_btn)
         layout.addWidget(header)
 
         self.search = QLineEdit()

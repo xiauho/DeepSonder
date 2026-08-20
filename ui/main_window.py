@@ -60,6 +60,8 @@ class MainWindow(QMainWindow):
         self._task: DSHTask | None = None
         self._task_chapter_id: str | None = None
         self._focus_mode = False
+        self._left_panel_width = 270
+        self._inspector_width = 330
         self.config = load_config()
         self._configure_dsh()
 
@@ -119,6 +121,7 @@ class MainWindow(QMainWindow):
         action("redo", "重做", lambda: self.editor.text_edit.redo(), "Ctrl+Y")
         action("find", "查找与替换", lambda: self.editor.show_find(), "Ctrl+F")
         action("focus", "专注模式", self.toggle_focus_mode, "Ctrl+K")
+        action("navigation", "显示/隐藏工作区", self.toggle_navigation_panel, "Ctrl+Shift+L")
         action("inspector", "显示/隐藏故事雷达", self.toggle_inspector, "Ctrl+Shift+I")
         action("output", "显示/隐藏 AI 记录", self.toggle_output, "Ctrl+J")
         action("continue", "AI 续写", self.continue_writing, "Ctrl+Enter")
@@ -190,8 +193,12 @@ class MainWindow(QMainWindow):
         root_layout.addWidget(self.action_bar)
 
         self.outer_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.outer_splitter.setObjectName("outerSplitter")
+        self.outer_splitter.setHandleWidth(5)
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.main_splitter.setObjectName("mainSplitter")
+        self.main_splitter.setHandleWidth(5)
+        self.main_splitter.setChildrenCollapsible(False)
         self.left_panel = LeftPanel()
         self.editor = Editor()
         self.inspector = Inspector()
@@ -202,7 +209,10 @@ class MainWindow(QMainWindow):
         self.main_splitter.setStretchFactor(1, 1)
         self.main_splitter.setStretchFactor(2, 0)
         self.main_splitter.setSizes([270, 820, 330])
+        self.main_splitter.setCollapsible(0, False)
         self.main_splitter.setCollapsible(1, False)
+        self.main_splitter.setCollapsible(2, False)
+        self.main_splitter.splitterMoved.connect(self._remember_panel_sizes)
 
         self.output_container = QFrame()
         self.output_container.setObjectName("outputContainer")
@@ -238,6 +248,8 @@ class MainWindow(QMainWindow):
 
         self.left_panel.file_selected.connect(self._on_file_selected)
         self.left_panel.new_chapter_requested.connect(self.new_chapter)
+        self.left_panel.toggle_requested.connect(self.toggle_navigation_panel)
+        self.inspector.toggle_requested.connect(self.toggle_inspector)
         self.editor.dirty_changed.connect(self._on_dirty_changed)
         self.editor.file_saved.connect(lambda _path: self._refresh_current_context())
         self.editor.exit_focus_button.clicked.connect(self._exit_focus_mode)
@@ -280,6 +292,7 @@ class MainWindow(QMainWindow):
 
         view_menu = self.menuBar().addMenu("视图")
         view_menu.addAction(self.actions["focus"])
+        view_menu.addAction(self.actions["navigation"])
         view_menu.addAction(self.actions["inspector"])
         view_menu.addAction(self.actions["output"])
 
@@ -496,7 +509,38 @@ class MainWindow(QMainWindow):
             self.toggle_focus_mode()
 
     def toggle_inspector(self) -> None:
-        self.inspector.setVisible(not self.inspector.isVisible())
+        self._toggle_side_panel(self.inspector, 2, "_inspector_width")
+
+    def toggle_navigation_panel(self) -> None:
+        self._toggle_side_panel(self.left_panel, 0, "_left_panel_width")
+
+    def _toggle_side_panel(self, panel: QWidget, index: int, width_attribute: str) -> None:
+        if panel.isVisible():
+            sizes = self.main_splitter.sizes()
+            if len(sizes) > index and sizes[index] > 0:
+                setattr(self, width_attribute, sizes[index])
+            panel.hide()
+            return
+
+        panel.show()
+        QTimer.singleShot(0, self._restore_side_panel_sizes)
+
+    def _restore_side_panel_sizes(self) -> None:
+        if self.main_splitter.width() <= 0:
+            return
+        left = self._left_panel_width if self.left_panel.isVisible() else 0
+        right = self._inspector_width if self.inspector.isVisible() else 0
+        center = max(1, self.main_splitter.width() - left - right)
+        self.main_splitter.setSizes([left, center, right])
+
+    def _remember_panel_sizes(self, _position: int, _index: int) -> None:
+        sizes = self.main_splitter.sizes()
+        if len(sizes) < 3:
+            return
+        if self.left_panel.isVisible() and sizes[0] >= self.left_panel.minimumWidth():
+            self._left_panel_width = sizes[0]
+        if self.inspector.isVisible() and sizes[2] >= self.inspector.minimumWidth():
+            self._inspector_width = sizes[2]
 
     def toggle_output(self) -> None:
         self.output_container.setVisible(not self.output_container.isVisible())
