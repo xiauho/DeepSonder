@@ -37,6 +37,7 @@ def build_expansion_prompt(
     related = project.find_related_canon(chapter_id)
     state = project.load_story_state()
     context = _build_story_context(project, chapter_id)
+    related_block = related.to_block() or "【相关设定】\n（暂无）"
     target_chars = max(300, int(target_chars))
     min_chars = round(target_chars * 0.85)
     max_chars = round(target_chars * 1.15)
@@ -75,7 +76,7 @@ def build_expansion_prompt(
 【相关章节摘要】
 {context["summaries"] or "（暂无）"}
 
-{related.to_block() or "【相关设定】\n（暂无）"}
+{related_block}
 
 【当前故事状态】
 {json.dumps(state, ensure_ascii=False, indent=2)}
@@ -124,6 +125,7 @@ def build_write_prompt(
     related = project.find_related_canon(chapter_id)
     state = project.load_story_state()
     context = _build_story_context(project, chapter_id)
+    related_block = related.to_block() or "【相关设定】\n（暂无）"
     target_chars = max(300, int(target_chars))
     min_chars = round(target_chars * 0.85)
     max_chars = round(target_chars * 1.15)
@@ -161,7 +163,7 @@ def build_write_prompt(
 【相关章节摘要】
 {context["summaries"] or "（暂无）"}
 
-{related.to_block() or "【相关设定】\n（暂无）"}
+{related_block}
 
 【当前故事状态】
 {json.dumps(state, ensure_ascii=False, indent=2)}
