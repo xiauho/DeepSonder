@@ -11,11 +11,19 @@ def merge_story_state(old_state: dict, new_state: dict) -> dict:
     We keep all old character keys and overlay the updated fields, so a model
     omission does not erase existing data.
     """
+    if not isinstance(old_state, dict):
+        old_state = {}
+    if not isinstance(new_state, dict):
+        return dict(old_state)
     merged = dict(old_state)
-    merged.update(new_state)
+    merged.update({key: value for key, value in new_state.items() if value is not None})
 
     old_chars = old_state.get("characters", {}) or {}
     new_chars = new_state.get("characters", {}) or {}
+    if not isinstance(old_chars, dict):
+        old_chars = {}
+    if not isinstance(new_chars, dict):
+        new_chars = {}
     merged_chars = dict(old_chars)
     for name, fields in new_chars.items():
         if isinstance(fields, dict):
@@ -28,11 +36,14 @@ def merge_story_state(old_state: dict, new_state: dict) -> dict:
             merged_chars[name] = fields
     merged["characters"] = merged_chars
 
-    # Combine foreshadowing without duplicates.
-    old_foreshadowing = list(old_state.get("foreshadowing", []) or [])
-    new_foreshadowing = list(new_state.get("foreshadowing", []) or [])
-    combined = list(dict.fromkeys(old_foreshadowing + new_foreshadowing))
-    merged["foreshadowing"] = combined
+    # The field means "not yet recovered". A generated empty list therefore
+    # intentionally clears hooks that the chapter has resolved.
+    if "foreshadowing" in new_state:
+        hooks = new_state.get("foreshadowing")
+        merged["foreshadowing"] = _unique_hooks(hooks)
+    else:
+        old_hooks = old_state.get("foreshadowing", [])
+        merged["foreshadowing"] = _unique_hooks(old_hooks)
 
     return merged
 
@@ -48,3 +59,18 @@ def apply_state_update(project: NovelProject, new_state: dict) -> dict:
     merged = merge_story_state(old_state, new_state)
     project.save_story_state(merged)
     return merged
+
+
+def _unique_hooks(value: object) -> list:
+    if not isinstance(value, list):
+        return []
+    result = []
+    seen: set[str] = set()
+    for item in value:
+        if not isinstance(item, (str, int, float)):
+            continue
+        key = str(item)
+        if key not in seen:
+            seen.add(key)
+            result.append(item)
+    return result

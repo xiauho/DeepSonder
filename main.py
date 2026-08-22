@@ -5,6 +5,7 @@ from PySide6.QtWidgets import QApplication, QStyleFactory
 
 from core.config import load_config
 from core.resources import resource_path
+from ui.icons import load_stitch_fonts
 from ui.main_window import MainWindow
 from ui.theme import apply_theme
 
@@ -29,13 +30,14 @@ def main() -> int:
     app.setApplicationName("Novalist")
     app.setOrganizationName("Novalist")
     app.setStyle(QStyleFactory.create("Fusion"))
+    load_stitch_fonts()
     app.setFont(QFont("Microsoft YaHei UI", 10))
     app.setWindowIcon(QIcon(str(resource_path("assets/app_icon.ico"))))
 
     config = load_config()
     apply_theme(app, config)
 
-    window = MainWindow()
+    window = MainWindow(config=config)
     screen = app.primaryScreen()
     if screen is not None:
         area = screen.availableGeometry()

@@ -1,6 +1,8 @@
 # Novalist
 
-Novalist 是一款面向长篇小说创作的本地桌面工具，使用 PySide6 构建，并可通过 `dsh` 的 `headless` 模式调用 DeepSeek Harness 完成续写、一致性检查、章节摘要和故事状态更新。
+> 当前发布版本：`v2.0.0-alpha`。本版本将 AI 续写入口调整为基于章节规划的 AI 扩写，属于公开预览版；请在真实创作项目中使用前先完成一次本机 DSh 实测。
+
+Novalist 是一款面向长篇小说创作的本地桌面工具，使用 PySide6 构建，并可通过 `dsh` 的 `headless` 模式调用 DeepSeek Harness 完成章节扩写、一致性检查、章节摘要和故事状态更新。
 
 > **第三方项目声明**：Novalist 是独立开发的第三方开源工具，不是 DeepSeek 或 DeepSeek Harness 的官方产品，与其不存在隶属、合作、授权、认证或背书关系。“DeepSeek Harness”仅用于说明兼容性和所依赖的外部工具。
 
@@ -13,12 +15,12 @@ Novalist 是一款面向长篇小说创作的本地桌面工具，使用 PySide6
 
 ## 主要功能
 
-- **沉浸式写作台**：低对比深色/浅色主题、蓝色强调色、可收起侧栏、专注模式、查找替换和未保存状态提示
+- **沉浸式写作台**：蓝白浅色主题（可切换蓝黑深色）、统一一级导航、可收起侧栏、专注模式、查找替换和未保存状态提示
 - **写作统计**：实时显示字数、段落、预计阅读时长和光标位置
 - **安全保存**：定时自动保存，切换资料时自动落盘，退出前检查未保存内容
 - **故事资料库**：管理大纲、章节、角色、世界观、战力体系和时间线
 - **故事雷达**：汇总章节目标、相关人物、故事状态、摘要和待回收伏笔
-- **AI 辅助**：通过 `dsh --profile headless` 续写、检查一致性、生成摘要和更新记忆
+- **AI 辅助**：通过 `dsh --profile headless` 扩写章节、检查一致性、生成摘要和更新记忆
 - **首次使用告知**：调用 AI 前明确提示可能发送的数据范围和 AI 输出风险
 - **整书导出**：导出为 Markdown 或纯文本
 
@@ -68,6 +70,8 @@ python main.py
 
 首次运行会由 `config.example.json` 生成本机的 `config.json`。后者已被 Git 忽略，不应提交到公开仓库。
 
+Novalist 的 AI 配置只针对 DeepSeek Harness 的 `dsh --profile headless` 入口，不提供其他模型供应商、API Key 或模型列表配置。凭据和模型连接由 Harness 自己管理。
+
 如果系统已经能直接执行 `dsh`，保持默认设置即可：
 
 ```json
@@ -75,7 +79,7 @@ python main.py
   "dsh_command": "dsh",
   "dsh_launcher_args": [],
   "dsh_profile": "headless",
-  "dsh_timeout": 180,
+  "dsh_timeout": 600,
   "dsh_extra_args": []
 }
 ```
@@ -96,7 +100,7 @@ macOS/Linux 通常使用 `npx` 而不是 `npx.cmd`。API 密钥应按照 Harness
 
 1. 启动后打开 `projects/demo_novel`，或新建自己的项目。
 2. 从左侧打开章节，在中间编辑器中写作。
-3. 使用“AI 续写”“检查设定”或“更新记忆”时，首次调用会显示数据处理告知。
+3. 使用“AI 扩写”“检查设定”或“更新记忆”时，首次调用会显示数据处理告知。
 4. 审核 AI 输出后再保存、采用或公开。
 5. 通过“文件 → 导出全书”生成 `.md` 或 `.txt` 文件。
 
@@ -109,7 +113,7 @@ macOS/Linux 通常使用 `npx` 而不是 `npx.cmd`。API 密钥应按照 Harness
 | 查找与替换 | `Ctrl+F` |
 | 进入/退出专注模式 | `Ctrl+K` 或 `F11`；专注模式中也可按 `Esc` |
 | 显示/隐藏左侧工作区 | `Ctrl+Shift+L` |
-| AI 续写 | `Ctrl+Enter` |
+| AI 扩写 | `Ctrl+Enter` |
 | 一致性检查 | `Ctrl+Shift+C` |
 | 更新故事记忆 | `Ctrl+Shift+M` |
 | 显示/隐藏故事雷达 | `Ctrl+Shift+I` |

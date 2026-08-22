@@ -17,6 +17,18 @@ from PySide6.QtWidgets import (
 )
 
 from core.project import NovelProject
+from ui.icons import set_button_icon
+from ui.theme import document_css
+
+
+def rank_character_names(character_names: list[str], chapter_text: str) -> list[str]:
+    """Order related characters by their frequency in the current chapter.
+
+    Python's sort is stable, so characters with the same frequency retain the
+    canonical filename order returned by the project lookup.
+    """
+    names = [name.strip() for name in character_names if name.strip()]
+    return sorted(names, key=lambda name: -chapter_text.count(name))
 
 
 class Inspector(QWidget):
@@ -46,7 +58,7 @@ class Inspector(QWidget):
         header_layout.addLayout(title_box, 1)
         toggle_btn = QToolButton()
         toggle_btn.setObjectName("panelToggleButton")
-        toggle_btn.setText("×")
+        set_button_icon(toggle_btn, "close", size=17)
         toggle_btn.setToolTip("收起故事雷达（Ctrl+Shift+I 可恢复）")
         toggle_btn.clicked.connect(self.toggle_requested)
         header_layout.addWidget(toggle_btn)
@@ -61,24 +73,19 @@ class Inspector(QWidget):
         self.tabs.addTab(self.memory_browser, "记忆")
         self.tabs.addTab(self.report_browser, "报告")
         layout.addWidget(self.tabs, 1)
+        self.set_theme({"theme": "light"})
 
     @staticmethod
     def _browser() -> QTextBrowser:
         browser = QTextBrowser()
         browser.setOpenExternalLinks(False)
         browser.setObjectName("inspectorBrowser")
-        browser.document().setDefaultStyleSheet(
-            "body{font-family:'Microsoft YaHei UI';line-height:1.65;}"
-            "h2{font-size:18px;margin:5px 0 10px;}h3{font-size:14px;margin:16px 0 7px;}"
-            ".eyebrow{font-size:11px;color:#58A6FF;letter-spacing:1px;}"
-            ".muted{color:#8B949E;}.good{color:#3FB950;}"
-            ".card{background:#151A21;border:1px solid #30363D;border-radius:7px;padding:9px;margin:5px 0;}"
-            ".chip{background:#1C2A39;color:#58A6FF;border-radius:8px;padding:3px 7px;margin-right:4px;}"
-            ".metric{display:inline-block;background:#151A21;border:1px solid #30363D;padding:7px;margin:3px;}"
-            ".metric b{font-size:17px;color:#58A6FF;}.metric span{font-size:10px;color:#8B949E;margin-left:4px;}"
-            ".report{line-height:1.75;}li{margin-bottom:5px;}"
-        )
         return browser
+
+    def set_theme(self, config: dict | None = None) -> None:
+        style = document_css(config)
+        for browser in (self.context_browser, self.memory_browser, self.report_browser):
+            browser.document().setDefaultStyleSheet(style)
 
     def show_project(self, project: NovelProject | None, chapter_id: str | None = None) -> None:
         if project is None:
@@ -119,9 +126,13 @@ class Inspector(QWidget):
         summaries = project.load_chapter_summaries()
 
         character_names = re.findall(r"^###\s+(.+)$", related.characters, re.MULTILINE)
-        characters_html = "".join(
-            f"<span class='chip'>{html.escape(name)}</span>" for name in character_names
-        ) or "<span class='muted'>正文中暂未识别到角色卡名称</span>"
+        character_names = rank_character_names(character_names, chapter.content)
+        characters_html = (
+            "&nbsp;".join(
+                f"<span class='chip'>{html.escape(name)}</span>" for name in character_names
+            )
+            or "<span class='muted'>正文中暂未识别到角色卡名称</span>"
+        )
 
         outline = html.escape(chapter.outline or "暂无大纲").replace("\n", "<br>")
         context = (
@@ -131,7 +142,7 @@ class Inspector(QWidget):
             f"<h3>出场角色</h3><div>{characters_html}</div>"
         )
         if related.world:
-            context += "<h3>世界观已接入</h3><p class='good'>✓ AI 续写会携带世界观设定</p>"
+            context += "<h3>世界观已接入</h3><p class='good'>✓ AI 扩写会携带世界观设定</p>"
         if related.power:
             context += "<h3>战力体系已接入</h3><p class='good'>✓ 一致性检查会核对战力规则</p>"
         self.context_browser.setHtml(context)

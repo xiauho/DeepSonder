@@ -18,6 +18,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ui.icons import set_button_icon
+
 
 class Editor(QWidget):
     """Focused Markdown editor with document state, stats and find/replace."""
@@ -85,7 +87,7 @@ class Editor(QWidget):
         replace_btn = QPushButton("替换")
         replace_all_btn = QPushButton("全部替换")
         close_btn = QToolButton()
-        close_btn.setText("×")
+        set_button_icon(close_btn, "close", size=17)
         close_btn.setToolTip("关闭查找")
         find_layout.addWidget(self.find_input, 2)
         find_layout.addWidget(self.replace_input, 2)
@@ -101,7 +103,7 @@ class Editor(QWidget):
         self.text_edit = QPlainTextEdit()
         self.text_edit.setObjectName("writingEditor")
         self.text_edit.setPlaceholderText(
-            "在这里写下故事。\n\n提示：章节建议保留「## 大纲」和「## 正文」标记，AI 会据此理解你的写作意图。"
+            "在这里写下故事。\n\n提示：章节建议保留「## 大纲」「## 剧情简写」和「## 正文」标记，AI 扩写会据此理解你的写作意图。"
         )
         self.text_edit.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
         self.text_edit.setTabStopDistance(32.0)
@@ -143,7 +145,7 @@ class Editor(QWidget):
             return False
         try:
             content = path.read_text(encoding="utf-8")
-        except OSError as exc:
+        except (OSError, UnicodeError) as exc:
             self.clear_document(f"读取失败：{exc}")
             return False
 
@@ -207,6 +209,42 @@ class Editor(QWidget):
             cursor.insertText("\n\n" + text.strip() + "\n")
         else:
             cursor.insertText(text.strip() + "\n")
+        self.text_edit.setTextCursor(cursor)
+        self.text_edit.ensureCursorVisible()
+
+    def replace_chapter_body(self, text: str) -> None:
+        """Replace only the current chapter's ``## 正文`` section."""
+        raw = self.text_edit.toPlainText()
+        body = str(text or "").strip()
+        marker = "## 正文"
+        if marker in raw:
+            prefix = raw.split(marker, 1)[0].rstrip()
+            replacement = f"{prefix}\n\n{marker}\n{body}\n"
+        else:
+            replacement = f"{raw.rstrip()}\n\n{marker}\n{body}\n"
+        self.text_edit.setPlainText(replacement)
+        cursor = self.text_edit.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        self.text_edit.setTextCursor(cursor)
+        self.text_edit.ensureCursorVisible()
+
+    def cursor_snapshot(self) -> tuple[int, int]:
+        cursor = self.text_edit.textCursor()
+        return cursor.position(), cursor.anchor()
+
+    def insert_text_at_snapshot(
+        self,
+        text: str,
+        position: int,
+        anchor: int | None = None,
+    ) -> None:
+        cursor = self.text_edit.textCursor()
+        document_length = self.text_edit.document().characterCount() - 1
+        position = max(0, min(int(position), document_length))
+        anchor = position if anchor is None else max(0, min(int(anchor), document_length))
+        cursor.setPosition(anchor)
+        cursor.setPosition(position, QTextCursor.MoveMode.KeepAnchor)
+        cursor.insertText(text.strip())
         self.text_edit.setTextCursor(cursor)
         self.text_edit.ensureCursorVisible()
 

@@ -18,6 +18,7 @@ Layout:
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -64,6 +65,10 @@ class NovelProject:
         # Skeleton files
         (root / "outline" / "main_arc.md").write_text(
             "# 总大纲\n\n- 主线：\n- 支线：\n- 伏笔：\n", encoding="utf-8"
+        )
+        (root / "outline" / "future_plan.md").write_text(
+            "# 后续剧情规划\n\n- 下一阶段主要事件：\n- 必须推进的伏笔：\n- 章节结尾目标：\n",
+            encoding="utf-8",
         )
         (root / "canon" / "timeline.md").write_text(
             "# 时间线\n\n| 时间 | 事件 |\n|---|---|\n", encoding="utf-8"
@@ -129,14 +134,34 @@ class NovelProject:
         return self._list_md(self.canon_dir / "power")
 
     def list_outline(self) -> list[Path]:
-        files = [self.outline_dir / "main_arc.md"]
+        files = [
+            self.outline_dir / "main_arc.md",
+            self.outline_dir / "future_plan.md",
+        ]
         files += self.list_chapters()
         return [p for p in files if p.exists()]
+
+    def load_optional_text(self, path: Path, default: str = "") -> str:
+        """Read an optional planning/context file without failing a task."""
+        path = Path(path)
+        if not path.exists():
+            return default
+        try:
+            return self.read_file(path).strip()
+        except (OSError, UnicodeError):
+            return default
+
+    def load_main_arc(self) -> str:
+        return self.load_optional_text(self.outline_dir / "main_arc.md")
+
+    def load_future_plan(self) -> str:
+        return self.load_optional_text(self.outline_dir / "future_plan.md")
 
     def list_all_editable_files(self) -> list[tuple[str, Path]]:
         """Return (category, path) pairs for the left navigation tree."""
         items: list[tuple[str, Path]] = [
             ("大纲", self.outline_dir / "main_arc.md"),
+            ("大纲", self.outline_dir / "future_plan.md"),
             ("时间线", self.canon_dir / "timeline.md"),
         ]
         items += [("大纲", p) for p in self.list_chapters()]
@@ -179,9 +204,12 @@ class NovelProject:
             raw=raw,
         )
 
-    def save_chapter(self, chapter_id: str, outline: str, content: str) -> None:
+    def save_chapter(
+        self, chapter_id: str, outline: str, content: str, title: str | None = None
+    ) -> None:
         path = self.chapters_dir / f"{chapter_id}.md"
-        text = f"# {chapter_id}\n\n## 大纲\n{outline.strip()}\n\n## 正文\n{content.strip()}\n"
+        chapter_title = title or self.load_chapter(chapter_id).title or chapter_id
+        text = f"# {chapter_title}\n\n## 大纲\n{outline.strip()}\n\n## 正文\n{content.strip()}\n"
         self.write_file(path, text)
 
     # ------------------------------------------------------------------
@@ -252,11 +280,7 @@ class NovelProject:
     def _copy_default(default: Any) -> Any:
         if default is None:
             return {}
-        if isinstance(default, dict):
-            return dict(default)
-        if isinstance(default, list):
-            return list(default)
-        return default
+        return deepcopy(default)
 
     @staticmethod
     def _write_json(path: Path, data: Any) -> None:
@@ -277,6 +301,7 @@ class NovelProject:
         content = ""
         in_outline = False
         in_content = False
+        has_sections = "## 大纲" in raw or "## 正文" in raw
 
         for line in raw.splitlines():
             if line.strip().startswith("## 大纲"):
@@ -291,4 +316,8 @@ class NovelProject:
                 outline += line + "\n"
             elif in_content:
                 content += line + "\n"
+        if not has_sections:
+            content = "\n".join(
+                line for line in raw.splitlines() if not line.startswith("# ")
+            )
         return outline.strip(), content.strip()
