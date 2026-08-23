@@ -78,7 +78,7 @@ class ProjectLifecycleControllerTests(unittest.TestCase):
 
             paths = controller.recent_projects()
 
-            self.assertEqual(paths, [root])
+            self.assertEqual(paths, [root.resolve()])
             self.assertEqual(config["recent_projects"], [str(root.resolve())])
             self.assertEqual(config["last_project"], "")
             self.assertEqual(len(persisted), 1)

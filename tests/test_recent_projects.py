@@ -11,7 +11,7 @@ class RecentProjectPathTests(unittest.TestCase):
     def test_valid_project_path_is_accepted(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = NovelProject.create(Path(tmp) / "proj", "测试").root
-            self.assertEqual(MainWindow._safe_project_path(root), root)
+            self.assertEqual(MainWindow._safe_project_path(root), root.resolve())
 
     def test_missing_or_inaccessible_path_is_ignored(self) -> None:
         self.assertIsNone(MainWindow._safe_project_path("C:/missing-project"))
