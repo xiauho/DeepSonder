@@ -16,8 +16,13 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
+import threading
+import time
 from pathlib import Path
 from typing import Any
+
+from .task_controller import AITaskCancelled
 
 
 WINDOWS_CMDLINE_LIMIT = 7800
@@ -40,9 +45,31 @@ class DSHClient:
         self.timeout = timeout
         self.extra_args = extra_args or []
         self.working_directory = Path(working_directory) if working_directory else None
+        self._isolated_workspace: Path | None = None
 
     def set_working_directory(self, directory: str | Path | None) -> None:
         self.working_directory = Path(directory) if directory else None
+
+    def use_isolated_workspace(self) -> None:
+        """Run dsh in a private empty directory instead of the user's project.
+
+        All story context travels inline in the task argument, so the agent
+        never needs project files.  An empty workspace keeps a misbehaving
+        agent away from the novel files and gives it no project structure to
+        describe instead of doing the task.
+        """
+        if self._isolated_workspace is None or not self._isolated_workspace.is_dir():
+            self._isolated_workspace = Path(tempfile.mkdtemp(prefix="novalist-dsh-"))
+        self.working_directory = self._isolated_workspace
+
+    def cleanup(self) -> None:
+        """Best-effort removal of the isolated workspace."""
+        workspace = self._isolated_workspace
+        self._isolated_workspace = None
+        if workspace is not None:
+            if self.working_directory == workspace:
+                self.working_directory = None
+            shutil.rmtree(workspace, ignore_errors=True)
 
     def generate(
         self,
@@ -51,6 +78,7 @@ class DSHClient:
         session_id: str | None = None,
         *,
         timeout_override: int | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> str:
         """Run dsh headless with a combined single prompt."""
         combined = self._combine_prompts(system_prompt, user_prompt)
@@ -65,6 +93,9 @@ class DSHClient:
             cmd += ["--resume", session_id]
         cmd.append(combined)
         cmd = self._prepare_command_for_prompt(cmd, command)
+
+        if cancel_event is not None:
+            return self._generate_cancellable(cmd, effective_timeout, cancel_event)
 
         try:
             result = subprocess.run(
@@ -91,6 +122,62 @@ class DSHClient:
             )
 
         output = result.stdout.strip()
+        if not output:
+            raise RuntimeError("dsh 返回了空内容。")
+        return output
+
+    def _generate_cancellable(
+        self,
+        cmd: list[str],
+        timeout: int,
+        cancel_event: threading.Event,
+    ) -> str:
+        if cancel_event.is_set():
+            raise AITaskCancelled()
+        try:
+            process = subprocess.Popen(
+                cmd,
+                text=True,
+                encoding="utf-8",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=str(self.working_directory) if self.working_directory else None,
+            )
+        except FileNotFoundError:
+            raise RuntimeError(
+                "找不到 AI 引擎命令。请确认 DeepSeek Harness 已安装，"
+                "或在偏好设置中修改命令与启动参数。"
+            ) from None
+
+        deadline = time.monotonic() + timeout
+        try:
+            while True:
+                if cancel_event.is_set():
+                    process.kill()
+                    process.communicate()
+                    raise AITaskCancelled()
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    process.kill()
+                    process.communicate()
+                    raise RuntimeError(f"dsh 调用超时（>{timeout} 秒）。")
+                try:
+                    stdout, stderr = process.communicate(timeout=min(0.2, remaining))
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
+        finally:
+            if process.poll() is None and cancel_event.is_set():
+                process.kill()
+                process.communicate()
+
+        if process.returncode != 0:
+            raise RuntimeError(
+                "dsh 调用失败。\n"
+                f"命令: {' '.join(cmd[:-1])} ...\n"
+                f"stderr: {stderr.strip()}"
+            )
+        output = stdout.strip()
         if not output:
             raise RuntimeError("dsh 返回了空内容。")
         return output
@@ -201,6 +288,7 @@ class DSHClient:
         session_id: str | None = None,
         *,
         timeout_override: int | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> Any:
         """Ask dsh for JSON and parse it safely."""
         text = self.generate(
@@ -208,6 +296,7 @@ class DSHClient:
             user_prompt,
             session_id,
             timeout_override=timeout_override,
+            cancel_event=cancel_event,
         )
         return self._extract_json(text)
 

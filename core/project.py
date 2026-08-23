@@ -18,11 +18,13 @@ Layout:
 from __future__ import annotations
 
 import json
+import re
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 from .models import Chapter, RelatedCanon
+from .storage import atomic_write_text
 
 DEFAULT_STORY_STATE = {
     "current_chapter": 1,
@@ -32,6 +34,29 @@ DEFAULT_STORY_STATE = {
 }
 
 DEFAULT_CHAPTER_SUMMARIES = {}
+
+
+def chapter_number_from_id(chapter_id: str) -> int | None:
+    """Chapter ordinal for ids following the app's ``chapter_07`` naming.
+
+    Returns ``None`` for imported or custom ids so callers fall back to their
+    own default instead of trusting digits that are part of a title.
+    """
+    match = re.fullmatch(r"chapter[_-]?(\d+)", str(chapter_id or "").strip(), re.IGNORECASE)
+    return int(match.group(1)) if match else None
+
+
+def chapter_sort_key(value: str | Path) -> tuple[int, int, str]:
+    """Return one stable natural-order key for chapter ids and paths.
+
+    Canonical ids such as ``chapter_2`` sort before custom/imported ids, and
+    numeric chapter ids use their numeric value instead of lexical order.
+    """
+    chapter_id = value.stem if isinstance(value, Path) else str(value)
+    number = chapter_number_from_id(chapter_id)
+    if number is not None:
+        return 0, number, chapter_id.casefold()
+    return 1, 0, chapter_id.casefold()
 
 
 class NovelProject:
@@ -63,28 +88,34 @@ class NovelProject:
         cls._write_json(root / "project.json", meta)
 
         # Skeleton files
-        (root / "outline" / "main_arc.md").write_text(
+        atomic_write_text(
+            root / "outline" / "main_arc.md",
             "# 总大纲\n\n- 主线：\n- 支线：\n- 伏笔：\n", encoding="utf-8"
         )
-        (root / "outline" / "future_plan.md").write_text(
+        atomic_write_text(
+            root / "outline" / "future_plan.md",
             "# 后续剧情规划\n\n- 下一阶段主要事件：\n- 必须推进的伏笔：\n- 章节结尾目标：\n",
             encoding="utf-8",
         )
-        (root / "canon" / "timeline.md").write_text(
+        atomic_write_text(
+            root / "canon" / "timeline.md",
             "# 时间线\n\n| 时间 | 事件 |\n|---|---|\n", encoding="utf-8"
         )
-        (root / "memory" / "story_state.json").write_text(
+        atomic_write_text(
+            root / "memory" / "story_state.json",
             json.dumps(DEFAULT_STORY_STATE, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-        (root / "memory" / "chapter_summaries.json").write_text(
+        atomic_write_text(
+            root / "memory" / "chapter_summaries.json",
             json.dumps(DEFAULT_CHAPTER_SUMMARIES, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
 
         chapter_01 = root / "outline" / "chapters" / "chapter_01.md"
         if not chapter_01.exists():
-            chapter_01.write_text(
+            atomic_write_text(
+                chapter_01,
                 "# 第一章 初始\n\n## 大纲\n- 在这里写本章剧情目标\n\n## 正文\n在这里开始写作。\n",
                 encoding="utf-8",
             )
@@ -122,7 +153,7 @@ class NovelProject:
     # File listing
     # ------------------------------------------------------------------
     def list_chapters(self) -> list[Path]:
-        return self._list_md(self.chapters_dir)
+        return sorted(self._list_md(self.chapters_dir), key=chapter_sort_key)
 
     def list_characters(self) -> list[Path]:
         return self._list_md(self.canon_dir / "characters")
@@ -178,8 +209,7 @@ class NovelProject:
 
     def write_file(self, path: Path, text: str) -> None:
         path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
+        atomic_write_text(path, text)
 
     def chapter_from_path(self, path: Path) -> Chapter | None:
         path = Path(path)
@@ -190,7 +220,7 @@ class NovelProject:
     def load_chapter(self, chapter_id: str) -> Chapter:
         path = self.chapters_dir / f"{chapter_id}.md"
         raw = self.read_file(path) if path.exists() else ""
-        outline, content = self._split_chapter(raw)
+        outline, plot_brief, content, extra_sections = self._parse_chapter(raw)
         title = path.stem
         if raw.startswith("# "):
             first_line = raw.splitlines()[0]
@@ -200,17 +230,59 @@ class NovelProject:
             path=path,
             title=title,
             outline=outline,
+            plot_brief=plot_brief,
             content=content,
             raw=raw,
+            extra_sections=extra_sections,
         )
 
     def save_chapter(
-        self, chapter_id: str, outline: str, content: str, title: str | None = None
+        self,
+        chapter_id: str,
+        outline: str,
+        content: str,
+        title: str | None = None,
+        *,
+        plot_brief: str | None = None,
+        extra_sections: list[tuple[str, str]] | None = None,
     ) -> None:
         path = self.chapters_dir / f"{chapter_id}.md"
-        chapter_title = title or self.load_chapter(chapter_id).title or chapter_id
-        text = f"# {chapter_title}\n\n## 大纲\n{outline.strip()}\n\n## 正文\n{content.strip()}\n"
+        existing = self.load_chapter(chapter_id) if path.exists() else None
+        chapter_title = title or (existing.title if existing else "") or chapter_id
+        if plot_brief is None:
+            plot_brief = existing.plot_brief if existing else ""
+        if extra_sections is None:
+            extra_sections = existing.extra_sections if existing else []
+        text = self.serialize_chapter(
+            chapter_title,
+            outline,
+            plot_brief,
+            content,
+            extra_sections,
+        )
         self.write_file(path, text)
+
+    @staticmethod
+    def serialize_chapter(
+        title: str,
+        outline: str = "",
+        plot_brief: str = "",
+        content: str = "",
+        extra_sections: list[tuple[str, str]] | None = None,
+    ) -> str:
+        """Serialize the canonical chapter sections without dropping extras."""
+        blocks = [f"# {str(title).strip() or '未命名章节'}"]
+        for heading, body in (
+            ("大纲", outline),
+            ("剧情简写", plot_brief),
+            ("正文", content),
+        ):
+            blocks.append(f"## {heading}\n{str(body or '').strip()}")
+        for heading, body in extra_sections or []:
+            heading = str(heading).strip()
+            if heading and heading not in {"大纲", "剧情简写", "正文"}:
+                blocks.append(f"## {heading}\n{str(body or '').strip()}")
+        return "\n\n".join(blocks).rstrip() + "\n"
 
     # ------------------------------------------------------------------
     # Memory
@@ -284,8 +356,8 @@ class NovelProject:
 
     @staticmethod
     def _write_json(path: Path, data: Any) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
+        atomic_write_text(
+            path,
             json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
         )
 
@@ -296,28 +368,41 @@ class NovelProject:
         return sorted(Path(directory).glob("*.md"))
 
     @staticmethod
-    def _split_chapter(raw: str) -> tuple[str, str]:
-        outline = ""
-        content = ""
-        in_outline = False
-        in_content = False
-        has_sections = "## 大纲" in raw or "## 正文" in raw
+    def _parse_chapter(raw: str) -> tuple[str, str, str, list[tuple[str, str]]]:
+        """Parse standard chapter sections while preserving unknown sections."""
+        sections: dict[str, list[str]] = {}
+        section_order: list[str] = []
+        current: str | None = None
+        has_level_two_section = False
 
         for line in raw.splitlines():
-            if line.strip().startswith("## 大纲"):
-                in_outline, in_content = True, False
+            heading = re.match(r"^##\s+(.+?)\s*$", line.strip())
+            if heading:
+                current = heading.group(1).strip()
+                has_level_two_section = True
+                if current not in sections:
+                    sections[current] = []
+                    section_order.append(current)
                 continue
-            if line.strip().startswith("## 正文"):
-                in_outline, in_content = False, True
+            if line.startswith("# "):
                 continue
-            if line.strip().startswith("# "):
-                continue
-            if in_outline:
-                outline += line + "\n"
-            elif in_content:
-                content += line + "\n"
-        if not has_sections:
-            content = "\n".join(
-                line for line in raw.splitlines() if not line.startswith("# ")
-            )
-        return outline.strip(), content.strip()
+            if current is not None:
+                sections.setdefault(current, []).append(line)
+            elif not has_level_two_section:
+                sections.setdefault("正文", []).append(line)
+
+        def body(name: str) -> str:
+            return "\n".join(sections.get(name, [])).strip()
+
+        extras = [
+            (name, body(name))
+            for name in section_order
+            if name not in {"大纲", "剧情简写", "正文"} and body(name)
+        ]
+        return body("大纲"), body("剧情简写"), body("正文"), extras
+
+    @staticmethod
+    def _split_chapter(raw: str) -> tuple[str, str]:
+        """Backward-compatible outline/content view of a chapter document."""
+        outline, _plot_brief, content, _extra_sections = NovelProject._parse_chapter(raw)
+        return outline, content

@@ -1,7 +1,7 @@
 from unittest import TestCase
 
 from core.config import DEFAULT_CONFIG, _normalize_config
-from ui.theme import DARK_COLORS, LIGHT_COLORS, build_qss
+from ui.theme import DARK_COLORS, LIGHT_COLORS, build_qss, document_css
 
 
 class ThemeConfigTests(TestCase):
@@ -19,6 +19,13 @@ class ThemeConfigTests(TestCase):
         self.assertIn("QMessageBox", qss)
         self.assertIn(LIGHT_COLORS["panel_color"], qss)
         self.assertIn(LIGHT_COLORS["text_color"], qss)
+
+    def test_document_css_switches_browser_field_background(self) -> None:
+        light_css = document_css({"theme": "light"})
+        dark_css = document_css({"theme": "dark"})
+        self.assertIn(LIGHT_COLORS["field_color"], light_css)
+        self.assertIn(DARK_COLORS["field_color"], dark_css)
+        self.assertNotEqual(light_css, dark_css)
 
     def test_ui_language_defaults_to_chinese(self) -> None:
         self.assertEqual(DEFAULT_CONFIG["ui_language"], "zh-CN")

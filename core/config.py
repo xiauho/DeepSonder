@@ -9,6 +9,7 @@ from typing import Any
 from copy import deepcopy
 
 from .theme_tokens import DARK_COLORS, LIGHT_COLORS
+from .storage import atomic_write_text
 
 DEFAULT_CONFIG = {
     "dsh_command": "dsh",
@@ -46,6 +47,13 @@ def load_config() -> dict:
         _merge_config(config, config_path)
     _normalize_config(config)
     return config
+
+
+def normalize_config(config: dict) -> dict:
+    """Return a validated copy suitable for runtime use and persistence."""
+    normalized = deepcopy(config) if isinstance(config, dict) else {}
+    _normalize_config(normalized)
+    return normalized
 
 
 def _merge_config(config: dict, path: Path) -> None:
@@ -140,6 +148,7 @@ def _is_hex_color(value: str) -> bool:
 def save_config(config: dict) -> None:
     """Write config.json to the project root."""
     path = get_config_path()
-    path.write_text(
+    atomic_write_text(
+        path,
         json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8"
     )

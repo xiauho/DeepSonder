@@ -1,0 +1,69 @@
+from types import SimpleNamespace
+from unittest import TestCase
+from unittest.mock import Mock, patch
+
+from PySide6.QtWidgets import QMessageBox
+
+from ui.ai_result_coordinator import AIResultCoordinator
+
+
+class AIResultCoordinatorTests(TestCase):
+    def test_expansion_cancel_does_not_replace_body(self) -> None:
+        replace_body = Mock()
+        dialog = SimpleNamespace(confirmed=False, exec=Mock())
+        with patch("ui.ai_result_coordinator.ExpansionPreviewDialog", return_value=dialog):
+            outcome = AIResultCoordinator().confirm_expansion(
+                text="正文",
+                char_count=2,
+                length_ok=True,
+                has_existing_content=True,
+                context_matches=lambda: True,
+                replace_body=replace_body,
+            )
+
+        self.assertEqual(outcome.status, "cancelled")
+        replace_body.assert_not_called()
+
+    def test_expansion_stale_context_does_not_replace_body(self) -> None:
+        replace_body = Mock()
+        dialog = SimpleNamespace(confirmed=True, exec=Mock())
+        with patch("ui.ai_result_coordinator.ExpansionPreviewDialog", return_value=dialog):
+            with patch("ui.ai_result_coordinator.QMessageBox.warning"):
+                outcome = AIResultCoordinator().confirm_expansion(
+                    text="正文",
+                    char_count=2,
+                    length_ok=True,
+                    has_existing_content=False,
+                    context_matches=lambda: False,
+                    replace_body=replace_body,
+                )
+
+        self.assertEqual(outcome.status, "stale")
+        replace_body.assert_not_called()
+
+    def test_memory_cancel_and_stale_context_do_not_commit(self) -> None:
+        commit = Mock()
+        coordinator = AIResultCoordinator()
+        with patch(
+            "ui.ai_result_coordinator.QMessageBox.question",
+            return_value=QMessageBox.StandardButton.No,
+        ):
+            cancelled = coordinator.confirm_memory(
+                summary="摘要",
+                context_matches=lambda: True,
+                commit=commit,
+            )
+        self.assertEqual(cancelled.status, "cancelled")
+
+        with patch(
+            "ui.ai_result_coordinator.QMessageBox.question",
+            return_value=QMessageBox.StandardButton.Yes,
+        ):
+            with patch("ui.ai_result_coordinator.QMessageBox.warning"):
+                stale = coordinator.confirm_memory(
+                    summary="摘要",
+                    context_matches=lambda: False,
+                    commit=commit,
+                )
+        self.assertEqual(stale.status, "stale")
+        commit.assert_not_called()

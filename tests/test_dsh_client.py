@@ -79,3 +79,34 @@ class DSHClientTests(TestCase):
             self.assertEqual(command[0], "C:/node/node.exe")
             self.assertEqual(command[1], str(script))
             self.assertIn("NOVALIST_TASK_START", command[-1])
+
+    def test_isolated_workspace_is_empty_reused_and_cleaned(self) -> None:
+        client = DSHClient("dsh")
+        client.use_isolated_workspace()
+        workspace = client.working_directory
+        self.assertIsNotNone(workspace)
+        self.assertTrue(workspace.is_dir())
+        self.assertEqual(list(workspace.iterdir()), [])
+        client.use_isolated_workspace()
+        self.assertEqual(client.working_directory, workspace)
+        client.cleanup()
+        self.assertFalse(workspace.exists())
+        self.assertIsNone(client.working_directory)
+
+    def test_generate_runs_in_isolated_workspace(self) -> None:
+        completed = SimpleNamespace(returncode=0, stdout="generated text\n", stderr="")
+        client = DSHClient("dsh")
+        client.use_isolated_workspace()
+        with patch("core.dsh_client.subprocess.run", return_value=completed) as run:
+            client.generate("system", "user")
+        self.assertEqual(Path(run.call_args.kwargs["cwd"]), client.working_directory)
+
+    def test_cleanup_keeps_explicitly_set_working_directory(self) -> None:
+        with TemporaryDirectory() as directory:
+            client = DSHClient("dsh")
+            client.use_isolated_workspace()
+            isolated = client.working_directory
+            client.set_working_directory(directory)
+            client.cleanup()
+            self.assertFalse(isolated.exists())
+            self.assertTrue(Path(directory).is_dir())

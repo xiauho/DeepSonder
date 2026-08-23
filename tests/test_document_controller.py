@@ -1,0 +1,103 @@
+import tempfile
+import unittest
+from pathlib import Path
+
+from PySide6.QtCore import QCoreApplication, QObject, Signal
+
+from core.project import NovelProject
+from ui.document_controller import DocumentController
+from ui.project_session import ProjectSession
+
+
+class FakeEditor(QObject):
+    file_saved = Signal(str)
+
+    def __init__(self):
+        super().__init__()
+        self.path: str | None = None
+        self.category = ""
+        self.dirty = False
+        self.content = ""
+        self.save_calls = 0
+
+    def current_path(self):
+        return self.path
+
+    def is_dirty(self):
+        return self.dirty
+
+    def open_file(self, category: str, path: str) -> bool:
+        self.category = category
+        self.path = path
+        self.content = Path(path).read_text(encoding="utf-8")
+        self.dirty = False
+        return True
+
+    def save(self) -> bool:
+        self.save_calls += 1
+        if self.path is None:
+            return False
+        Path(self.path).write_text(self.content, encoding="utf-8")
+        self.dirty = False
+        self.file_saved.emit(self.path)
+        return True
+
+
+class DocumentControllerTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = QCoreApplication.instance() or QCoreApplication([])
+
+    def test_open_saves_dirty_document_before_switching(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            first = project.chapters_dir / "chapter_01.md"
+            second = project.chapters_dir / "chapter_02.md"
+            second.write_text("# 第二章\n\n## 正文\n新内容\n", encoding="utf-8")
+            editor = FakeEditor()
+            editor.path = str(first)
+            editor.content = "已修改"
+            editor.dirty = True
+            controller = DocumentController(editor, ProjectSession())
+
+            self.assertTrue(controller.open_file("章节", second))
+            self.assertEqual(editor.save_calls, 1)
+            self.assertEqual(editor.path, str(second))
+            self.assertEqual(first.read_text(encoding="utf-8"), "已修改")
+
+    def test_create_and_import_documents_notify_session(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            session = ProjectSession()
+            changes = []
+            session.data_changed.connect(lambda value: changes.append(value))
+            controller = DocumentController(FakeEditor(), session)
+            session.set_project(project)
+
+            chapter = controller.create_chapter("新章节", "chapter_02")
+            character = controller.create_character("新角色")
+            world = controller.create_world_entry("新设定")
+            source = Path(tmp) / "import.md"
+            source.write_text("# 外部章节\n\n正文\n", encoding="utf-8")
+            imported = controller.import_markdown([source])
+
+            self.assertTrue(chapter.exists())
+            self.assertTrue(character.exists())
+            self.assertTrue(world.exists())
+            self.assertEqual(len(imported), 1)
+            self.assertEqual(len(changes), 4)
+
+    def test_auto_save_reports_success_only_after_save(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            editor = FakeEditor()
+            editor.path = str(project.chapters_dir / "chapter_01.md")
+            editor.content = "自动保存内容"
+            editor.dirty = True
+            controller = DocumentController(editor, ProjectSession())
+            saved = []
+            controller.auto_saved.connect(saved.append)
+
+            self.assertTrue(controller.auto_save())
+            self.assertEqual(saved, [editor.path])
+            self.assertFalse(editor.dirty)

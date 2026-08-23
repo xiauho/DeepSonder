@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import re
-
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QFrame,
@@ -15,6 +13,8 @@ from PySide6.QtWidgets import (
 )
 
 from core.project import NovelProject
+from core.project import chapter_number_from_id
+from core.project_data import ProjectDataStore
 from ui.icons import IconTextButton
 
 
@@ -138,8 +138,9 @@ class StoryMemoryPage(QWidget):
             return
 
         self.sync_button.setEnabled(bool(project.list_chapters()))
-        state = project.load_story_state()
-        summaries = project.load_chapter_summaries()
+        store = ProjectDataStore(project)
+        state = store.load_story_state()
+        summaries = store.load_chapter_summaries()
         characters = state.get("characters") or {}
         hooks = state.get("foreshadowing") or []
         health = self._context_health(state, summaries)
@@ -183,11 +184,13 @@ class StoryMemoryPage(QWidget):
         layout = QVBoxLayout(card)
         layout.setContentsMargins(14, 12, 14, 12)
         layout.setSpacing(5)
-        chapter = project.load_chapter(chapter_id)
+        chapter = ProjectDataStore(project).load_chapter(chapter_id)
         title_row = QHBoxLayout()
         title = QLabel(chapter.title)
         title.setObjectName("sectionTitle")
-        number = QLabel(chapter_id.replace("chapter_", "第") + "章")
+        chapter_number = chapter_number_from_id(chapter_id)
+        number_text = f"第{chapter_number}章" if chapter_number is not None else chapter_id
+        number = QLabel(number_text)
         number.setObjectName("mutedLabel")
         title_row.addWidget(title, 1)
         title_row.addWidget(number)
@@ -272,8 +275,8 @@ class StoryMemoryPage(QWidget):
 
     @staticmethod
     def _chapter_number(chapter_id: str) -> int:
-        match = re.search(r"(\d+)", chapter_id)
-        return int(match.group(1)) if match else 0
+        number = chapter_number_from_id(chapter_id)
+        return number if number is not None else -1
 
     @staticmethod
     def _context_health(state: dict, summaries: dict) -> int:

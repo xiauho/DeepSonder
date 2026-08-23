@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from core.project import NovelProject
+from core.project_data import ProjectDataStore
 from ui.icons import IconTextButton, material_icon, set_button_icon
 from ui.theme import colors_for
 
@@ -130,12 +131,13 @@ class LeftPanel(QWidget):
         if project is None:
             return
 
+        store = ProjectDataStore(project)
         groups: list[tuple[str, str, list[Path]]] = [
             ("总大纲", "01", [project.outline_dir / "main_arc.md"]),
-            ("章节", "02", project.list_chapters()),
-            ("角色", "03", project.list_characters()),
-            ("世界观", "04", project.list_world()),
-            ("能力体系", "05", project.list_power()),
+            ("章节", "02", store.list_chapters()),
+            ("角色", "03", store.list_characters()),
+            ("世界观", "04", store.list_world()),
+            ("能力体系", "05", store.list_power()),
             ("时间线", "06", [project.canon_dir / "timeline.md"]),
         ]
         if self._scope == "canon":
@@ -153,7 +155,7 @@ class LeftPanel(QWidget):
             group.setIcon(0, material_icon(self.GROUP_ICONS.get(label, "folder"), self._icon_color, 18))
             self.tree.addTopLevelItem(group)
             for path in existing:
-                child = QTreeWidgetItem([self._display_name(path)])
+                child = QTreeWidgetItem([store.chapter_display_name(path)])
                 child.setToolTip(0, str(path))
                 child.setData(0, self.PATH_ROLE, str(path))
                 child.setData(0, self.CATEGORY_ROLE, category_map.get(label, label))
@@ -213,13 +215,3 @@ class LeftPanel(QWidget):
             if needle and visible_children:
                 group.setExpanded(True)
         self._restore_selection()
-
-    @staticmethod
-    def _display_name(path: Path) -> str:
-        try:
-            first_line = path.read_text(encoding="utf-8").splitlines()[0]
-        except (OSError, IndexError):
-            return path.stem
-        if first_line.startswith("# "):
-            return first_line[2:].strip() or path.stem
-        return path.stem

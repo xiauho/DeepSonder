@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
-import json
-
-from .project import NovelProject
+from .context_budget import (
+    DEFAULT_PROMPT_BUDGET,
+    allocate,
+    build_ai_context,
+    gather_sections,
+)
+from .project import NovelProject, chapter_number_from_id
 
 COMMON_RULES = """
 你是 Novalist 的小说创作 AI。
@@ -33,11 +37,25 @@ def build_expansion_prompt(
     Unlike continuation, this task deliberately excludes the current chapter
     body.  The user's outline is the source of truth for the new draft.
     """
-    chapter = project.load_chapter(chapter_id)
-    related = project.find_related_canon(chapter_id)
-    state = project.load_story_state()
-    context = _build_story_context(project, chapter_id)
-    related_block = related.to_block() or "【相关设定】\n（暂无）"
+    context = build_ai_context(project, chapter_id)
+    chapter = context.chapter
+    sections = gather_sections(
+        project,
+        chapter_id,
+        (
+            "outline",
+            "plot_brief",
+            "state",
+            "summaries",
+            "characters",
+            "future_plan",
+            "main_arc",
+            "timeline",
+            "world",
+            "power",
+        ),
+        context=context,
+    )
     target_chars = max(300, int(target_chars))
     min_chars = round(target_chars * 0.85)
     max_chars = round(target_chars * 1.15)
@@ -50,7 +68,9 @@ def build_expansion_prompt(
 目标长度约为 {target_chars} 个中文字符，允许范围为 {min_chars}～{max_chars} 个中文字符。
 """.strip()
 
-    user_prompt = f"""
+    def render(ctx: dict[str, str]) -> str:
+        related_block = _related_block(ctx) or "【相关设定】\n（暂无）"
+        return f"""
 请根据下方的章节规划和故事资料，将当前章节扩写成完整小说正文。
 
 扩写要求：
@@ -65,21 +85,24 @@ def build_expansion_prompt(
 章节 ID：{chapter.id}
 
 【本章规划与用户剧情简写】
-{chapter.outline or "（暂无规划，请根据故事状态生成合理但克制的章节正文）"}
+{_section(ctx, "outline", "（暂无规划，请根据故事状态生成合理但克制的章节正文）")}
+
+【剧情简写】
+{_section(ctx, "plot_brief")}
 
 【主线大纲】
-{context["main_arc"] or "（暂无）"}
+{_section(ctx, "main_arc")}
 
 【后续剧情规划】
-{context["future_plan"] or "（暂无）"}
+{_section(ctx, "future_plan")}
 
 【相关章节摘要】
-{context["summaries"] or "（暂无）"}
+{_section(ctx, "summaries")}
 
 {related_block}
 
 【当前故事状态】
-{json.dumps(state, ensure_ascii=False, indent=2)}
+{_section(ctx, "state")}
 
 只输出以下标记之间的小说正文：
 <NOVEL_TEXT>
@@ -87,7 +110,8 @@ def build_expansion_prompt(
 </NOVEL_TEXT>
 <NOVALIST_TASK_DONE>扩写任务已完成</NOVALIST_TASK_DONE>
 """.strip()
-    return system_prompt, user_prompt
+
+    return _finalize(system_prompt, render, sections)
 
 
 def build_expansion_retry_prompt(
@@ -121,11 +145,26 @@ def build_write_prompt(
     chapter_id: str,
     target_chars: int = 2000,
 ) -> tuple[str, str]:
-    chapter = project.load_chapter(chapter_id)
-    related = project.find_related_canon(chapter_id)
-    state = project.load_story_state()
-    context = _build_story_context(project, chapter_id)
-    related_block = related.to_block() or "【相关设定】\n（暂无）"
+    context = build_ai_context(project, chapter_id)
+    chapter = context.chapter
+    sections = gather_sections(
+        project,
+        chapter_id,
+        (
+            "outline",
+            "plot_brief",
+            "content",
+            "state",
+            "summaries",
+            "characters",
+            "future_plan",
+            "main_arc",
+            "timeline",
+            "world",
+            "power",
+        ),
+        context=context,
+    )
     target_chars = max(300, int(target_chars))
     min_chars = round(target_chars * 0.85)
     max_chars = round(target_chars * 1.15)
@@ -138,7 +177,9 @@ def build_write_prompt(
 目标长度约为 {target_chars} 个中文字符，允许范围为 {min_chars}～{max_chars} 个中文字符。
 """.strip()
 
-    user_prompt = f"""
+    def render(ctx: dict[str, str]) -> str:
+        related_block = _related_block(ctx) or "【相关设定】\n（暂无）"
+        return f"""
 请从当前章节正文的最后一句开始，继续生成后续小说正文。
 
 续写要求：
@@ -152,24 +193,27 @@ def build_write_prompt(
 章节 ID：{chapter.id}
 
 【本章大纲】
-{chapter.outline or "（暂无，请根据当前故事状态合理推进）"}
+{_section(ctx, "outline", "（暂无，请根据当前故事状态合理推进）")}
+
+【剧情简写】
+{_section(ctx, "plot_brief")}
 
 【主线大纲】
-{context["main_arc"] or "（暂无）"}
+{_section(ctx, "main_arc")}
 
 【后续剧情规划】
-{context["future_plan"] or "（暂无）"}
+{_section(ctx, "future_plan")}
 
 【相关章节摘要】
-{context["summaries"] or "（暂无）"}
+{_section(ctx, "summaries")}
 
 {related_block}
 
 【当前故事状态】
-{json.dumps(state, ensure_ascii=False, indent=2)}
+{_section(ctx, "state")}
 
 【当前章节已有正文】
-{chapter.content or "（暂无正文，请根据大纲开始写作）"}
+{_section(ctx, "content", "（暂无正文，请根据大纲开始写作）")}
 
 只输出以下标记之间的小说正文：
 <NOVEL_TEXT>
@@ -177,7 +221,8 @@ def build_write_prompt(
 </NOVEL_TEXT>
 <NOVALIST_TASK_DONE>续写任务已完成</NOVALIST_TASK_DONE>
 """.strip()
-    return system_prompt, user_prompt
+
+    return _finalize(system_prompt, render, sections)
 
 
 def build_write_retry_prompt(
@@ -207,29 +252,43 @@ def build_write_retry_prompt(
 
 
 def build_summary_prompt(project: NovelProject, chapter_id: str) -> tuple[str, str]:
-    chapter = project.load_chapter(chapter_id)
-    related = project.find_related_canon(chapter_id)
-    state = project.load_story_state()
+    context = build_ai_context(project, chapter_id)
+    chapter = context.chapter
+    sections = gather_sections(
+        project,
+        chapter_id,
+        ("state", "summaries", "characters", "timeline", "world", "power", "outline", "plot_brief", "content"),
+        content_keep="head",
+        context=context,
+    )
     system_prompt = f"""
 {COMMON_RULES}
 
 任务类型：chapter_summary。
 只输出合法 JSON，不要输出 Markdown 代码围栏或解释。
 """.strip()
-    user_prompt = f"""
+
+    def render(ctx: dict[str, str]) -> str:
+        return f"""
 请为当前章节生成结构化摘要。摘要不超过 200 个中文字符，只描述正文中已经发生的事实。
 
 【相关设定】
-{related.to_block() or "（暂无）"}
+{_related_block(ctx) or "（暂无）"}
 
 【当前故事状态】
-{json.dumps(state, ensure_ascii=False, indent=2)}
+{_section(ctx, "state")}
 
 【章节标题】
 {chapter.title}
 
+【本章规划】
+{_section(ctx, "outline")}
+
+【剧情简写】
+{_section(ctx, "plot_brief")}
+
 【章节正文】
-{chapter.content or "（本章暂无正文）"}
+{_section(ctx, "content", "（本章暂无正文）")}
 
 返回格式：
 {{
@@ -243,13 +302,33 @@ def build_summary_prompt(project: NovelProject, chapter_id: str) -> tuple[str, s
   "foreshadowing_changes": {{"added": ["新增伏笔"], "resolved": ["已回收伏笔"]}}
 }}
 """.strip()
-    return system_prompt, user_prompt
+
+    return _finalize(system_prompt, render, sections)
 
 
 def build_state_update_prompt(project: NovelProject, chapter_id: str) -> tuple[str, str]:
-    chapter = project.load_chapter(chapter_id)
-    old_state = project.load_story_state()
-
+    context = build_ai_context(project, chapter_id)
+    chapter = context.chapter
+    old_state = context.story_state
+    expected_number = chapter_number_from_id(chapter_id)
+    # A literal example value gets echoed back by the model, so the template
+    # must carry the real chapter ordinal whenever one is known.
+    example_number = expected_number
+    if example_number is None:
+        old_number = old_state.get("current_chapter")
+        example_number = old_number if isinstance(old_number, int) else 1
+    number_rule = (
+        f"7. current_chapter 必须填写为 {expected_number}（当前正在处理的章节序号），不要改用其他数字。\n"
+        if expected_number is not None
+        else ""
+    )
+    sections = gather_sections(
+        project,
+        chapter_id,
+        ("outline", "plot_brief", "content", "state"),
+        content_keep="head",
+        context=context,
+    )
     system_prompt = f"""
 {COMMON_RULES}
 
@@ -257,7 +336,8 @@ def build_state_update_prompt(project: NovelProject, chapter_id: str) -> tuple[s
 只输出合法 JSON，不要输出 Markdown 代码围栏或解释。
 """.strip()
 
-    user_prompt = f"""
+    def render(ctx: dict[str, str]) -> str:
+        return f"""
 请根据当前章节正文和旧故事状态，生成更新后的故事状态。
 
 要求：
@@ -265,21 +345,26 @@ def build_state_update_prompt(project: NovelProject, chapter_id: str) -> tuple[s
 2. 不要删除旧角色，除非正文明确说明角色已经不存在。
 3. 已回收的伏笔从 foreshadowing 中移除。
 4. 新增但尚未回收的伏笔加入 foreshadowing。
-
+5. 只返回本章发生变化的角色字段，未提及的字段会自动保持旧值。
+6. 旧故事状态中以“…”结尾的值是截断版本，不要原样抄回。
+{number_rule}
 【旧故事状态】
-{json.dumps(old_state, ensure_ascii=False, indent=2)}
+{_section(ctx, "state")}
 
 【本章大纲】
-{chapter.outline or "（暂无）"}
+{_section(ctx, "outline", "（暂无）")}
+
+【剧情简写】
+{_section(ctx, "plot_brief")}
 
 【本章正文】
-{chapter.content or "（暂无）"}
+{_section(ctx, "content", "（暂无）")}
 
 返回格式：
 {{
   "type": "story_state_update",
   "completion_message": "故事状态更新任务已完成",
-  "current_chapter": 1,
+  "current_chapter": {example_number},
   "current_location": "当前地点",
   "characters": {{
     "角色名": {{
@@ -293,15 +378,20 @@ def build_state_update_prompt(project: NovelProject, chapter_id: str) -> tuple[s
   "foreshadowing": ["未回收伏笔"]
 }}
 """.strip()
-    return system_prompt, user_prompt
+
+    return _finalize(system_prompt, render, sections)
 
 
 def build_check_prompt(project: NovelProject, chapter_id: str) -> tuple[str, str]:
-    chapter = project.load_chapter(chapter_id)
-    related = project.find_related_canon(chapter_id)
-    state = project.load_story_state()
-    context = _build_story_context(project, chapter_id)
-
+    context = build_ai_context(project, chapter_id)
+    chapter = context.chapter
+    sections = gather_sections(
+        project,
+        chapter_id,
+        ("outline", "plot_brief", "content", "state", "summaries", "characters", "main_arc", "timeline", "world", "power"),
+        content_keep="head",
+        context=context,
+    )
     system_prompt = f"""
 {COMMON_RULES}
 
@@ -309,7 +399,8 @@ def build_check_prompt(project: NovelProject, chapter_id: str) -> tuple[str, str
 只输出合法 JSON，不要改写正文。
 """.strip()
 
-    user_prompt = f"""
+    def render(ctx: dict[str, str]) -> str:
+        return f"""
 请检查当前章节是否存在设定冲突。
 
 检查范围：
@@ -323,19 +414,24 @@ def build_check_prompt(project: NovelProject, chapter_id: str) -> tuple[str, str
 8. 伏笔、地点和事件的前后关系。
 
 【主线大纲】
-{context["main_arc"] or "（暂无）"}
+{_section(ctx, "main_arc")}
 
-【相关设定】
-{related.to_block() or "（暂无相关设定）"}
+{_related_block(ctx) or "（暂无相关设定）"}
 
 【当前故事状态】
-{json.dumps(state, ensure_ascii=False, indent=2)}
+{_section(ctx, "state")}
+
+【相关章节摘要】
+{_section(ctx, "summaries")}
 
 【本章大纲】
-{chapter.outline or "（暂无）"}
+{_section(ctx, "outline", "（暂无）")}
+
+【剧情简写】
+{_section(ctx, "plot_brief")}
 
 【本章正文】
-{chapter.content or "（暂无）"}
+{_section(ctx, "content", "（暂无）")}
 
 返回格式：
 {{
@@ -355,19 +451,29 @@ def build_check_prompt(project: NovelProject, chapter_id: str) -> tuple[str, str
   ]
 }}
 """.strip()
-    return system_prompt, user_prompt
+
+    return _finalize(system_prompt, render, sections)
 
 
-def _build_story_context(project: NovelProject, chapter_id: str) -> dict[str, str]:
-    summaries = project.load_chapter_summaries()
-    summary_items = []
-    for key, value in summaries.items():
-        if key == chapter_id:
-            continue
-        if str(value).strip():
-            summary_items.append(f"### {key}\n{str(value).strip()}")
-    return {
-        "main_arc": project.load_main_arc(),
-        "future_plan": project.load_future_plan(),
-        "summaries": "\n\n".join(summary_items[-5:]),
-    }
+def _finalize(system_prompt: str, render, sections) -> tuple[str, str]:
+    """Budget sections against the fixed instruction overhead, then render."""
+    overhead = len(system_prompt) + len(render({}))
+    ctx = allocate(sections, max(1000, DEFAULT_PROMPT_BUDGET - overhead))
+    return system_prompt, render(ctx)
+
+
+def _section(ctx: dict[str, str], key: str, fallback: str = "（暂无）") -> str:
+    return ctx.get(key) or fallback
+
+
+def _related_block(ctx: dict[str, str]) -> str:
+    parts = []
+    if ctx.get("world"):
+        parts.append(f"【世界观摘要】\n{ctx['world']}")
+    if ctx.get("power"):
+        parts.append(f"【战力规则】\n{ctx['power']}")
+    if ctx.get("timeline"):
+        parts.append(f"【时间线摘要】\n{ctx['timeline']}")
+    if ctx.get("characters"):
+        parts.append(f"【相关角色卡】\n{ctx['characters']}")
+    return "\n\n".join(parts)

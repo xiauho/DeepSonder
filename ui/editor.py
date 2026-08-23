@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui.icons import set_button_icon
+from core.storage import atomic_write_text
 
 
 class Editor(QWidget):
@@ -177,7 +178,7 @@ class Editor(QWidget):
             return False
         path = Path(self._current_path)
         try:
-            path.write_text(self.text_edit.toPlainText(), encoding="utf-8")
+            atomic_write_text(path, self.text_edit.toPlainText())
         except OSError as exc:
             self.dirty_badge.setText("保存失败")
             self.path_label.setText(f"保存失败：{exc}")

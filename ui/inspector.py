@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from core.project import NovelProject
+from core.project_data import ProjectDataStore
 from ui.icons import set_button_icon
 from ui.theme import document_css
 
@@ -69,6 +70,11 @@ class Inspector(QWidget):
         self.context_browser = self._browser()
         self.memory_browser = self._browser()
         self.report_browser = self._browser()
+        self._browser_html: dict[QTextBrowser, str] = {
+            self.context_browser: "",
+            self.memory_browser: "",
+            self.report_browser: "",
+        }
         self.tabs.addTab(self.context_browser, "上下文")
         self.tabs.addTab(self.memory_browser, "记忆")
         self.tabs.addTab(self.report_browser, "报告")
@@ -86,12 +92,19 @@ class Inspector(QWidget):
         style = document_css(config)
         for browser in (self.context_browser, self.memory_browser, self.report_browser):
             browser.document().setDefaultStyleSheet(style)
+            html_content = self._browser_html.get(browser)
+            if html_content:
+                browser.setHtml(html_content)
+
+    def _set_browser_html(self, browser: QTextBrowser, content: str) -> None:
+        self._browser_html[browser] = content
+        browser.setHtml(content)
 
     def show_project(self, project: NovelProject | None, chapter_id: str | None = None) -> None:
         if project is None:
             empty = self._empty("等待故事", "打开或新建项目后，这里会整理故事上下文。")
-            self.context_browser.setHtml(empty)
-            self.memory_browser.setHtml(empty)
+            self._set_browser_html(self.context_browser, empty)
+            self._set_browser_html(self.memory_browser, empty)
             return
         if chapter_id:
             self.show_chapter(project, chapter_id)
@@ -99,16 +112,11 @@ class Inspector(QWidget):
             self.show_general(project)
 
     def show_general(self, project: NovelProject) -> None:
-        chapters = project.list_chapters()
-        chars = project.list_characters()
-        total_chars = 0
-        for path in chapters:
-            try:
-                text = path.read_text(encoding="utf-8")
-                total_chars += len(re.findall(r"[\u3400-\u9fff]", text))
-            except OSError:
-                pass
-        self.context_browser.setHtml(
+        store = ProjectDataStore(project)
+        chapters = store.list_chapters()
+        chars = store.list_characters()
+        total_chars = store.total_chinese_character_count()
+        self._set_browser_html(self.context_browser,
             f"<div class='eyebrow'>当前项目</div>"
             f"<h2>{html.escape(project.name)}</h2>"
             f"<div class='metric'><b>{len(chapters)}</b><span>章节</span></div>"
@@ -116,14 +124,15 @@ class Inspector(QWidget):
             f"<div class='metric'><b>{len(chars)}</b><span>角色</span></div>"
             "<hr><p>从左侧选择章节后，这里会自动聚合相关角色和设定。</p>"
         )
-        state = project.load_story_state()
-        self.memory_browser.setHtml(self._state_html(state, None))
+        state = store.load_story_state()
+        self._set_browser_html(self.memory_browser, self._state_html(state, None))
 
     def show_chapter(self, project: NovelProject, chapter_id: str) -> None:
-        chapter = project.load_chapter(chapter_id)
-        related = project.find_related_canon(chapter_id)
-        state = project.load_story_state()
-        summaries = project.load_chapter_summaries()
+        store = ProjectDataStore(project)
+        chapter = store.load_chapter(chapter_id)
+        related = store.find_related_canon(chapter_id)
+        state = store.load_story_state()
+        summaries = store.load_chapter_summaries()
 
         character_names = re.findall(r"^###\s+(.+)$", related.characters, re.MULTILINE)
         character_names = rank_character_names(character_names, chapter.content)
@@ -145,12 +154,16 @@ class Inspector(QWidget):
             context += "<h3>世界观已接入</h3><p class='good'>✓ AI 扩写会携带世界观设定</p>"
         if related.power:
             context += "<h3>战力体系已接入</h3><p class='good'>✓ 一致性检查会核对战力规则</p>"
-        self.context_browser.setHtml(context)
-        self.memory_browser.setHtml(self._state_html(state, summaries.get(chapter_id)))
+        self._set_browser_html(self.context_browser, context)
+        self._set_browser_html(
+            self.memory_browser,
+            self._state_html(state, summaries.get(chapter_id)),
+        )
 
     def show_text(self, title: str, text: str) -> None:
         rendered = html.escape(text).replace("\n", "<br>")
-        self.report_browser.setHtml(
+        self._set_browser_html(
+            self.report_browser,
             f"<div class='eyebrow'>AI 分析</div><h2>{html.escape(title)}</h2>"
             f"<div class='report'>{rendered}</div>"
         )

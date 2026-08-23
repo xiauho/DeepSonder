@@ -12,8 +12,10 @@ class Chapter:
     path: Path
     title: str
     outline: str = ""
+    plot_brief: str = ""
     content: str = ""
     raw: str = ""
+    extra_sections: list[tuple[str, str]] = field(default_factory=list)
 
     @property
     def filename(self) -> str:

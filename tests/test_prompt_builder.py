@@ -7,7 +7,7 @@ from core.project import NovelProject
 
 class PromptBuilderTests(TestCase):
     def setUp(self) -> None:
-        self.project = NovelProject(Path(__file__).parents[1] / "projects" / "planetary_dawn_demo")
+        self.project = NovelProject(Path(__file__).parents[1] / "projects" / "demo_novel")
 
     def test_write_prompt_contains_task_contract_and_context(self) -> None:
         system, user = prompt_builder.build_write_prompt(self.project, "chapter_01", 2000)
@@ -53,3 +53,13 @@ class PromptBuilderTests(TestCase):
         self.assertIn('"type": "story_state_update"', state_user)
         self.assertIn("chapter_summary", summary_system)
         self.assertIn("story_state_update", state_system)
+
+    def test_state_update_prompt_carries_real_chapter_number(self) -> None:
+        _system, user = prompt_builder.build_state_update_prompt(self.project, "chapter_07")
+        self.assertIn('"current_chapter": 7', user)
+        self.assertIn("current_chapter 必须填写为 7", user)
+        self.assertNotIn('"current_chapter": 1,', user)
+
+    def test_state_update_prompt_falls_back_to_old_state_number(self) -> None:
+        _system, user = prompt_builder.build_state_update_prompt(self.project, "序章")
+        self.assertIn('"current_chapter": 1', user)

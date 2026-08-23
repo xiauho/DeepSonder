@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 import shlex
-from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -25,7 +24,10 @@ from PySide6.QtWidgets import (
 )
 
 from core.config import DEFAULT_CONFIG
+from core.export import render_manuscript
 from core.project import NovelProject
+from core.project_data import ProjectDataStore
+from ui.export_controller import ExportController
 from ui.icons import IconTextButton
 from ui.theme import DARK_COLORS, LIGHT_COLORS
 
@@ -179,13 +181,9 @@ class DashboardPage(QWidget):
             self._status_value.setText("等待开始")
             self.continue_button.setEnabled(False)
             return
-        chapters = project.list_chapters()
-        total_words = 0
-        for path in chapters:
-            try:
-                total_words += _words(path.read_text(encoding="utf-8"))
-            except (OSError, UnicodeError):
-                continue
+        store = ProjectDataStore(project)
+        chapters = store.list_chapters()
+        total_words = store.total_word_count(_words)
         self._project_title.setText(project.name)
         self._project_meta.setText(f"{project.root} · 最近打开的本地项目")
         self._chapter_value.setText(f"{len(chapters)}")
@@ -288,6 +286,7 @@ class ExportPage(QWidget):
         super().__init__(parent)
         self.setObjectName("exportPage")
         self._project: NovelProject | None = None
+        self._export_controller: ExportController | None = None
         self._chapter_checks: list[tuple[str, QListWidgetItem]] = []
         self.format_combo = QComboBox()
         self.format_combo.addItem("Markdown 文档 (.md)", "md")
@@ -368,14 +367,19 @@ class ExportPage(QWidget):
         self.chapter_list.itemChanged.connect(lambda _item: self.render_preview())
         self.show_project(None)
 
+    def set_export_controller(self, controller: ExportController) -> None:
+        self._export_controller = controller
+        self.render_preview()
+
     def show_project(self, project: NovelProject | None) -> None:
         self._project = project
         self.chapter_list.blockSignals(True)
         self.chapter_list.clear()
         self._chapter_checks.clear()
         if project:
-            for path in project.list_chapters():
-                chapter = project.load_chapter(path.stem)
+            store = ProjectDataStore(project)
+            for path in store.list_chapters():
+                chapter = store.load_chapter(path.stem)
                 item = QListWidgetItem(self.chapter_list)
                 item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
                 item.setCheckState(Qt.CheckState.Checked)
@@ -400,25 +404,10 @@ class ExportPage(QWidget):
             self.preview.setPlainText("打开项目后，这里会显示导出预览。")
             return
         options = self.options()
-        selected = set(options["chapter_ids"])
-        chapters = [path for path in self._project.list_chapters() if path.stem in selected]
-        blocks: list[str] = []
-        if options["include_title"]:
-            blocks.append(self._project.name)
-        if options["include_toc"]:
-            blocks.append("目录\n" + "\n".join(
-                f"{index}. {self._project.load_chapter(path.stem).title}"
-                for index, path in enumerate(chapters, 1)
-            ))
-        for path in chapters:
-            try:
-                raw = path.read_text(encoding="utf-8")
-            except (OSError, UnicodeError):
-                continue
-            content = _strip_markdown(raw) if options["strip"] or options["format"] == "txt" else raw
-            blocks.append(content.strip())
-        separator = "\n\n***\n\n" if options["separators"] else "\n\n\n"
-        text = separator.join(blocks).strip()
+        if self._export_controller is not None:
+            text = self._export_controller.render(options)
+        else:
+            text = render_manuscript(self._project, options)
         self.preview.setPlainText(text or "请选择至少一个章节以生成预览。")
 
 

@@ -1,0 +1,263 @@
+"""Priority-based context budget for dsh prompts.
+
+The headless CLI only accepts the task as a command-line argument, so the
+whole prompt must stay under Windows' ~30K CreateProcess limit.  Instead of
+failing when a novel outgrows that, context sections are ranked by
+importance: the least important ones are capped or dropped first, and every
+truncation is marked in place so the model can tell trimmed data apart from
+missing data.
+"""
+
+from __future__ import annotations
+
+import json
+import hashlib
+from dataclasses import dataclass
+
+from .models import Chapter, RelatedCanon
+from .project import NovelProject, chapter_number_from_id
+from .project_data import ProjectDataStore
+
+# Sections share this pool; instruction text and section labels live outside
+# it.  The value leaves headroom below DSHClient's 30K hard limit.
+DEFAULT_PROMPT_BUDGET = 24000
+
+# A section trimmed below this many chars carries no useful signal; drop it.
+MIN_SECTION_CHARS = 160
+
+DROPPED_PLACEHOLDER = "（因上下文长度限制，本节内容已省略）"
+HEAD_MARK = "\n…（内容过长，已截断）"
+TAIL_MARK = "（前文过长，已截断）\n"
+
+# key: (cap, keep, priority).  Lower priority number is allocated first.
+SECTION_RULES: dict[str, tuple[int, str, int]] = {
+    "outline": (3000, "head", 1),
+    "plot_brief": (2500, "head", 1),
+    "content": (12000, "tail", 1),
+    "state": (4000, "head", 2),
+    "summaries": (2000, "head", 3),
+    "characters": (3000, "head", 4),
+    "future_plan": (1500, "head", 5),
+    "main_arc": (1500, "head", 5),
+    "timeline": (1500, "head", 6),
+    "world": (2000, "head", 7),
+    "power": (1500, "head", 7),
+}
+
+
+@dataclass(frozen=True)
+class Section:
+    key: str
+    text: str
+    cap: int
+    keep: str  # "head" | "tail"
+    priority: int
+
+
+@dataclass(frozen=True)
+class AIContext:
+    """One immutable-in-use snapshot of all source data for an AI task."""
+
+    project_root: str
+    chapter_id: str
+    chapter: Chapter
+    related: RelatedCanon
+    story_state: dict
+    chapter_summaries: dict
+    main_arc: str
+    future_plan: str
+
+    def fingerprint(self, editor_text: str | None = None) -> str:
+        payload = {
+            "project_root": self.project_root,
+            "chapter_id": self.chapter_id,
+            "chapter": {
+                "title": self.chapter.title,
+                "outline": self.chapter.outline,
+                "plot_brief": self.chapter.plot_brief,
+                "content": self.chapter.content,
+                "raw": self.chapter.raw,
+            },
+            "related": {
+                "characters": self.related.characters,
+                "world": self.related.world,
+                "power": self.related.power,
+                "timeline": self.related.timeline,
+            },
+            "story_state": self.story_state,
+            "chapter_summaries": self.chapter_summaries,
+            "main_arc": self.main_arc,
+            "future_plan": self.future_plan,
+            "editor_text": editor_text,
+        }
+        canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def build_ai_context(project: NovelProject, chapter_id: str) -> AIContext:
+    """Load all prompt sources through one project data facade."""
+    store = ProjectDataStore(project)
+    return AIContext(
+        project_root=str(store.root.resolve()).casefold(),
+        chapter_id=str(chapter_id),
+        chapter=store.load_chapter(chapter_id),
+        related=store.find_related_canon(chapter_id),
+        story_state=store.load_story_state(),
+        chapter_summaries=store.load_chapter_summaries(),
+        main_arc=store.load_main_arc(),
+        future_plan=store.load_future_plan(),
+    )
+
+
+def allocate(sections: list[Section], budget: int) -> dict[str, str]:
+    """Fit sections into the budget, trimming from the lowest priority up.
+
+    Returns each section's final text.  A section that could not be kept maps
+    to ``DROPPED_PLACEHOLDER`` so the model sees "omitted for length" instead
+    of concluding the data does not exist.
+    """
+    result: dict[str, str] = {}
+    remaining = max(0, int(budget))
+    for section in sorted(sections, key=lambda item: item.priority):
+        text = str(section.text).strip()
+        if not text:
+            continue
+        capped_len = min(len(text), section.cap)
+        if capped_len <= remaining:
+            result[section.key] = (
+                text if len(text) <= section.cap else _trim(text, section.cap, section.keep)
+            )
+            remaining -= capped_len
+        elif remaining >= MIN_SECTION_CHARS:
+            result[section.key] = _trim(text, remaining, section.keep)
+            remaining = 0
+        else:
+            result[section.key] = DROPPED_PLACEHOLDER
+    return result
+
+
+def gather_sections(
+    project: NovelProject,
+    chapter_id: str,
+    keys,
+    *,
+    content_keep: str = "tail",
+    context: AIContext | None = None,
+) -> list[Section]:
+    """Load the named standard sections in deterministic rule order."""
+    context = context or build_ai_context(project, chapter_id)
+    chapter = context.chapter
+    related = context.related
+    raw = {
+        "outline": chapter.outline,
+        "plot_brief": chapter.plot_brief,
+        "content": chapter.content,
+        "state": json.dumps(
+            compact_story_state(context.story_state),
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ),
+        "summaries": prior_chapter_summaries(
+            project,
+            chapter_id,
+            summaries=context.chapter_summaries,
+        ),
+        "characters": related.characters,
+        "future_plan": context.future_plan,
+        "main_arc": context.main_arc,
+        "timeline": related.timeline,
+        "world": related.world,
+        "power": related.power,
+    }
+    sections: list[Section] = []
+    wanted = set(keys)
+    for key in SECTION_RULES:
+        if key not in wanted:
+            continue
+        text = str(raw.get(key) or "").strip()
+        if not text:
+            continue
+        cap, keep, priority = SECTION_RULES[key]
+        if key == "content":
+            keep = content_keep
+        sections.append(Section(key, text, cap, keep, priority))
+    return sections
+
+
+def compact_story_state(
+    state: dict,
+    *,
+    value_cap: int = 200,
+    hook_cap: int = 120,
+    max_list_items: int = 12,
+    max_hooks: int = 24,
+) -> dict:
+    """Bound a story state for prompting without breaking its structure.
+
+    Capped strings end with "…" so prompts can tell the model not to copy a
+    truncated value back verbatim.
+    """
+    if not isinstance(state, dict):
+        return {}
+    compacted: dict[str, object] = {}
+    for key, value in state.items():
+        if key == "foreshadowing" and isinstance(value, list):
+            compacted[key] = [_cap_text(item, hook_cap) for item in value[:max_hooks]]
+        else:
+            compacted[key] = _cap_value(value, value_cap, max_list_items)
+    return compacted
+
+
+def prior_chapter_summaries(
+    project: NovelProject,
+    chapter_id: str,
+    *,
+    count: int = 5,
+    per_summary_cap: int = 400,
+    summaries: dict | None = None,
+) -> str:
+    """Recent summaries that cannot spoil chapters after the current one.
+
+    Chapters sort numerically (chapter_2 before chapter_10); summaries of
+    later chapters are excluded so regenerating an early chapter does not
+    feed the model future plot.
+    """
+    current = chapter_number_from_id(chapter_id)
+    entries: list[tuple[int, int, str, str]] = []
+    source = summaries if summaries is not None else project.load_chapter_summaries()
+    for key, value in (source or {}).items():
+        text = str(value).strip()
+        if not text or key == chapter_id:
+            continue
+        number = chapter_number_from_id(key)
+        if current is not None and number is not None and number > current:
+            continue
+        entries.append((0 if number is None else 1, number or 0, key, text))
+    entries.sort(key=lambda entry: (entry[0], entry[1]))
+    recent = entries[-count:]
+    return "\n\n".join(
+        f"### {key}\n{_cap_text(text, per_summary_cap)}" for _rank, _number, key, text in recent
+    )
+
+
+def _trim(text: str, allowance: int, keep: str) -> str:
+    if keep == "tail":
+        return TAIL_MARK + text[-(allowance - len(TAIL_MARK)) :]
+    return text[: allowance - len(HEAD_MARK)] + HEAD_MARK
+
+
+def _cap_value(value: object, cap: int, max_items: int) -> object:
+    if isinstance(value, str):
+        return _cap_text(value, cap)
+    if isinstance(value, list):
+        return [_cap_value(item, cap, max_items) for item in value[:max_items]]
+    if isinstance(value, dict):
+        return {str(key): _cap_value(item, cap, max_items) for key, item in value.items()}
+    return value
+
+
+def _cap_text(value: object, cap: int) -> str:
+    text = str(value).strip()
+    if len(text) <= cap:
+        return text
+    return text[:cap].rstrip() + "…"
