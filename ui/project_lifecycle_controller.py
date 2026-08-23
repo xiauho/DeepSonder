@@ -110,7 +110,7 @@ class ProjectLifecycleController(QObject):
             return None
         try:
             path = Path(str(value)).expanduser()
-            return path if cls.is_project_path(path) else None
+            return path.resolve() if cls.is_project_path(path) else None
         except (OSError, TypeError, ValueError):
             return None
 
