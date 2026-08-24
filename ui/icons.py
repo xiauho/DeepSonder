@@ -9,7 +9,8 @@ from PySide6.QtGui import QColor, QFont, QFontDatabase, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import QAbstractButton, QLabel, QPushButton, QHBoxLayout, QSizePolicy
 
 
-FONT_ROOT = Path(__file__).resolve().parents[1] / "stitch_prd_ui_generator" / "assets" / "fonts"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+FONT_ROOT = PROJECT_ROOT / "assets" / "fonts"
 
 # Only the normal weights used by the application are loaded. The source
 # package contains italic and unused weights as well, but loading all of them
@@ -34,12 +35,16 @@ STITCH_FONT_FILES = (
     "font-58.woff2",  # Material Symbols Outlined 400
     "font-56.woff2",  # Material Symbols Outlined 500
 )
+MATERIAL_SYMBOL_FONT_FILES = frozenset(("font-58.woff2", "font-56.woff2"))
 
 _loaded_font_ids: dict[str, int] = {}
+_material_symbols_available = False
 
 
 def load_stitch_fonts() -> dict[str, int]:
     """Load the bundled WOFF2 files once and return their Qt font IDs."""
+    global _material_symbols_available
+
     for filename in STITCH_FONT_FILES:
         if filename in _loaded_font_ids:
             continue
@@ -49,7 +54,19 @@ def load_stitch_fonts() -> dict[str, int]:
         font_id = QFontDatabase.addApplicationFont(str(path))
         if font_id >= 0:
             _loaded_font_ids[filename] = font_id
+            if filename in MATERIAL_SYMBOL_FONT_FILES:
+                families = QFontDatabase.applicationFontFamilies(font_id)
+                _material_symbols_available |= "Material Symbols Outlined" in families
     return dict(_loaded_font_ids)
+
+
+def material_symbols_available() -> bool:
+    """Return whether Material Symbols can safely render ligature names."""
+    load_stitch_fonts()
+    if _material_symbols_available:
+        return True
+    # A user-installed copy is a valid fallback, but never assume it exists.
+    return "Material Symbols Outlined" in QFontDatabase.families()
 
 
 def _font(size: int = 18, weight: int = 400) -> QFont:
@@ -63,6 +80,9 @@ def _font(size: int = 18, weight: int = 400) -> QFont:
 
 def material_icon(name: str, color: str = "#63748A", size: int = 18) -> QIcon:
     """Render a Material Symbols ligature into a scalable-enough Qt icon."""
+    if not material_symbols_available():
+        return QIcon()
+
     pixmap = QPixmap(size, size)
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
@@ -84,7 +104,9 @@ class IconTextButton(QPushButton):
         self._rail_anchor_ratio: float | None = None
         self.setProperty("material_icon", icon_name)
         self.setProperty("material_icon_size", 17)
-        icon = QLabel(icon_name, self)
+        # Never expose the ligature name as visible UI text if its font is
+        # unavailable; the button label remains usable in that case.
+        icon = QLabel(icon_name if material_symbols_available() else "", self)
         icon.setObjectName("buttonIcon")
         icon.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         icon.setAlignment(Qt.AlignmentFlag.AlignCenter)

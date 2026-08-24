@@ -29,12 +29,12 @@ AI-assisted features.
 
 ## Bundled Stitch typography assets
 
-The native interface reuses the local font files collected under
-`stitch_prd_ui_generator/assets/fonts/` for visual consistency with the Stitch
-reference screens. The font families are Hanken Grotesk, Inter, JetBrains Mono,
-Source Serif 4, and Material Symbols Outlined. Their upstream license terms
-remain applicable; the first four are distributed under the SIL Open Font
-License 1.1 and Material Symbols under the Apache License 2.0.
+The native interface bundles the local font files under `assets/fonts/` for
+visual consistency with the Stitch reference screens. The font families are
+Hanken Grotesk, Inter, JetBrains Mono, Source Serif 4, and Material Symbols
+Outlined. Their upstream license terms remain applicable; the first four are
+distributed under the SIL Open Font License 1.1 and Material Symbols under the
+Apache License 2.0.
 
 - Google Fonts: <https://fonts.google.com/> and <https://developers.google.com/fonts/faq>
 - Material Symbols: <https://github.com/google/material-design-icons>
