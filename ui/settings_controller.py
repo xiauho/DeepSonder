@@ -93,4 +93,8 @@ class SettingsController(QObject):
             apply_theme(app, self._config)
 
     def _on_connection_finished(self) -> None:
+        task = self._connection_task
+        self._connection_task = None
         self.connection_finished.emit()
+        if task is not None:
+            task.deleteLater()

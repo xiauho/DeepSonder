@@ -15,8 +15,10 @@ QSS_TEMPLATE = r"""
     font-size: __FONT_SIZE__px;
     color: __TEXT__;
 }
-QMainWindow, QDialog, QWidget#appRoot { background: __BG__; }
+QMainWindow, QWidget#appRoot { background: __BG__; }
 QWidget { background: transparent; }
+QDialog { background: __BG__; }
+QDialog#trashDialog { background: __BG__; color: __TEXT__; }
 
 QWidget#primarySidebar {
     background: __PANEL__;
@@ -163,20 +165,24 @@ QTreeWidget#projectTree::item:selected:!active {
     color: __TEXT__;
     border: none;
 }
-QListWidget#chapterList {
+QListWidget#chapterList, QListWidget#trashList {
     background: __FIELD__;
     border: 1px solid __BORDER__;
     border-radius: 8px;
     outline: none;
 }
-QListWidget#chapterList::item {
+QListWidget#chapterList::item, QListWidget#trashList::item {
     min-height: __TREE_ITEM_HEIGHT__px;
     padding: 2px 8px;
     border-radius: 6px;
 }
-QListWidget#chapterList::item:hover { background: __HOVER__; }
-QListWidget#chapterList::item:pressed { background: __SELECTION__; }
-QListWidget#chapterList::item:selected {
+QListWidget#chapterList::item:hover, QListWidget#trashList::item:hover {
+    background: __HOVER__;
+}
+QListWidget#chapterList::item:pressed, QListWidget#trashList::item:pressed {
+    background: __SELECTION__;
+}
+QListWidget#chapterList::item:selected, QListWidget#trashList::item:selected {
     background: __SELECTION__;
     color: __TEXT__;
     border: none;

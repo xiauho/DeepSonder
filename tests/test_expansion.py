@@ -1,5 +1,6 @@
 from pathlib import Path
 from unittest import TestCase
+from unittest.mock import patch
 
 from core import expansion
 from core.project import NovelProject
@@ -41,7 +42,13 @@ class ExpansionTests(TestCase):
 
     def test_retry_keeps_full_timeout_budget(self) -> None:
         dsh = FakeDSH([self.onboarding_output, self.valid_output])
-        raw, first_raw = expansion.run_expansion(self.project, "chapter_01", dsh, target_chars=300)
+        with patch(
+            "core.expansion.build_ai_context",
+            wraps=expansion.build_ai_context,
+        ) as build_context:
+            raw, first_raw = expansion.run_expansion(
+                self.project, "chapter_01", dsh, target_chars=300
+            )
         self.assertEqual(raw, self.valid_output)
         self.assertEqual(first_raw, self.onboarding_output)
         self.assertEqual(len(dsh.calls), 2)
@@ -49,3 +56,16 @@ class ExpansionTests(TestCase):
         # Regression: the retry regenerates the whole chapter and must not run
         # under a shortened timeout budget.
         self.assertIsNone(dsh.calls[1]["timeout_override"])
+        self.assertEqual(build_context.call_count, 1)
+
+    def test_history_window_is_forwarded_to_prompt_and_retry(self) -> None:
+        dsh = FakeDSH([self.onboarding_output, self.valid_output])
+        expansion.run_expansion(
+            self.project,
+            "chapter_01",
+            dsh,
+            target_chars=300,
+            history_chapters=7,
+        )
+        self.assertIn("最多最近 7 个已完成章节的摘要", dsh.calls[0]["user"])
+        self.assertIn("最多最近 7 个已完成章节的摘要", dsh.calls[1]["user"])

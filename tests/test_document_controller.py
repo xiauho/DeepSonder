@@ -19,6 +19,7 @@ class FakeEditor(QObject):
         self.dirty = False
         self.content = ""
         self.save_calls = 0
+        self.cleared = []
 
     def current_path(self):
         return self.path
@@ -41,6 +42,13 @@ class FakeEditor(QObject):
         self.dirty = False
         self.file_saved.emit(self.path)
         return True
+
+    def clear_document(self, message: str = "未打开文件") -> None:
+        self.cleared.append(message)
+        self.path = None
+        self.category = ""
+        self.content = ""
+        self.dirty = False
 
 
 class DocumentControllerTests(unittest.TestCase):
@@ -101,3 +109,37 @@ class DocumentControllerTests(unittest.TestCase):
             self.assertTrue(controller.auto_save())
             self.assertEqual(saved, [editor.path])
             self.assertFalse(editor.dirty)
+
+    def test_delete_current_chapter_clears_editor_and_notifies_session(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            session = ProjectSession()
+            session.set_project(project)
+            editor = FakeEditor()
+            editor.path = str(project.chapters_dir / "chapter_01.md")
+            editor.category = "章节"
+            controller = DocumentController(editor, session)
+            changes = []
+            session.data_changed.connect(changes.append)
+
+            controller.delete_chapter("chapter_01")
+
+            self.assertIsNone(editor.path)
+            self.assertFalse((project.chapters_dir / "chapter_01.md").exists())
+            self.assertEqual(editor.cleared, ["章节已删除"])
+            self.assertEqual(changes, [project])
+
+    def test_delete_current_dirty_chapter_requires_explicit_discard(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            session = ProjectSession()
+            session.set_project(project)
+            editor = FakeEditor()
+            editor.path = str(project.chapters_dir / "chapter_01.md")
+            editor.category = "章节"
+            editor.dirty = True
+            controller = DocumentController(editor, session)
+
+            with self.assertRaisesRegex(RuntimeError, "未保存修改"):
+                controller.delete_chapter("chapter_01")
+            self.assertTrue(Path(editor.path).exists())

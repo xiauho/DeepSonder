@@ -43,14 +43,31 @@ from ui.project_session import ProjectSession
 from ui.project_lifecycle_controller import ProjectLifecycleController, ProjectSwitchCancelled
 from ui.settings_controller import SettingsController
 from ui.story_navigation_controller import StoryNavigationController
+from ui.trash_dialog import TrashDialog
 from ui.view_refresh_controller import ViewRefreshController
 from ui.window_state_controller import WindowStateController
 
 
+def fallback_chapter_after_delete(
+    chapters: list[Path],
+    deleted_index: int,
+    current_deleted: bool,
+) -> Path | None:
+    """Choose a neighboring chapter only when the open chapter was deleted."""
+    if not current_deleted:
+        return None
+    remaining = chapters[:deleted_index] + chapters[deleted_index + 1 :]
+    if not remaining:
+        return None
+    return remaining[min(deleted_index, len(remaining) - 1)]
+
+
 class MainWindow(QMainWindow):
     ROUTES = ("dashboard", "writing", "canon", "memory", "reports", "export", "settings")
+    DELETE_CHAPTER_SHORTCUT = "Ctrl+Shift+Delete"
     ACTION_ICONS = {
         "new_chapter": "add",
+        "delete_chapter": "delete",
         "open_project": "folder_open",
         "save": "save",
         "export": "ios_share",
@@ -221,9 +238,18 @@ class MainWindow(QMainWindow):
         action("open_project", "打开项目…", self.open_project, "Ctrl+Shift+O")
         action("save", "保存", self.save_current_file, "Ctrl+S")
         action("export", "导出作品", lambda: self._show_route("export"), "Ctrl+Shift+E")
+        action("trash", "回收站…", self.open_trash)
+        self.actions["trash"].setEnabled(False)
         action("settings", "设置", lambda: self._show_route("settings"), "Ctrl+,")
         action("quit", "退出", self.close, "Ctrl+Q")
         action("new_chapter", "新建章节", self.new_chapter, "Ctrl+N")
+        action(
+            "delete_chapter",
+            "移入回收站",
+            self.delete_current_chapter,
+            self.DELETE_CHAPTER_SHORTCUT,
+        )
+        self.actions["delete_chapter"].setEnabled(False)
         action("new_character", "新建角色", self.new_character, "Ctrl+Alt+C")
         action("new_world", "新建世界观条目", self.new_world_entry)
         action("undo", "撤销", lambda: self.editor.text_edit.undo(), "Ctrl+Z")
@@ -418,6 +444,7 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
         file_menu.addAction(self.actions["save"])
         file_menu.addAction(self.actions["export"])
+        file_menu.addAction(self.actions["trash"])
         file_menu.addSeparator()
         file_menu.addAction(self.actions["settings"])
         file_menu.addAction(self.actions["quit"])
@@ -430,6 +457,7 @@ class MainWindow(QMainWindow):
 
         create_menu = self.menuBar().addMenu("创作")
         create_menu.addAction(self.actions["new_chapter"])
+        create_menu.addAction(self.actions["delete_chapter"])
         create_menu.addAction(self.actions["new_character"])
         create_menu.addAction(self.actions["new_world"])
         create_menu.addSeparator()
@@ -465,12 +493,14 @@ class MainWindow(QMainWindow):
     def _connect_signals(self) -> None:
         self.primary_nav.route_requested.connect(self._show_route)
         self.primary_nav.new_project_requested.connect(self.new_project)
+        self.primary_nav.trash_requested.connect(self.open_trash)
         self.dashboard_page.new_project_requested.connect(self.new_project)
         self.dashboard_page.open_project_requested.connect(self.open_project)
         self.dashboard_page.import_requested.connect(self._import_markdown_chapters)
         self.dashboard_page.continue_requested.connect(lambda: self._show_route("writing"))
         self.left_panel.file_selected.connect(self._on_file_selected)
         self.left_panel.new_chapter_requested.connect(self.new_chapter)
+        self.left_panel.delete_chapter_requested.connect(self.delete_chapter_by_path)
         self.left_panel.toggle_requested.connect(self.toggle_navigation_panel)
         self.memory_page.sync_requested.connect(self.update_memory)
         self.memory_page.chapter_requested.connect(self._open_memory_chapter)
@@ -484,8 +514,10 @@ class MainWindow(QMainWindow):
         self.settings_controller.connection_failed.connect(self._on_dsh_test_failed)
         self.settings_controller.connection_finished.connect(self._on_dsh_test_finished)
         self.editor.dirty_changed.connect(self._on_dirty_changed)
+        self.ai_controller.started.connect(self._on_ai_started)
+        self.ai_controller.finished.connect(self._on_ai_finished)
         self.document_controller.document_saved.connect(
-            lambda _path: self.view_refresh_controller.refresh_current_context()
+            self.view_refresh_controller.refresh_current_context
         )
         self.document_controller.auto_saved.connect(self._on_auto_saved)
         self.editor.exit_focus_button.clicked.connect(self._exit_focus_mode)
@@ -493,19 +525,19 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # Routing and shared shell
     # ------------------------------------------------------------------
-    def _show_route(self, route: str) -> None:
+    def _show_route(self, route: str) -> bool:
         if route not in self.ROUTES:
             route = "dashboard"
         if route not in {"dashboard", "settings"} and not self._require_project():
             self.primary_nav.set_active(self.window_state_controller.current_route)
-            return
+            return False
         if (
             route != self.window_state_controller.current_route
             and self.editor.is_dirty()
             and not self._save_if_dirty()
         ):
             self.primary_nav.set_active(self.window_state_controller.current_route)
-            return
+            return False
 
         if route != "settings":
             self.view_refresh_controller.refresh_route(route)
@@ -517,6 +549,7 @@ class MainWindow(QMainWindow):
 
         self._update_page_header(route)
         self._update_window_title()
+        return True
 
     def _update_page_header(self, route: str) -> None:
         labels = {
@@ -566,7 +599,23 @@ class MainWindow(QMainWindow):
         self.status_message.setText(
             f"已打开 · {project.name}" if project else "尚未打开项目"
         )
+        self._refresh_delete_action()
+        self._refresh_trash_access()
         self._update_page_header(self.window_state_controller.current_route)
+
+    def _on_ai_started(self, _token) -> None:
+        self._refresh_delete_action()
+        self.primary_nav.set_trash_enabled(False)
+        self.actions["trash"].setEnabled(False)
+
+    def _on_ai_finished(self, _token) -> None:
+        self._refresh_delete_action()
+        self._refresh_trash_access()
+
+    def _refresh_trash_access(self) -> None:
+        enabled = self.project is not None and not self.ai_controller.is_running()
+        self.primary_nav.set_trash_enabled(enabled)
+        self.actions["trash"].setEnabled(enabled)
 
     def new_project(self) -> None:
         parent_dir = QFileDialog.getExistingDirectory(self, "选择新项目存放目录")
@@ -628,6 +677,114 @@ class MainWindow(QMainWindow):
         self.left_panel.select_path(path)
         self.status_message.setText(f"已创建 · {title.strip()}")
 
+    def open_trash(self) -> None:
+        project = self.project
+        if project is None:
+            QMessageBox.information(self, "尚未打开项目", "请先打开或新建一个小说项目。")
+            return
+        if self.ai_controller.is_running():
+            QMessageBox.information(self, "AI 正在工作", "当前 AI 任务完成后才能管理回收站。")
+            return
+        dialog = TrashDialog(self.project_session.require_data_store(), self)
+        dialog.changed.connect(self.project_session.notify_data_changed)
+        dialog.exec()
+
+    def delete_current_chapter(self) -> None:
+        chapter_id = self.editor.current_chapter_id()
+        if chapter_id is None:
+            QMessageBox.information(self, "需要章节", "请先打开要删除的章节。")
+            return
+        self._delete_chapter(chapter_id)
+
+    def delete_chapter_by_path(self, path_str: str) -> None:
+        project = self.project
+        if project is None:
+            return
+        path = Path(path_str)
+        try:
+            if path.resolve().parent != project.chapters_dir.resolve():
+                raise ValueError
+        except (OSError, ValueError):
+            QMessageBox.warning(self, "删除失败", "只能删除当前项目中的章节文件。")
+            return
+        self._delete_chapter(path.stem)
+
+    def _delete_chapter(self, chapter_id: str) -> None:
+        project = self.project
+        if project is None:
+            return
+        if self.ai_controller.is_running():
+            QMessageBox.information(self, "AI 正在工作", "当前 AI 任务完成后才能删除章节。")
+            return
+
+        target = project.chapters_dir / f"{chapter_id}.md"
+        if not target.is_file():
+            QMessageBox.warning(self, "删除失败", "目标章节不存在，项目资料可能已经发生变化。")
+            self.project_session.notify_data_changed()
+            return
+
+        chapters = self.project_session.require_data_store().list_chapters()
+        try:
+            deleted_index = next(
+                index
+                for index, path in enumerate(chapters)
+                if path.resolve() == target.resolve()
+            )
+        except StopIteration:
+            QMessageBox.warning(self, "删除失败", "目标章节不在当前项目章节目录内。")
+            return
+
+        current_path = self.editor.current_path()
+        is_current = bool(current_path and Path(current_path).resolve() == target.resolve())
+        chapter_title = project.load_chapter(chapter_id).title
+        answer = QMessageBox.question(
+            self,
+            "移入回收站",
+            f"确定将《{chapter_title}》移入回收站吗？\n\n"
+            "章节文件和对应摘要将移入回收站，之后仍可恢复。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        discard_current_changes = False
+        if is_current and self.editor.is_dirty():
+            choice = QMessageBox(self)
+            choice.setIcon(QMessageBox.Icon.Warning)
+            choice.setWindowTitle("章节尚未保存")
+            choice.setText("当前章节有未保存修改，删除前如何处理？")
+            save_button = choice.addButton("保存后删除", QMessageBox.ButtonRole.AcceptRole)
+            discard_button = choice.addButton(
+                "放弃修改并删除", QMessageBox.ButtonRole.DestructiveRole
+            )
+            choice.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+            choice.exec()
+            if choice.clickedButton() is save_button:
+                if not self.document_controller.save():
+                    QMessageBox.warning(self, "删除失败", "当前章节保存失败，已取消删除。")
+                    return
+            elif choice.clickedButton() is discard_button:
+                discard_current_changes = True
+            else:
+                return
+
+        fallback = fallback_chapter_after_delete(chapters, deleted_index, is_current)
+        try:
+            self.document_controller.delete_chapter(
+                chapter_id,
+                discard_current_changes=discard_current_changes,
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            QMessageBox.critical(self, "删除失败", str(exc))
+            return
+
+        if fallback is not None:
+            self._show_route("writing")
+            self.left_panel.select_path(fallback)
+        self.status_message.setText(f"已移入回收站 · {chapter_title}")
+        self._refresh_delete_action()
+
     def new_character(self) -> None:
         if not self._require_project():
             return
@@ -671,6 +828,7 @@ class MainWindow(QMainWindow):
             self._show_route(
                 self.story_navigation_controller.route_for_category(category)
             )
+        self._refresh_delete_action()
         self._update_window_title()
 
     def _open_memory_chapter(self, chapter_id: str) -> None:
@@ -802,6 +960,16 @@ class MainWindow(QMainWindow):
 
     def _on_dirty_changed(self, _dirty: bool) -> None:
         self._update_window_title()
+
+    def _refresh_delete_action(self) -> None:
+        action = self.actions.get("delete_chapter")
+        if action is None:
+            return
+        action.setEnabled(
+            self.project is not None
+            and self.editor.current_chapter_id() is not None
+            and not self.ai_controller.is_running()
+        )
 
     def _save_if_dirty(self) -> bool:
         return self.document_controller.save_if_dirty()

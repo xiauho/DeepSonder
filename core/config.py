@@ -27,6 +27,7 @@ DEFAULT_CONFIG = {
     "auto_save": True,
     "auto_save_interval": 30,
     "expand_target_chars": 2000,
+    "ai_context_history_chapters": 5,
     "show_line_numbers": False,
     "ai_notice_acknowledged": False,
     "recent_projects": [],
@@ -125,6 +126,12 @@ def _normalize_config(config: dict[str, Any]) -> None:
         )
     except (TypeError, ValueError):
         config["expand_target_chars"] = 2000
+    try:
+        config["ai_context_history_chapters"] = max(
+            0, min(10, int(config.get("ai_context_history_chapters", 5)))
+        )
+    except (TypeError, ValueError):
+        config["ai_context_history_chapters"] = 5
     config.pop("continue_target_chars", None)
     config["auto_save"] = bool(config.get("auto_save", True))
     config["ai_notice_acknowledged"] = bool(config.get("ai_notice_acknowledged", False))

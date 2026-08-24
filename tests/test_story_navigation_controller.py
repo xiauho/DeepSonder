@@ -72,6 +72,25 @@ class StoryNavigationControllerTests(unittest.TestCase):
             self.assertEqual(panel.selected, [chapter])
             self.assertFalse(controller.open_memory_chapter("missing"))
 
+    def test_default_canon_selection_falls_back_to_future_plan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "project", "测试")
+            (project.outline_dir / "main_arc.md").unlink()
+            session = ProjectSession()
+            session.set_project(project)
+            panel = _LeftPanel()
+            controller = StoryNavigationController(
+                project_session=session,
+                editor=_Editor(),
+                left_panel=panel,
+                show_route=lambda _route: None,
+            )
+
+            selected = controller.select_default_canon()
+
+            self.assertEqual(selected, project.outline_dir / "future_plan.md")
+            self.assertEqual(panel.selected, [selected])
+
 
 if __name__ == "__main__":
     unittest.main()

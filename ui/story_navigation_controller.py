@@ -27,9 +27,10 @@ class StoryNavigationController(QObject):
         project = self.project_session.project
         if project is None or self.editor.current_category() != "章节":
             return None
-        store = ProjectDataStore(project)
+        store = self.project_session.require_data_store()
         paths = [
             project.outline_dir / "main_arc.md",
+            project.outline_dir / "future_plan.md",
             *store.list_characters(),
             *store.list_world(),
             *store.list_power(),

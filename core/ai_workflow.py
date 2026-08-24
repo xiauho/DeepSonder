@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 
 from . import ai_protocol, consistency, expansion
+from .context_budget import build_ai_context
 from .dsh_client import DSHClient
 from .project import NovelProject
 from .prompt_builder import build_state_update_prompt, build_summary_prompt
@@ -25,6 +26,7 @@ class AIWorkflowService:
         project: NovelProject,
         chapter_id: str,
         target_chars: int = 2000,
+        history_chapters: int = 5,
         cancel_event: threading.Event | None = None,
     ) -> tuple[str, str | None]:
         return expansion.run_expansion(
@@ -32,6 +34,7 @@ class AIWorkflowService:
             chapter_id,
             self.dsh,
             target_chars=target_chars,
+            history_chapters=history_chapters,
             cancel_event=cancel_event,
         )
 
@@ -49,12 +52,17 @@ class AIWorkflowService:
         chapter_id: str,
         cancel_event: threading.Event | None = None,
     ) -> tuple[str, dict, str]:
-        summary_system, summary_user = build_summary_prompt(project, chapter_id)
+        context = build_ai_context(project, chapter_id)
+        summary_system, summary_user = build_summary_prompt(
+            project, chapter_id, context=context
+        )
         generate_options = {"cancel_event": cancel_event} if cancel_event is not None else {}
         summary_raw = self.dsh.generate(summary_system, summary_user, **generate_options)
         summary_result = ai_protocol.parse_summary_result(summary_raw)
 
-        state_system, state_user = build_state_update_prompt(project, chapter_id)
+        state_system, state_user = build_state_update_prompt(
+            project, chapter_id, context=context
+        )
         state_raw = self.dsh.generate_json(state_system, state_user, **generate_options)
         state_result = ai_protocol.parse_story_state_result(state_raw)
 

@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass
 from pathlib import Path
+from threading import RLock
 
-from .context_budget import build_ai_context
 from .project import NovelProject
+
+
+_FILE_HASH_CACHE: dict[str, tuple[int, int, str]] = {}
+_FILE_HASH_LOCK = RLock()
 
 
 def context_paths(project: NovelProject, chapter_id: str) -> list[Path]:
@@ -49,7 +54,6 @@ class AIContextSnapshot:
         editor_text: str | None,
     ) -> "AIContextSnapshot":
         root = project.root.resolve()
-        context_hash = build_ai_context(project, chapter_id).fingerprint(editor_text)
         hashes = []
         for path in context_paths(project, chapter_id):
             try:
@@ -57,12 +61,23 @@ class AIContextSnapshot:
             except ValueError:
                 key = str(path.resolve()).casefold()
             hashes.append((key, _file_hash(path)))
+        file_hashes = tuple(hashes)
+        editor_hash = _text_hash(editor_text) if editor_text is not None else None
+        context_payload = {
+            "project_root": str(root).casefold(),
+            "chapter_id": str(chapter_id),
+            "editor_hash": editor_hash,
+            "file_hashes": file_hashes,
+        }
+        context_hash = hashlib.sha256(
+            json.dumps(context_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        ).hexdigest()
         return cls(
             project_root=str(root).casefold(),
             chapter_id=str(chapter_id),
-            editor_hash=_text_hash(editor_text) if editor_text is not None else None,
+            editor_hash=editor_hash,
             context_hash=context_hash,
-            file_hashes=tuple(hashes),
+            file_hashes=file_hashes,
         )
 
     def matches(
@@ -88,12 +103,26 @@ class AIContextSnapshot:
 
 def _file_hash(path: Path) -> str:
     path = Path(path)
-    if not path.exists():
-        return "<missing>"
     try:
-        return hashlib.sha256(path.read_bytes()).hexdigest()
+        stat = path.stat()
+    except OSError:
+        with _FILE_HASH_LOCK:
+            _FILE_HASH_CACHE.pop(str(path.resolve()).casefold(), None)
+        return "<missing>"
+
+    key = str(path.resolve()).casefold()
+    signature = (stat.st_mtime_ns, stat.st_size)
+    with _FILE_HASH_LOCK:
+        cached = _FILE_HASH_CACHE.get(key)
+        if cached is not None and cached[:2] == signature:
+            return cached[2]
+    try:
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
     except OSError:
         return "<unreadable>"
+    with _FILE_HASH_LOCK:
+        _FILE_HASH_CACHE[key] = (*signature, digest)
+    return digest
 
 
 def _text_hash(text: str) -> str:

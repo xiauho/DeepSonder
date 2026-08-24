@@ -115,6 +115,24 @@ class ViewRefreshControllerTests(unittest.TestCase):
             self.assertIs(dashboard.refreshes[-1], project)
             self.assertEqual(export.render_count, 1)
 
+    def test_saved_file_refreshes_radar_without_rebuilding_project_pages(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            session = ProjectSession()
+            session.set_project(project)
+            editor = _Editor()
+            controller, _left, inspector, dashboard, _memory, _reports, export = self._controller(
+                session, editor
+            )
+            dashboard_count = len(dashboard.refreshes)
+            chapter_path = project.chapters_dir / "chapter_01.md"
+
+            controller.refresh_current_context(str(chapter_path))
+
+            self.assertEqual(inspector.calls[-1], (project, None))
+            self.assertEqual(len(dashboard.refreshes), dashboard_count)
+            self.assertEqual(export.render_count, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -5,6 +5,7 @@
   "dsh_timeout": 600,
   "dsh_extra_args": [],
   "expand_target_chars": 2000,
+  "ai_context_history_chapters": 5,
   "theme": "dark",
   "ui_language": "zh-CN",
   "ui_font_size": 14,

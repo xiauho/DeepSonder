@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from core.project import NovelProject
 from ui.icons import set_button_icon
 from core.storage import atomic_write_text
 
@@ -217,12 +218,7 @@ class Editor(QWidget):
         """Replace only the current chapter's ``## 正文`` section."""
         raw = self.text_edit.toPlainText()
         body = str(text or "").strip()
-        marker = "## 正文"
-        if marker in raw:
-            prefix = raw.split(marker, 1)[0].rstrip()
-            replacement = f"{prefix}\n\n{marker}\n{body}\n"
-        else:
-            replacement = f"{raw.rstrip()}\n\n{marker}\n{body}\n"
+        replacement = NovelProject.replace_chapter_body(raw, body)
         self.text_edit.setPlainText(replacement)
         cursor = self.text_edit.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)

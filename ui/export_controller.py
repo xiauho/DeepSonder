@@ -9,7 +9,7 @@ from PySide6.QtCore import QObject
 
 from core.export import render_manuscript
 from core.project import NovelProject
-from core.project_data import ProjectDataStore
+from core.project_data import sanitize_filename
 from core.storage import atomic_write_text
 from ui.project_session import ProjectSession
 
@@ -33,11 +33,11 @@ class ExportController(QObject):
         return self.project_session.project
 
     def selected_chapters(self, options: dict) -> list[Path]:
-        project = self._require_project()
+        self._require_project()
         selected_ids = {str(item) for item in options.get("chapter_ids", [])}
         return [
             path
-            for path in ProjectDataStore(project).list_chapters()
+            for path in self.project_session.require_data_store().list_chapters()
             if path.stem in selected_ids
         ]
 
@@ -59,7 +59,7 @@ class ExportController(QObject):
     def suggested_path(self, options: dict) -> Path:
         project = self._require_project()
         format_name = self.normalize_options(options)["format"]
-        return project.root / f"{self.safe_name(project.name)}-全书.{format_name}"
+        return project.root / f"{sanitize_filename(project.name)}-全书.{format_name}"
 
     def export(
         self,
@@ -91,6 +91,4 @@ class ExportController(QObject):
 
     @staticmethod
     def safe_name(value: str) -> str:
-        forbidden = '<>:"/\\|?*'
-        cleaned = "".join("_" if char in forbidden else char for char in value).strip(" .")
-        return cleaned or "untitled"
+        return sanitize_filename(value)

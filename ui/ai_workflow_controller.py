@@ -36,7 +36,7 @@ class AIWorkflowController(QObject):
         ai_engine_controller,
         inspector,
         reports_page,
-        go_to_writing: Callable[[], None],
+        go_to_writing: Callable[[], bool],
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -64,6 +64,7 @@ class AIWorkflowController(QObject):
             return
         project, chapter_id, workflow = request
         target_chars = int(self.config.get("expand_target_chars", 2000))
+        history_chapters = int(self.config.get("ai_context_history_chapters", 5))
         self._start(
             "expand",
             chapter_id,
@@ -72,6 +73,7 @@ class AIWorkflowController(QObject):
                 project,
                 chapter_id,
                 target_chars=target_chars,
+                history_chapters=history_chapters,
                 cancel_event=cancel_event,
             ),
         )
@@ -109,11 +111,11 @@ class AIWorkflowController(QObject):
         if project is None:
             QMessageBox.information(self.parent, "尚未打开项目", "请先打开或新建一个小说项目。")
             return None
-        self.go_to_writing()
+        if not self.go_to_writing():
+            return None
         chapter_id = self.editor.current_chapter_id()
         if chapter_id is None:
             QMessageBox.information(self.parent, "需要章节", "请先从资料树打开一个章节。")
-            self.go_to_writing()
             return None
         if not self._ensure_ai_notice() or not self._save_current_file():
             return None
@@ -131,7 +133,7 @@ class AIWorkflowController(QObject):
         if not self.editor.current_path():
             QMessageBox.information(self.parent, "保存", "请先打开一份可编辑的故事资料。")
             return False
-        if not self.document_controller.save():
+        if not self.document_controller.save_if_dirty():
             QMessageBox.warning(self.parent, "保存失败", "文件未能保存，请检查写入权限。")
             return False
         return True
@@ -157,9 +159,6 @@ class AIWorkflowController(QObject):
         return True
 
     def _start(self, kind: str, chapter_id: str, message: str, worker) -> bool:
-        if self.ai_controller.is_running():
-            QMessageBox.information(self.parent, "AI 正在工作", "当前任务完成后再试一次。")
-            return False
         project = self.project_session.project
         if project is None:
             return False
@@ -176,14 +175,20 @@ class AIWorkflowController(QObject):
         return True
 
     def _on_task_succeeded(self, token, result) -> None:
-        if token.kind == "expand":
-            self._on_expansion_done(result)
-        elif token.kind == "check":
-            self._on_check_done(result)
-        elif token.kind == "memory":
-            self._on_memory_done(result)
+        try:
+            if token.kind == "expand":
+                self._on_expansion_done(token, result)
+            elif token.kind == "check":
+                self._on_check_done(result)
+            elif token.kind == "memory":
+                self._on_memory_done(token, result)
+        finally:
+            # The worker's finished signal can be processed while a preview or
+            # confirmation dialog is open.  Release the token-scoped snapshot
+            # only after the result handler has made its commit decision.
+            self.ai_controller.release_result(token)
 
-    def _on_expansion_done(self, result: tuple[str, str | None]) -> None:
+    def _on_expansion_done(self, token, result: tuple[str, str | None]) -> None:
         raw, first_raw = result
         if first_raw is not None:
             self._emit_output(
@@ -203,7 +208,7 @@ class AIWorkflowController(QObject):
             f"✅ {parsed.completion_message}；扩写结果已通过格式校验（约 {parsed.char_count} 字），等待确认写入"
         )
         self._emit_status("扩写已完成，等待确认写入")
-        chapter_id = self.ai_controller.task_chapter_id
+        chapter_id = token.chapter_id
         project = self.project_session.project
         chapter = project.load_chapter(chapter_id) if project and chapter_id else None
         has_existing_content = bool(chapter and chapter.content.strip())
@@ -212,7 +217,7 @@ class AIWorkflowController(QObject):
             char_count=parsed.char_count,
             length_ok=parsed.length_ok,
             has_existing_content=has_existing_content,
-            context_matches=self._task_context_matches,
+            context_matches=lambda: self._task_context_matches(token),
             replace_body=self.editor.replace_chapter_body,
         )
         if outcome.status == "cancelled":
@@ -237,12 +242,11 @@ class AIWorkflowController(QObject):
             return
         completion_message = str(report.get("completion_message") or "一致性检查任务已完成")
         self._notify_complete(completion_message)
-        self._emit_output(f"一致性检查完成\n{rendered}")
+        self._emit_output(f"一致性检查结果\n{rendered}")
         self.inspector.show_text("一致性检查", rendered)
         self.reports_page.show_result(rendered)
-        self._emit_status("一致性检查完成")
 
-    def _on_memory_done(self, result: tuple[str, dict, str]) -> None:
+    def _on_memory_done(self, token, result: tuple[str, dict, str]) -> None:
         summary, new_state, completion_message = result
         try:
             draft = self.ai_result_service.prepare_memory(summary, new_state)
@@ -251,14 +255,14 @@ class AIWorkflowController(QObject):
             return
         self._emit_output(f"✅ {completion_message}；记忆结果已生成，等待确认写入")
         self._emit_status("记忆更新已完成，等待确认写入")
-        chapter_id = self.ai_controller.task_chapter_id
+        chapter_id = token.chapter_id
         project = self.project_session.project
         if not chapter_id or project is None:
             self._emit_output("记忆更新已取消，未修改项目数据。")
             return
         outcome = self.ai_result_coordinator.confirm_memory(
             summary=draft.summary,
-            context_matches=self._task_context_matches,
+            context_matches=lambda: self._task_context_matches(token),
             commit=lambda: self.ai_result_service.commit_memory(project, chapter_id, draft),
         )
         if outcome.status == "cancelled":
@@ -284,11 +288,12 @@ class AIWorkflowController(QObject):
         self.project_session.notify_data_changed()
         self._emit_status("长期记忆已更新")
 
-    def _task_context_matches(self) -> bool:
+    def _task_context_matches(self, token) -> bool:
         return self.ai_controller.context_matches(
             self.project_session.project,
             self.editor.current_chapter_id() or "",
             self.editor.text_edit.toPlainText(),
+            token,
         )
 
     def _notify_complete(self, message: str) -> None:

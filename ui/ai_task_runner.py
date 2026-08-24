@@ -103,6 +103,9 @@ class AITaskRunner(QObject):
         token = self._token
         if not self._is_current(token):
             return
+        thread = self._thread
         self.controller.finish(token)
         self._thread = None
         self.finished.emit(token)
+        if thread is not None:
+            thread.deleteLater()

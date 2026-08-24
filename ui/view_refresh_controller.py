@@ -66,12 +66,19 @@ class ViewRefreshController(QObject):
         self.dashboard_page.refresh(project)
         self.refresh_inspector(project)
 
-    def refresh_current_context(self) -> None:
-        """Refresh the currently open document and project summary views."""
+    def refresh_current_context(self, saved_path: str | None = None) -> None:
+        """Refresh the current context without rebuilding unrelated pages.
+
+        A path supplied by the document controller means one file was saved.
+        Only the story radar depends on that immediate edit; project totals and
+        export previews are intentionally refreshed by broader project events.
+        """
         project = self.project_session.project
         if project is None:
             return
         self.refresh_inspector(project)
+        if saved_path is not None:
+            return
         self.dashboard_page.refresh(project)
         self.export_page.render_preview()
 

@@ -72,3 +72,22 @@ class CancellableDSHTests(TestCase):
                 client.generate("system", "user", cancel_event=event)
         self.assertTrue(process.killed)
         self.assertGreaterEqual(process.communicate_calls, 2)
+
+    def test_process_tree_reap_has_a_bounded_fallback(self) -> None:
+        class StuckProcess:
+            def __init__(self) -> None:
+                self.killed = False
+                self.communicate_calls = 0
+
+            def communicate(self, timeout=None):
+                self.communicate_calls += 1
+                raise subprocess.TimeoutExpired("dsh", timeout)
+
+            def kill(self):
+                self.killed = True
+
+        process = StuckProcess()
+        DSHClient._terminate_process_tree(process)
+
+        self.assertTrue(process.killed)
+        self.assertEqual(process.communicate_calls, 2)

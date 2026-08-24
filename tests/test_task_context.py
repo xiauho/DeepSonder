@@ -1,6 +1,7 @@
 import tempfile
 from pathlib import Path
 from unittest import TestCase
+from unittest.mock import patch
 
 from core.project import NovelProject
 from core.task_context import AIContextSnapshot
@@ -35,3 +36,15 @@ class AIContextSnapshotTests(TestCase):
             state["current_location"] = "新地点"
             project.save_story_state(state)
             self.assertFalse(snapshot.matches(project, "chapter_01", text))
+
+    def test_capture_does_not_rebuild_full_ai_context(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            text = project.load_chapter("chapter_01").raw
+            with patch(
+                "core.context_budget.build_ai_context",
+                side_effect=AssertionError("snapshot should use file fingerprints only"),
+            ):
+                snapshot = AIContextSnapshot.capture(project, "chapter_01", text)
+
+            self.assertTrue(snapshot.matches(project, "chapter_01", text))

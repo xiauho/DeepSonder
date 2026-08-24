@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMenu,
     QPushButton,
     QTreeWidget,
     QTreeWidgetItem,
@@ -28,6 +29,7 @@ class LeftPanel(QWidget):
 
     file_selected = Signal(str, str)
     new_chapter_requested = Signal()
+    delete_chapter_requested = Signal(str)
     toggle_requested = Signal()
 
     PATH_ROLE = int(Qt.ItemDataRole.UserRole)
@@ -96,6 +98,8 @@ class LeftPanel(QWidget):
         self.tree.setAnimated(True)
         self.tree.setUniformRowHeights(True)
         self.tree.itemClicked.connect(self._on_item_clicked)
+        self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._show_context_menu)
         layout.addWidget(self.tree, 1)
 
         hint = QLabel("单击打开 · Ctrl+S 保存 · Ctrl+K 专注")
@@ -133,7 +137,14 @@ class LeftPanel(QWidget):
 
         store = ProjectDataStore(project)
         groups: list[tuple[str, str, list[Path]]] = [
-            ("总大纲", "01", [project.outline_dir / "main_arc.md"]),
+            (
+                "总大纲",
+                "01",
+                [
+                    project.outline_dir / "main_arc.md",
+                    project.outline_dir / "future_plan.md",
+                ],
+            ),
             ("章节", "02", store.list_chapters()),
             ("角色", "03", store.list_characters()),
             ("世界观", "04", store.list_world()),
@@ -199,6 +210,21 @@ class LeftPanel(QWidget):
             self._selected_path = str(path_str)
             category = item.data(0, self.CATEGORY_ROLE) or ""
             self.file_selected.emit(category, path_str)
+
+    def _show_context_menu(self, position) -> None:
+        item = self.tree.itemAt(position)
+        if item is None:
+            return
+        path_str = item.data(0, self.PATH_ROLE)
+        category = item.data(0, self.CATEGORY_ROLE) or ""
+        if not path_str or category != "章节":
+            return
+        menu = QMenu(self.tree)
+        delete_action = menu.addAction("移入回收站")
+        delete_action.triggered.connect(
+            lambda _checked=False, path=str(path_str): self.delete_chapter_requested.emit(path)
+        )
+        menu.exec(self.tree.viewport().mapToGlobal(position))
 
     def _filter_tree(self, query: str) -> None:
         needle = query.strip().casefold()

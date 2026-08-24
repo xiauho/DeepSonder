@@ -9,6 +9,7 @@ from PySide6.QtCore import QObject
 
 from core.config import save_config
 from core.project import NovelProject
+from core.project_data import sanitize_filename
 
 
 class ProjectSwitchCancelled(Exception):
@@ -52,7 +53,7 @@ class ProjectLifecycleController(QObject):
         return project
 
     def create_and_load(self, parent_dir: Path, name: str):
-        root = Path(parent_dir) / self.safe_name(name)
+        root = Path(parent_dir) / sanitize_filename(name)
         if root.exists():
             raise FileExistsError(root)
         NovelProject.create(root, name=name.strip())
@@ -100,9 +101,7 @@ class ProjectLifecycleController(QObject):
 
     @staticmethod
     def safe_name(value: str) -> str:
-        forbidden = '<>:"/\\|?*'
-        cleaned = "".join("_" if char in forbidden else char for char in value).strip(" .")
-        return cleaned or "untitled"
+        return sanitize_filename(value)
 
     @classmethod
     def safe_project_path(cls, value: object) -> Path | None:

@@ -12,6 +12,7 @@ class PrimaryNavigation(QWidget):
     NAV_ANCHOR_RATIO = 0.10
     route_requested = Signal(str)
     new_project_requested = Signal()
+    trash_requested = Signal()
 
     ROUTES = (
         ("dashboard", "space_dashboard", "项目"),
@@ -85,6 +86,16 @@ class PrimaryNavigation(QWidget):
         divider.setFrameShape(QFrame.Shape.HLine)
         divider.setObjectName("navDivider")
         layout.addWidget(divider)
+        trash = IconTextButton("delete_sweep", "回收站")
+        trash.set_rail_anchor(self.NAV_ANCHOR_RATIO)
+        trash.setObjectName("primaryNavButton")
+        trash.setCursor(Qt.CursorShape.PointingHandCursor)
+        trash.setToolTip("打开回收站")
+        trash.clicked.connect(lambda _checked=False: self.trash_requested.emit())
+        self.buttons["trash"] = trash
+        self.trash_button = trash
+        layout.addWidget(trash)
+
         settings = IconTextButton("settings", "设置")
         settings.set_rail_anchor(self.NAV_ANCHOR_RATIO)
         settings.setObjectName("primaryNavButton")
@@ -97,10 +108,15 @@ class PrimaryNavigation(QWidget):
         local.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(local)
 
+        self.set_trash_enabled(False)
         self.set_active("dashboard")
 
     def set_project(self, name: str | None) -> None:
         self.project_name.setText(name or "尚未打开项目")
+        self.set_trash_enabled(name is not None)
+
+    def set_trash_enabled(self, enabled: bool) -> None:
+        self.trash_button.setEnabled(bool(enabled))
 
     def set_active(self, route: str) -> None:
         for key, button in self.buttons.items():

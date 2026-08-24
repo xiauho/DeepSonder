@@ -22,6 +22,12 @@ from .project_data import ProjectDataStore
 # it.  The value leaves headroom below DSHClient's 30K hard limit.
 DEFAULT_PROMPT_BUDGET = 24000
 
+# Task-specific history windows.  The current chapter's own planning text is
+# more useful for expansion than increasingly old raw prose.
+EXPANSION_SUMMARY_COUNT = 5
+CONTINUATION_SUMMARY_COUNT = 2
+SUMMARY_PER_CHAPTER_CAP = 400
+
 # A section trimmed below this many chars carries no useful signal; drop it.
 MIN_SECTION_CHARS = 160
 
@@ -31,8 +37,8 @@ TAIL_MARK = "（前文过长，已截断）\n"
 
 # key: (cap, keep, priority).  Lower priority number is allocated first.
 SECTION_RULES: dict[str, tuple[int, str, int]] = {
-    "outline": (3000, "head", 1),
-    "plot_brief": (2500, "head", 1),
+    "outline": (3000, "head", 0),
+    "plot_brief": (2500, "head", 0),
     "content": (12000, "tail", 1),
     "state": (4000, "head", 2),
     "summaries": (2000, "head", 3),
@@ -94,14 +100,59 @@ class AIContext:
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def build_ai_context(project: NovelProject, chapter_id: str) -> AIContext:
-    """Load all prompt sources through one project data facade."""
+def build_ai_context(
+    project: NovelProject,
+    chapter_id: str,
+    *,
+    character_scope: str = "chapter",
+    include_world: bool = True,
+    include_power: bool = True,
+    include_timeline: bool = True,
+) -> AIContext:
+    """Load prompt sources through one project data facade.
+
+    The default keeps the complete canon for compatibility.  Prompt builders
+    can narrow canon loading for a task so long projects do not pay the cost of
+    reading every world/power file before budgeting even begins.
+    """
+    return build_task_context(
+        project,
+        chapter_id,
+        character_scope=character_scope,
+        include_world=include_world,
+        include_power=include_power,
+        include_timeline=include_timeline,
+    )
+
+
+def build_task_context(
+    project: NovelProject,
+    chapter_id: str,
+    *,
+    character_scope: str = "chapter",
+    include_world: bool = True,
+    include_power: bool = True,
+    include_timeline: bool = True,
+) -> AIContext:
+    """Build an AI context with an explicit canon loading profile."""
     store = ProjectDataStore(project)
+    chapter = store.load_chapter(chapter_id)
+    character_query = None
+    if character_scope == "planning":
+        character_query = "\n".join(
+            part for part in (chapter.title, chapter.outline, chapter.plot_brief) if part
+        )
     return AIContext(
         project_root=str(store.root.resolve()).casefold(),
         chapter_id=str(chapter_id),
-        chapter=store.load_chapter(chapter_id),
-        related=store.find_related_canon(chapter_id),
+        chapter=chapter,
+        related=store.find_related_canon(
+            chapter_id,
+            character_query=character_query,
+            include_world=include_world,
+            include_power=include_power,
+            include_timeline=include_timeline,
+        ),
         story_state=store.load_story_state(),
         chapter_summaries=store.load_chapter_summaries(),
         main_arc=store.load_main_arc(),
@@ -142,12 +193,15 @@ def gather_sections(
     keys,
     *,
     content_keep: str = "tail",
+    content_cap: int | None = None,
+    summary_count: int = EXPANSION_SUMMARY_COUNT,
     context: AIContext | None = None,
 ) -> list[Section]:
     """Load the named standard sections in deterministic rule order."""
     context = context or build_ai_context(project, chapter_id)
     chapter = context.chapter
     related = context.related
+    summary_count = max(0, int(summary_count))
     raw = {
         "outline": chapter.outline,
         "plot_brief": chapter.plot_brief,
@@ -160,6 +214,8 @@ def gather_sections(
         "summaries": prior_chapter_summaries(
             project,
             chapter_id,
+            count=summary_count,
+            per_summary_cap=SUMMARY_PER_CHAPTER_CAP,
             summaries=context.chapter_summaries,
         ),
         "characters": related.characters,
@@ -178,8 +234,15 @@ def gather_sections(
         if not text:
             continue
         cap, keep, priority = SECTION_RULES[key]
+        if key == "summaries":
+            # The setting controls the number of summaries, so let this
+            # section grow with that choice. The global prompt budget still
+            # trims it after higher-priority sections are allocated.
+            cap = max(cap, summary_count * SUMMARY_PER_CHAPTER_CAP)
         if key == "content":
             keep = content_keep
+            if content_cap is not None:
+                cap = max(1, int(content_cap))
         sections.append(Section(key, text, cap, keep, priority))
     return sections
 

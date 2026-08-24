@@ -27,11 +27,15 @@ class ProjectSessionTests(unittest.TestCase):
 
             self.assertEqual(loaded.name, "测试")
             self.assertIs(session.project, loaded)
+            self.assertIsNotNone(session.data_store)
+            self.assertIs(session.data_store.project, loaded)
+            self.assertIs(session.data_store, session.data_store)
             self.assertEqual(changed, [loaded])
             self.assertEqual(data_changed, [loaded])
 
             session.clear()
             self.assertIsNone(session.project)
+            self.assertIsNone(session.data_store)
             self.assertIsNone(changed[-1])
 
     def test_load_rejects_non_project_directory(self) -> None:

@@ -20,6 +20,13 @@ class ThemeConfigTests(TestCase):
         self.assertIn(LIGHT_COLORS["panel_color"], qss)
         self.assertIn(LIGHT_COLORS["text_color"], qss)
 
+    def test_trash_dialog_has_opaque_theme_surfaces(self) -> None:
+        qss = build_qss({"theme": "light"})
+        self.assertIn("QDialog#trashDialog", qss)
+        self.assertIn("QListWidget#trashList", qss)
+        self.assertLess(qss.index("QWidget { background: transparent; }"), qss.index("QDialog { background:"))
+        self.assertIn(LIGHT_COLORS["field_color"], qss)
+
     def test_document_css_switches_browser_field_background(self) -> None:
         light_css = document_css({"theme": "light"})
         dark_css = document_css({"theme": "dark"})
@@ -35,3 +42,13 @@ class ThemeConfigTests(TestCase):
         _normalize_config(config)
         self.assertEqual(config["expand_target_chars"], 2600)
         self.assertNotIn("continue_target_chars", config)
+
+    def test_history_chapter_setting_is_bounded(self) -> None:
+        self.assertEqual(DEFAULT_CONFIG["ai_context_history_chapters"], 5)
+        config = {"ai_context_history_chapters": 99}
+        _normalize_config(config)
+        self.assertEqual(config["ai_context_history_chapters"], 10)
+
+        config = {"ai_context_history_chapters": -3}
+        _normalize_config(config)
+        self.assertEqual(config["ai_context_history_chapters"], 0)

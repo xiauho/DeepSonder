@@ -3,9 +3,36 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
+from datetime import datetime, timezone
+import json
 from pathlib import Path
+import shutil
+from uuid import uuid4
 
+from .foreshadowing import ForeshadowingStore
 from .project import NovelProject
+from .storage import atomic_write_text
+
+
+def sanitize_filename(value: str) -> str:
+    """Return a stable filename stem safe for the supported platforms."""
+    forbidden = '<>:"/\\|?*'
+    cleaned = "".join("_" if char in forbidden else char for char in str(value)).strip(" .")
+    return cleaned or "untitled"
+
+
+@dataclass(frozen=True)
+class TrashEntry:
+    """Metadata for one chapter stored in the project recycle bin."""
+
+    trash_id: str
+    chapter_id: str
+    title: str
+    original_path: str
+    deleted_at: str
+    has_summary: bool
+    path: Path
 
 
 class ProjectDataStore:
@@ -27,6 +54,10 @@ class ProjectDataStore:
     def root(self) -> Path:
         return self.project.root
 
+    @property
+    def trash_dir(self) -> Path:
+        return self.root / ".novalist" / "trash"
+
     def list_chapters(self) -> list[Path]:
         return self.project.list_chapters()
 
@@ -42,14 +73,35 @@ class ProjectDataStore:
     def load_chapter(self, chapter_id: str):
         return self.project.load_chapter(chapter_id)
 
-    def find_related_canon(self, chapter_id: str):
-        return self.project.find_related_canon(chapter_id)
+    def find_related_canon(self, chapter_id: str, **options):
+        return self.project.find_related_canon(chapter_id, **options)
 
     def load_story_state(self) -> dict:
         return self.project.load_story_state()
 
     def load_chapter_summaries(self) -> dict:
         return self.project.load_chapter_summaries()
+
+    def load_foreshadowing(self, *, status: str | None = None) -> list[dict]:
+        return ForeshadowingStore(self.project).list_notes(status=status)
+
+    def create_foreshadowing(self, title: str, **fields) -> dict:
+        return ForeshadowingStore(self.project).create_note(title, **fields)
+
+    def update_foreshadowing(self, note_id: str, **changes) -> dict:
+        return ForeshadowingStore(self.project).update_note(note_id, **changes)
+
+    def delete_foreshadowing(self, note_id: str):
+        return ForeshadowingStore(self.project).delete_note(note_id)
+
+    def list_foreshadowing_trash(self):
+        return ForeshadowingStore(self.project).list_trash()
+
+    def restore_foreshadowing(self, trash_id: str) -> dict:
+        return ForeshadowingStore(self.project).restore_trash_item(trash_id)
+
+    def delete_foreshadowing_trash(self, trash_id: str) -> None:
+        ForeshadowingStore(self.project).delete_trash_item(trash_id)
 
     def load_main_arc(self) -> str:
         return self.project.load_main_arc()
@@ -78,6 +130,170 @@ class ProjectDataStore:
         if path.exists():
             raise FileExistsError(path)
         self.project.write_file(path, text)
+
+    def move_chapter_to_trash(self, chapter_id: str) -> TrashEntry:
+        """Move one chapter and its summary into the project recycle bin."""
+        raw_id = str(chapter_id or "").strip()
+        path = self.project.chapters_dir / f"{raw_id}.md"
+        if (
+            not raw_id
+            or Path(raw_id).name != raw_id
+            or path.resolve().parent != self.project.chapters_dir.resolve()
+        ):
+            raise ValueError("只能删除当前项目章节目录内的章节文件。")
+        if not path.is_file():
+            raise FileNotFoundError(path)
+
+        original_text = self.project.read_file(path)
+        chapter = self.project.load_chapter(raw_id)
+        old_summaries = deepcopy(self.load_chapter_summaries())
+        new_summaries = deepcopy(old_summaries)
+        had_summary = raw_id in new_summaries
+        new_summaries.pop(raw_id, None)
+        deleted_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        trash_id = (
+            f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')}"
+            f"_{raw_id}_{uuid4().hex[:8]}"
+        )
+        entry_path = self.trash_dir / trash_id
+        entry = TrashEntry(
+            trash_id=trash_id,
+            chapter_id=raw_id,
+            title=chapter.title,
+            original_path=str(path.relative_to(self.root)),
+            deleted_at=deleted_at,
+            has_summary=had_summary,
+            path=entry_path,
+        )
+        try:
+            entry_path.mkdir(parents=True, exist_ok=False)
+            atomic_write_text(entry_path / "chapter.md", original_text)
+            atomic_write_text(
+                entry_path / "summary.json",
+                json.dumps(
+                    old_summaries.get(raw_id) if had_summary else None,
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+            )
+            atomic_write_text(
+                entry_path / "manifest.json",
+                json.dumps(
+                    {
+                        "trash_id": entry.trash_id,
+                        "chapter_id": entry.chapter_id,
+                        "title": entry.title,
+                        "original_path": entry.original_path,
+                        "deleted_at": entry.deleted_at,
+                        "has_summary": entry.has_summary,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+            )
+            path.unlink()
+            if had_summary:
+                self.save_chapter_summaries(new_summaries)
+        except Exception:
+            try:
+                if not path.exists():
+                    self.project.write_file(path, original_text)
+                if had_summary:
+                    self.save_chapter_summaries(old_summaries)
+            except Exception:
+                pass
+            self._remove_trash_path(entry_path)
+            raise
+        return entry
+
+    def delete_chapter(self, chapter_id: str) -> Path:
+        """Compatibility wrapper: move the chapter into the recycle bin."""
+        entry = self.move_chapter_to_trash(chapter_id)
+        return self.root / entry.original_path
+
+    def list_trash(self) -> list[TrashEntry]:
+        """Return valid recycle-bin entries, newest first."""
+        if not self.trash_dir.is_dir():
+            return []
+        entries: list[TrashEntry] = []
+        for path in self.trash_dir.iterdir():
+            if not path.is_dir():
+                continue
+            try:
+                entries.append(self._read_trash_entry(path))
+            except (OSError, ValueError, UnicodeError, json.JSONDecodeError):
+                continue
+        return sorted(entries, key=lambda item: item.deleted_at, reverse=True)
+
+    def restore_trash_item(self, trash_id: str) -> Path:
+        """Restore one recycle-bin entry to its original chapter path."""
+        entry = self._read_trash_entry(self._trash_entry_path(trash_id))
+        target = self.root / entry.original_path
+        if (
+            target.resolve().parent != self.project.chapters_dir.resolve()
+            or target.name != f"{entry.chapter_id}.md"
+        ):
+            raise ValueError("回收站条目不是有效的章节路径。")
+        if target.exists():
+            raise FileExistsError(target)
+
+        old_summaries = deepcopy(self.load_chapter_summaries())
+        chapter_text = (entry.path / "chapter.md").read_text(encoding="utf-8")
+        try:
+            self.project.write_file(target, chapter_text)
+            if entry.has_summary:
+                summary = json.loads((entry.path / "summary.json").read_text(encoding="utf-8"))
+                summaries = deepcopy(old_summaries)
+                summaries[entry.chapter_id] = summary
+                self.save_chapter_summaries(summaries)
+            self._remove_trash_path(entry.path)
+        except Exception:
+            try:
+                if target.exists():
+                    target.unlink()
+                self.save_chapter_summaries(old_summaries)
+            except Exception:
+                pass
+            raise
+        return target
+
+    def delete_trash_item(self, trash_id: str) -> None:
+        """Permanently remove one validated recycle-bin entry."""
+        entry_path = self._trash_entry_path(trash_id)
+        self._read_trash_entry(entry_path)
+        self._remove_trash_path(entry_path)
+
+    def _trash_entry_path(self, trash_id: str) -> Path:
+        raw_id = str(trash_id or "").strip()
+        path = self.trash_dir / raw_id
+        if not raw_id or Path(raw_id).name != raw_id or path.resolve().parent != self.trash_dir.resolve():
+            raise ValueError("无效的回收站条目。")
+        if not path.is_dir():
+            raise FileNotFoundError(path)
+        return path
+
+    @staticmethod
+    def _remove_trash_path(path: Path) -> None:
+        if path.is_dir():
+            shutil.rmtree(path)
+
+    def _read_trash_entry(self, path: Path) -> TrashEntry:
+        manifest_path = Path(path) / "manifest.json"
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        required = ("trash_id", "chapter_id", "title", "original_path", "deleted_at", "has_summary")
+        if any(key not in data for key in required):
+            raise ValueError("回收站条目元数据不完整。")
+        if str(data["trash_id"]) != Path(path).name:
+            raise ValueError("回收站条目标识不一致。")
+        return TrashEntry(
+            trash_id=str(data["trash_id"]),
+            chapter_id=str(data["chapter_id"]),
+            title=str(data["title"]),
+            original_path=str(data["original_path"]),
+            deleted_at=str(data["deleted_at"]),
+            has_summary=bool(data["has_summary"]),
+            path=Path(path),
+        )
 
     def commit_memory_update(
         self,

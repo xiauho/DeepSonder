@@ -11,9 +11,9 @@ adjust only this file.
 
 from __future__ import annotations
 
-import json
 import os
 import re
+import signal
 import shutil
 import subprocess
 import tempfile
@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from .task_controller import AITaskCancelled
+from .json_utils import JSONExtractionError, extract_json
 
 
 WINDOWS_CMDLINE_LIMIT = 7800
@@ -135,13 +136,26 @@ class DSHClient:
         if cancel_event.is_set():
             raise AITaskCancelled()
         try:
+            process_options: dict[str, Any] = {
+                "text": True,
+                "encoding": "utf-8",
+                "stdout": subprocess.PIPE,
+                "stderr": subprocess.PIPE,
+                "cwd": str(self.working_directory) if self.working_directory else None,
+            }
+            if os.name == "nt":
+                # Keep a process-group handle available for the Windows tree
+                # termination fallback.  taskkill below handles descendants.
+                process_options["creationflags"] = getattr(
+                    subprocess, "CREATE_NEW_PROCESS_GROUP", 0
+                )
+            else:
+                # dsh may launch a node/launcher child; kill the whole group on
+                # cancellation instead of leaving descendants behind.
+                process_options["start_new_session"] = True
             process = subprocess.Popen(
                 cmd,
-                text=True,
-                encoding="utf-8",
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                cwd=str(self.working_directory) if self.working_directory else None,
+                **process_options,
             )
         except FileNotFoundError:
             raise RuntimeError(
@@ -153,13 +167,11 @@ class DSHClient:
         try:
             while True:
                 if cancel_event.is_set():
-                    process.kill()
-                    process.communicate()
+                    self._terminate_process_tree(process)
                     raise AITaskCancelled()
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    process.kill()
-                    process.communicate()
+                    self._terminate_process_tree(process)
                     raise RuntimeError(f"dsh 调用超时（>{timeout} 秒）。")
                 try:
                     stdout, stderr = process.communicate(timeout=min(0.2, remaining))
@@ -168,8 +180,7 @@ class DSHClient:
                     continue
         finally:
             if process.poll() is None and cancel_event.is_set():
-                process.kill()
-                process.communicate()
+                self._terminate_process_tree(process)
 
         if process.returncode != 0:
             raise RuntimeError(
@@ -181,6 +192,47 @@ class DSHClient:
         if not output:
             raise RuntimeError("dsh 返回了空内容。")
         return output
+
+    @staticmethod
+    def _terminate_process_tree(process) -> None:
+        """Terminate dsh and descendants, then reap pipes without hanging."""
+        pid = getattr(process, "pid", None)
+        if pid:
+            if os.name == "nt":
+                try:
+                    subprocess.run(
+                        ["taskkill", "/PID", str(pid), "/T", "/F"],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        timeout=5,
+                        check=False,
+                    )
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
+            else:
+                try:
+                    os.killpg(os.getpgid(pid), signal.SIGKILL)
+                except (OSError, ProcessLookupError):
+                    pass
+
+        try:
+            process.kill()
+        except (OSError, ProcessLookupError):
+            pass
+
+        try:
+            process.communicate(timeout=5)
+        except (OSError, subprocess.TimeoutExpired):
+            # A broken/escaped descendant must not leave the worker blocked
+            # forever while trying to drain inherited stdout/stderr handles.
+            try:
+                process.kill()
+            except (OSError, ProcessLookupError):
+                pass
+            try:
+                process.communicate(timeout=1)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
 
     def _prepare_command_for_prompt(self, cmd: list[str], resolved_command: str) -> list[str]:
         """Avoid the ~8K ``cmd.exe`` limit used by Windows npm shims.
@@ -323,24 +375,7 @@ class DSHClient:
     @staticmethod
     def _extract_json(text: str) -> Any:
         """Extract a JSON object/array from dsh output, tolerating code fences."""
-        text = text.strip()
-        fence_match = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
-        if fence_match:
-            text = fence_match.group(1).strip()
-
         try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            # Harness may add a short preamble around an otherwise valid JSON
-            # object. JSONDecoder.raw_decode lets us extract the first complete
-            # object/array without guessing where nested braces end.
-            decoder = json.JSONDecoder()
-            for index, character in enumerate(text):
-                if character not in "[{":
-                    continue
-                try:
-                    value, _end = decoder.raw_decode(text[index:])
-                except json.JSONDecodeError:
-                    continue
-                return value
-            raise RuntimeError(f"dsh 返回内容不是合法 JSON：\n{text[:500]}")
+            return extract_json(text)
+        except JSONExtractionError as exc:
+            raise RuntimeError(f"dsh 返回内容不是合法 JSON：\n{str(text)[:500]}") from exc

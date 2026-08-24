@@ -6,7 +6,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
-from core.project_data import ProjectDataStore
+from core.project_data import sanitize_filename
 from ui.editor import Editor
 from ui.project_session import ProjectSession
 
@@ -71,8 +71,7 @@ class DocumentController(QObject):
         return True
 
     def next_chapter_id(self) -> str:
-        project = self._require_project()
-        store = ProjectDataStore(project)
+        store = self.project_session.require_data_store()
         return f"chapter_{len(store.list_chapters()) + 1:02d}"
 
     def create_chapter(self, title: str, chapter_id: str) -> Path:
@@ -81,22 +80,42 @@ class DocumentController(QObject):
         raw_chapter_id = str(chapter_id).strip()
         if not title or not raw_chapter_id:
             raise ValueError("章节标题和文件标识不能为空。")
-        chapter_id = self.safe_name(raw_chapter_id)
+        chapter_id = sanitize_filename(raw_chapter_id)
         path = project.chapters_dir / f"{chapter_id}.md"
-        ProjectDataStore(project).write_new_file(
+        self.project_session.require_data_store().write_new_file(
             path,
             f"# {title}\n\n## 大纲\n- 本章目标：\n- 核心冲突：\n- 章节钩子：\n\n## 剧情简写\n\n\n## 正文\n\n",
         )
         self.project_session.notify_data_changed()
         return path
 
+    def delete_chapter(
+        self,
+        chapter_id: str,
+        *,
+        discard_current_changes: bool = False,
+    ) -> Path:
+        """Delete a chapter after the UI has handled its confirmation."""
+        project = self._require_project()
+        target = project.chapters_dir / f"{str(chapter_id).strip()}.md"
+        current = self.editor.current_path()
+        is_current = bool(current and Path(current).resolve() == target.resolve())
+        if is_current and self.editor.is_dirty() and not discard_current_changes:
+            raise RuntimeError("当前章节存在未保存修改，请先保存或放弃修改。")
+
+        deleted = self.project_session.require_data_store().delete_chapter(chapter_id)
+        if is_current:
+            self.editor.clear_document("章节已删除")
+        self.project_session.notify_data_changed()
+        return deleted
+
     def create_character(self, name: str) -> Path:
         project = self._require_project()
         name = str(name).strip()
         if not name:
             raise ValueError("角色姓名不能为空。")
-        path = project.canon_dir / "characters" / f"{self.safe_name(name)}.md"
-        ProjectDataStore(project).write_new_file(
+        path = project.canon_dir / "characters" / f"{sanitize_filename(name)}.md"
+        self.project_session.require_data_store().write_new_file(
             path,
             f"# {name}\n\n- 身份：\n- 外貌特征：\n- 性格：\n- 核心欲望：\n- 当前目标：\n- 战力/能力：\n- 关键关系：\n- 秘密：\n",
         )
@@ -108,8 +127,8 @@ class DocumentController(QObject):
         title = str(title).strip()
         if not title:
             raise ValueError("世界观条目名称不能为空。")
-        path = project.canon_dir / "world" / f"{self.safe_name(title)}.md"
-        ProjectDataStore(project).write_new_file(
+        path = project.canon_dir / "world" / f"{sanitize_filename(title)}.md"
+        self.project_session.require_data_store().write_new_file(
             path,
             f"# {title}\n\n## 核心规则\n\n## 历史与现状\n\n## 对剧情的约束\n",
         )
@@ -118,11 +137,11 @@ class DocumentController(QObject):
 
     def import_markdown(self, sources: list[Path | str]) -> list[Path]:
         project = self._require_project()
-        store = ProjectDataStore(project)
+        store = self.project_session.require_data_store()
         imported: list[Path] = []
         for source_value in sources:
             source = Path(source_value)
-            stem = self.safe_name(source.stem) or "imported_chapter"
+            stem = sanitize_filename(source.stem) or "imported_chapter"
             destination = project.chapters_dir / f"{stem}.md"
             suffix = 2
             while destination.exists():
@@ -154,6 +173,5 @@ class DocumentController(QObject):
 
     @staticmethod
     def safe_name(value: str) -> str:
-        forbidden = '<>:"/\\|?*'
-        cleaned = "".join("_" if char in forbidden else char for char in value).strip(" .")
-        return cleaned or "untitled"
+        """Compatibility wrapper for callers using the old controller API."""
+        return sanitize_filename(value)

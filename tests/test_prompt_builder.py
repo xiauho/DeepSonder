@@ -1,4 +1,5 @@
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest import TestCase
 
 from core import prompt_builder
@@ -24,6 +25,37 @@ class PromptBuilderTests(TestCase):
         self.assertIn("<NOVEL_TEXT>", user)
         self.assertIn("扩写任务已完成", user)
         self.assertNotIn("【当前章节已有正文】", user)
+
+    def test_expansion_prompt_uses_scoped_context_and_planning_characters(self) -> None:
+        with TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "novel", "测试作品")
+            project.save_chapter(
+                "chapter_01",
+                outline="顾衍将在城门迎接计划角色。",
+                content="正文曾出现正文角色。",
+                title="第一章",
+            )
+            characters = project.canon_dir / "characters"
+            (characters / "计划角色.md").write_text("# 计划角色\n计划设定\n", encoding="utf-8")
+            (characters / "正文角色.md").write_text("# 正文角色\n正文设定\n", encoding="utf-8")
+            _system, user = prompt_builder.build_expansion_prompt(project, "chapter_01")
+
+        self.assertIn("【本次上下文范围】", user)
+        self.assertIn("最近 5 个已完成章节的摘要", user)
+        self.assertIn("计划角色", user)
+        self.assertNotIn("正文角色", user)
+        self.assertNotIn("【世界观摘要】", user)
+        self.assertNotIn("【战力规则】", user)
+
+    def test_prompt_history_window_is_configurable(self) -> None:
+        _system, expansion_user = prompt_builder.build_expansion_prompt(
+            self.project, "chapter_01", summary_count=7
+        )
+        _system, continuation_user = prompt_builder.build_write_prompt(
+            self.project, "chapter_01", summary_count=4
+        )
+        self.assertIn("最多最近 7 个已完成章节的摘要", expansion_user)
+        self.assertIn("最多最近 4 个已完成章节的摘要", continuation_user)
 
     def test_expansion_retry_prompt_explicitly_corrects_agent_preamble(self) -> None:
         system, user = prompt_builder.build_expansion_retry_prompt(self.project, "chapter_01", 2000)

@@ -2,7 +2,9 @@ import json
 import tempfile
 from pathlib import Path
 from unittest import TestCase
+from unittest.mock import patch
 
+from core import ai_workflow
 from core.ai_workflow import AIWorkflowService
 from core.project import NovelProject
 
@@ -46,12 +48,17 @@ class AIWorkflowTests(TestCase):
                 },
             )
 
-            result = AIWorkflowService(dsh).update_memory(project, "chapter_01")
+            with patch(
+                "core.ai_workflow.build_ai_context",
+                wraps=ai_workflow.build_ai_context,
+            ) as build_context:
+                result = AIWorkflowService(dsh).update_memory(project, "chapter_01")
 
             self.assertEqual(result[0], "主角抵达旧站。")
             self.assertEqual(result[1]["current_location"], "旧站")
             self.assertEqual(result[2], "摘要完成；状态完成")
             self.assertEqual(len(dsh.generate_calls), 1)
             self.assertEqual(len(dsh.json_calls), 1)
+            self.assertEqual(build_context.call_count, 1)
             self.assertIn("chapter_summary", dsh.generate_calls[0][1])
             self.assertIn("story_state_update", dsh.json_calls[0][1])

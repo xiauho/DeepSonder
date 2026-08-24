@@ -7,6 +7,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, Signal
 
 from core.project import NovelProject
+from core.project_data import ProjectDataStore
 
 
 class ProjectSession(QObject):
@@ -18,10 +19,21 @@ class ProjectSession(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._project: NovelProject | None = None
+        self._data_store: ProjectDataStore | None = None
 
     @property
     def project(self) -> NovelProject | None:
         return self._project
+
+    @property
+    def data_store(self) -> ProjectDataStore | None:
+        """Cached data facade for the active project."""
+        return self._data_store
+
+    def require_data_store(self) -> ProjectDataStore:
+        if self._data_store is None:
+            raise RuntimeError("当前没有打开的项目。")
+        return self._data_store
 
     def load(self, path: Path) -> NovelProject:
         """Load and activate one valid project directory."""
@@ -36,6 +48,7 @@ class ProjectSession(QObject):
         if project is not None and not isinstance(project, NovelProject):
             raise TypeError("project 必须是 NovelProject 或 None。")
         self._project = project
+        self._data_store = ProjectDataStore(project) if project is not None else None
         self.project_changed.emit(project)
 
     def notify_data_changed(self) -> None:

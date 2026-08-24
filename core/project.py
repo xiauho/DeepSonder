@@ -63,6 +63,9 @@ class NovelProject:
     def __init__(self, root: Path):
         self.root = Path(root)
         self.meta = self._read_json(self.root / "project.json")
+        self._related_canon_cache: dict[
+            tuple[object, ...], tuple[tuple[tuple[str, int, int], ...], RelatedCanon]
+        ] = {}
 
     # ------------------------------------------------------------------
     # Project creation / loading
@@ -109,6 +112,11 @@ class NovelProject:
         atomic_write_text(
             root / "memory" / "chapter_summaries.json",
             json.dumps(DEFAULT_CHAPTER_SUMMARIES, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        atomic_write_text(
+            root / "memory" / "foreshadowing.json",
+            json.dumps({"version": 1, "items": []}, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
 
@@ -284,6 +292,40 @@ class NovelProject:
                 blocks.append(f"## {heading}\n{str(body or '').strip()}")
         return "\n\n".join(blocks).rstrip() + "\n"
 
+    @staticmethod
+    def replace_chapter_body(raw: str, content: str) -> str:
+        """Replace only the正文 section while preserving later custom sections.
+
+        Chapters may contain application-defined ``##`` sections after the正文
+        section.  AI expansion must not silently delete those sections.
+        """
+        lines = str(raw or "").splitlines()
+        body_index = next(
+            (
+                index
+                for index, line in enumerate(lines)
+                if re.fullmatch(r"\s*##\s+正文\s*", line)
+            ),
+            None,
+        )
+        body_text = str(content or "").strip()
+        if body_index is None:
+            base = "\n".join(lines).rstrip()
+            return f"{base}\n\n## 正文\n{body_text}\n"
+
+        next_section = len(lines)
+        for index in range(body_index + 1, len(lines)):
+            if re.match(r"^\s*##\s+", lines[index]):
+                next_section = index
+                break
+
+        prefix = "\n".join(lines[: body_index + 1]).rstrip()
+        suffix = "\n".join(lines[next_section:]).strip()
+        result = f"{prefix}\n{body_text}"
+        if suffix:
+            result += f"\n\n{suffix}"
+        return result.rstrip() + "\n"
+
     # ------------------------------------------------------------------
     # Memory
     # ------------------------------------------------------------------
@@ -308,9 +350,41 @@ class NovelProject:
     # ------------------------------------------------------------------
     # Related canon lookup (MVP keyword/tag based)
     # ------------------------------------------------------------------
-    def find_related_canon(self, chapter_id: str) -> RelatedCanon:
+    def find_related_canon(
+        self,
+        chapter_id: str,
+        *,
+        character_query: str | None = None,
+        include_world: bool = True,
+        include_power: bool = True,
+        include_timeline: bool = True,
+    ) -> RelatedCanon:
+        """Load canon relevant to one task without forcing every canon file in.
+
+        The default remains backward-compatible and loads the same project-wide
+        canon as before.  Task-specific context builders can narrow the query
+        and omit expensive low-signal sections such as the full world/power
+        directories.
+        """
+        cache_key = (
+            str(chapter_id),
+            character_query,
+            bool(include_world),
+            bool(include_power),
+            bool(include_timeline),
+        )
+        signature = self._related_canon_signature(
+            chapter_id,
+            include_world=include_world,
+            include_power=include_power,
+            include_timeline=include_timeline,
+        )
+        cached = self._related_canon_cache.get(cache_key)
+        if cached is not None and cached[0] == signature:
+            return cached[1]
+
         chapter = self.load_chapter(chapter_id)
-        haystack = chapter.raw
+        haystack = character_query if character_query is not None else chapter.raw
 
         characters_parts = []
         for path in self.list_characters():
@@ -319,23 +393,57 @@ class NovelProject:
                 characters_parts.append(f"### {name}\n{self.read_file(path).strip()}")
 
         world_parts = []
-        for path in self.list_world():
-            world_parts.append(self.read_file(path).strip())
+        if include_world:
+            for path in self.list_world():
+                world_parts.append(self.read_file(path).strip())
         power_parts = []
-        for path in self.list_power():
-            power_parts.append(self.read_file(path).strip())
+        if include_power:
+            for path in self.list_power():
+                power_parts.append(self.read_file(path).strip())
 
         timeline = ""
         timeline_path = self.canon_dir / "timeline.md"
-        if timeline_path.exists():
+        if include_timeline and timeline_path.exists():
             timeline = self.read_file(timeline_path)
 
-        return RelatedCanon(
+        related = RelatedCanon(
             world="\n\n".join(world_parts),
             power="\n\n".join(power_parts),
             timeline=timeline,
             characters="\n\n".join(characters_parts),
         )
+        self._related_canon_cache[cache_key] = (signature, related)
+        return related
+
+    def _related_canon_signature(
+        self,
+        chapter_id: str,
+        *,
+        include_world: bool = True,
+        include_power: bool = True,
+        include_timeline: bool = True,
+    ) -> tuple[tuple[str, int, int], ...]:
+        paths = [
+            self.chapters_dir / f"{chapter_id}.md",
+            *self.list_characters(),
+        ]
+        if include_timeline:
+            paths.append(self.canon_dir / "timeline.md")
+        if include_world:
+            paths.extend(self.list_world())
+        if include_power:
+            paths.extend(self.list_power())
+        signature: list[tuple[str, int, int]] = []
+        for path in paths:
+            path = Path(path)
+            key = str(path.resolve()).casefold()
+            try:
+                stat = path.stat()
+            except OSError:
+                signature.append((key, -1, -1))
+            else:
+                signature.append((key, stat.st_mtime_ns, stat.st_size))
+        return tuple(signature)
 
     # ------------------------------------------------------------------
     # Internal helpers

@@ -7,10 +7,11 @@ the project.
 
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import dataclass
 from typing import Any
+
+from .json_utils import JSONExtractionError, extract_json
 
 
 class AIProtocolError(ValueError):
@@ -220,23 +221,10 @@ def _as_object(raw: str | dict[str, Any], label: str) -> dict[str, Any]:
 
 
 def _extract_json(text: str) -> Any:
-    text = text.strip()
-    fence_match = re.search(r"```(?:json)?\s*([\s\S]*?)```", text, re.IGNORECASE)
-    if fence_match:
-        text = fence_match.group(1).strip()
     try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        decoder = json.JSONDecoder()
-        for index, character in enumerate(text):
-            if character not in "[{":
-                continue
-            try:
-                value, _end = decoder.raw_decode(text[index:])
-            except json.JSONDecodeError:
-                continue
-            return value
-    raise AIProtocolError("DSh 返回内容不是合法 JSON。")
+        return extract_json(text)
+    except JSONExtractionError as exc:
+        raise AIProtocolError("DSh 返回内容不是合法 JSON。") from exc
 
 
 def _content_length(text: str) -> int:

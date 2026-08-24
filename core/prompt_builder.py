@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 from .context_budget import (
+    AIContext,
+    CONTINUATION_SUMMARY_COUNT,
     DEFAULT_PROMPT_BUDGET,
+    EXPANSION_SUMMARY_COUNT,
     allocate,
     build_ai_context,
+    build_task_context,
     gather_sections,
 )
 from .project import NovelProject, chapter_number_from_id
@@ -31,13 +35,24 @@ def build_expansion_prompt(
     project: NovelProject,
     chapter_id: str,
     target_chars: int = 2000,
+    *,
+    summary_count: int = EXPANSION_SUMMARY_COUNT,
+    context: AIContext | None = None,
 ) -> tuple[str, str]:
     """Build a compact outline-to-chapter expansion task.
 
     Unlike continuation, this task deliberately excludes the current chapter
     body.  The user's outline is the source of truth for the new draft.
     """
-    context = build_ai_context(project, chapter_id)
+    summary_count = max(0, int(summary_count))
+    context = context or build_task_context(
+        project,
+        chapter_id,
+        character_scope="planning",
+        include_world=False,
+        include_power=False,
+        include_timeline=True,
+    )
     chapter = context.chapter
     sections = gather_sections(
         project,
@@ -51,9 +66,8 @@ def build_expansion_prompt(
             "future_plan",
             "main_arc",
             "timeline",
-            "world",
-            "power",
         ),
+        summary_count=summary_count,
         context=context,
     )
     target_chars = max(300, int(target_chars))
@@ -83,6 +97,12 @@ def build_expansion_prompt(
 【当前章节】
 章节：{chapter.title}
 章节 ID：{chapter.id}
+
+【本次上下文范围】
+- 历史剧情：最多最近 {summary_count} 个已完成章节的摘要
+- 当前正文：未加载，扩写只依据本章规划生成
+- 角色资料：仅加载本章标题、大纲和剧情简写中命中的角色卡
+- 世界观与战力：不加载全量资料，以主线、后续规划和故事状态为约束
 
 【本章规划与用户剧情简写】
 {_section(ctx, "outline", "（暂无规划，请根据故事状态生成合理但克制的章节正文）")}
@@ -118,9 +138,18 @@ def build_expansion_retry_prompt(
     project: NovelProject,
     chapter_id: str,
     target_chars: int = 2000,
+    *,
+    summary_count: int = EXPANSION_SUMMARY_COUNT,
+    context: AIContext | None = None,
 ) -> tuple[str, str]:
     """Build a correction prompt when headless returns a workspace preamble."""
-    _system_prompt, user_prompt = build_expansion_prompt(project, chapter_id, target_chars)
+    _system_prompt, user_prompt = build_expansion_prompt(
+        project,
+        chapter_id,
+        target_chars,
+        summary_count=summary_count,
+        context=context,
+    )
     retry_system = f"""
 {COMMON_RULES}
 
@@ -144,8 +173,12 @@ def build_write_prompt(
     project: NovelProject,
     chapter_id: str,
     target_chars: int = 2000,
+    *,
+    summary_count: int = CONTINUATION_SUMMARY_COUNT,
+    context: AIContext | None = None,
 ) -> tuple[str, str]:
-    context = build_ai_context(project, chapter_id)
+    summary_count = max(0, int(summary_count))
+    context = context or build_ai_context(project, chapter_id)
     chapter = context.chapter
     sections = gather_sections(
         project,
@@ -163,6 +196,8 @@ def build_write_prompt(
             "world",
             "power",
         ),
+        content_cap=6000,
+        summary_count=summary_count,
         context=context,
     )
     target_chars = max(300, int(target_chars))
@@ -191,6 +226,10 @@ def build_write_prompt(
 【当前章节】
 章节：{chapter.title}
 章节 ID：{chapter.id}
+
+【本次上下文范围】
+- 历史剧情：最多最近 {summary_count} 个已完成章节的摘要
+- 当前正文：只提供结尾窗口，用于保持直接衔接
 
 【本章大纲】
 {_section(ctx, "outline", "（暂无，请根据当前故事状态合理推进）")}
@@ -229,9 +268,18 @@ def build_write_retry_prompt(
     project: NovelProject,
     chapter_id: str,
     target_chars: int = 2000,
+    *,
+    summary_count: int = CONTINUATION_SUMMARY_COUNT,
+    context: AIContext | None = None,
 ) -> tuple[str, str]:
     """Build an explicit retry after an Agent-style response."""
-    system_prompt, user_prompt = build_write_prompt(project, chapter_id, target_chars)
+    system_prompt, user_prompt = build_write_prompt(
+        project,
+        chapter_id,
+        target_chars,
+        summary_count=summary_count,
+        context=context,
+    )
     retry_system = f"""
 {COMMON_RULES}
 
@@ -251,8 +299,13 @@ def build_write_retry_prompt(
     return retry_system, retry_user
 
 
-def build_summary_prompt(project: NovelProject, chapter_id: str) -> tuple[str, str]:
-    context = build_ai_context(project, chapter_id)
+def build_summary_prompt(
+    project: NovelProject,
+    chapter_id: str,
+    *,
+    context: AIContext | None = None,
+) -> tuple[str, str]:
+    context = context or build_ai_context(project, chapter_id)
     chapter = context.chapter
     sections = gather_sections(
         project,
@@ -306,8 +359,13 @@ def build_summary_prompt(project: NovelProject, chapter_id: str) -> tuple[str, s
     return _finalize(system_prompt, render, sections)
 
 
-def build_state_update_prompt(project: NovelProject, chapter_id: str) -> tuple[str, str]:
-    context = build_ai_context(project, chapter_id)
+def build_state_update_prompt(
+    project: NovelProject,
+    chapter_id: str,
+    *,
+    context: AIContext | None = None,
+) -> tuple[str, str]:
+    context = context or build_ai_context(project, chapter_id)
     chapter = context.chapter
     old_state = context.story_state
     expected_number = chapter_number_from_id(chapter_id)
@@ -382,8 +440,13 @@ def build_state_update_prompt(project: NovelProject, chapter_id: str) -> tuple[s
     return _finalize(system_prompt, render, sections)
 
 
-def build_check_prompt(project: NovelProject, chapter_id: str) -> tuple[str, str]:
-    context = build_ai_context(project, chapter_id)
+def build_check_prompt(
+    project: NovelProject,
+    chapter_id: str,
+    *,
+    context: AIContext | None = None,
+) -> tuple[str, str]:
+    context = context or build_ai_context(project, chapter_id)
     chapter = context.chapter
     sections = gather_sections(
         project,

@@ -85,3 +85,30 @@ class AIControllerTests(unittest.TestCase):
             thread.wait(1000)
             self._drain()
             self.assertFalse(controller.is_running())
+
+    def test_success_context_survives_worker_finish_until_result_release(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            text = project.load_chapter("chapter_01").raw
+            controller = AIController()
+            token = controller.start(
+                "expand",
+                project,
+                "chapter_01",
+                text,
+                lambda _cancel_event: "生成结果",
+            )
+            self.assertIsNotNone(token)
+
+            thread = controller.task_runner._thread
+            self.assertIsNotNone(thread)
+            thread.wait(1000)
+            self._drain()
+
+            # The worker is finished, but a UI preview/confirmation may still
+            # be open.  The token-scoped snapshot must remain usable then.
+            self.assertTrue(controller.context_matches(project, "chapter_01", text, token))
+            self.assertFalse(controller.context_matches(project, "chapter_01", text))
+
+            controller.release_result(token)
+            self.assertFalse(controller.context_matches(project, "chapter_01", text, token))

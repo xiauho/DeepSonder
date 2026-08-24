@@ -476,10 +476,18 @@ class SettingsPage(QWidget):
         self.expand_target_chars.setRange(300, 10000)
         self.expand_target_chars.setSingleStep(100)
         self.expand_target_chars.setSuffix(" 字")
+        self.ai_context_history_chapters = QSpinBox()
+        self.ai_context_history_chapters.setRange(0, 10)
+        self.ai_context_history_chapters.setSingleStep(1)
+        self.ai_context_history_chapters.setSuffix(" 章")
+        self.ai_context_history_chapters.setToolTip(
+            "仅控制携带的前文章节摘要数量；当前章节内容和本章规划按任务规则单独处理。"
+        )
         writing_form.addRow("自动保存", self.auto_save)
         writing_form.addRow("保存间隔", self.auto_save_interval)
         writing_form.addRow("正文字号", self.editor_font_size)
         writing_form.addRow("AI 扩写字数", self.expand_target_chars)
+        writing_form.addRow("AI 前文参考章节数", self.ai_context_history_chapters)
         writing_layout.addLayout(writing_form)
         content_layout.addWidget(writing)
 
@@ -587,6 +595,9 @@ class SettingsPage(QWidget):
         self.expand_target_chars.setValue(
             int(config.get("expand_target_chars", config.get("continue_target_chars", 2000)))
         )
+        self.ai_context_history_chapters.setValue(
+            int(config.get("ai_context_history_chapters", 5))
+        )
         self.command.setText(str(config.get("dsh_command", "dsh")))
         self.launcher_args.setText(shlex.join(config.get("dsh_launcher_args") or []))
         self.extra_args.setText(shlex.join(config.get("dsh_extra_args") or []))
@@ -608,6 +619,7 @@ class SettingsPage(QWidget):
                 "auto_save_interval": self.auto_save_interval.value(),
                 "editor_font_size": self.editor_font_size.value(),
                 "expand_target_chars": self.expand_target_chars.value(),
+                "ai_context_history_chapters": self.ai_context_history_chapters.value(),
                 "dsh_command": self.command.text().strip() or "dsh",
                 "dsh_launcher_args": launcher_args,
                 "dsh_profile": "headless",
