@@ -28,6 +28,15 @@ from .json_utils import JSONExtractionError, extract_json
 
 WINDOWS_CMDLINE_LIMIT = 7800
 WINDOWS_CREATEPROCESS_LIMIT = 30000
+DSH_PROBE_MARKER = "NOVALIST_PROBE_OK"
+EMPTY_TASK_HINTS = (
+    "I don't see an actual task",
+    "I don't see a specific task",
+    "only the runtime context",
+    "only the session startup context",
+    "只收到运行时上下文",
+    "没有看到实际任务",
+)
 
 
 class DSHClient:
@@ -125,6 +134,11 @@ class DSHClient:
         output = result.stdout.strip()
         if not output:
             raise RuntimeError("dsh 返回了空内容。")
+        if self._looks_like_empty_task(output):
+            raise RuntimeError(
+                "dsh 已启动，但没有收到 Novalist 的实际任务参数。"
+                f"（入口：{command}；提示词长度：{len(combined)}）"
+            )
         return output
 
     def _generate_cancellable(
@@ -191,6 +205,11 @@ class DSHClient:
         output = stdout.strip()
         if not output:
             raise RuntimeError("dsh 返回了空内容。")
+        if self._looks_like_empty_task(output):
+            raise RuntimeError(
+                "dsh 已启动，但没有收到 Novalist 的实际任务参数。"
+                f"（入口：{cmd[0]}；提示词长度：{len(cmd[-1])}）"
+            )
         return output
 
     @staticmethod
@@ -237,11 +256,12 @@ class DSHClient:
     def _prepare_command_for_prompt(self, cmd: list[str], resolved_command: str) -> list[str]:
         """Avoid the ~8K ``cmd.exe`` limit used by Windows npm shims.
 
-        DSh's headless contract currently accepts the task as positional
+        DSH's headless contract currently accepts the task as positional
         arguments, so the prompt cannot be moved to stdin without changing
-        the external CLI contract.  For a long prompt, invoke the JavaScript
-        entry point behind a readable ``.CMD`` shim directly; this raises the
-        practical limit to CreateProcess's limit while preserving DSh args.
+        the external CLI contract.  Whenever a readable ``.CMD`` shim is
+        available, invoke its JavaScript entry point directly.  This avoids
+        both the ``cmd.exe`` argument parser and its ~8K limit, while keeping
+        the same DSH argument order for short and long prompts.
         """
         length = len(subprocess.list2cmdline(cmd))
         if not resolved_command.lower().endswith((".cmd", ".bat")):
@@ -251,9 +271,6 @@ class DSHClient:
                     "请减少章节设定或剧情简写后重试。"
                 )
             return cmd
-        if length <= WINDOWS_CMDLINE_LIMIT:
-            return cmd
-
         direct = self._resolve_windows_shim(resolved_command)
         if direct:
             node, script = direct
@@ -263,6 +280,9 @@ class DSHClient:
                 return direct_cmd
             length = direct_length
 
+        if length <= WINDOWS_CMDLINE_LIMIT:
+            return cmd
+
         raise RuntimeError(
             f"dsh 提示词过长（命令约 {length} 个字符），Windows 无法启动该任务。"
             "请减少章节设定或剧情简写后重试。"
@@ -270,21 +290,42 @@ class DSHClient:
 
     @staticmethod
     def _resolve_windows_shim(command: str) -> tuple[str, str] | None:
-        """Resolve an npm ``.CMD`` shim to ``node`` plus its JavaScript entry."""
+        """Resolve a Windows npm shim to ``node`` plus its JavaScript entry.
+
+        npm has emitted several equivalent ``.cmd`` templates over time.  In
+        particular, some use ``%_prog%`` while the normal npm template uses
+        ``%~dp0\\node.exe``.  Reading only one template makes long prompts
+        fall back to ``cmd.exe`` and can silently lose the final task
+        argument, so accept both forms and locate the first JavaScript entry
+        referenced by the shim.
+        """
         path = Path(command)
         try:
             shim = path.read_text(encoding="utf-8", errors="ignore")
         except OSError:
             return None
 
-        match = re.search(r'"%_prog%"\s+"([^"]+\.js)"', shim, re.IGNORECASE)
-        if not match:
-            return None
-        script_ref = match.group(1).replace("%dp0%", str(path.parent))
-        script = Path(script_ref)
-        if not script.is_absolute():
-            script = path.parent / script
-        if not script.is_file():
+        script_refs = re.findall(r'"([^"\r\n]+\.js)"', shim, re.IGNORECASE)
+        script_refs += re.findall(
+            r'(?<!["\w])([^\s"\r\n]+\.js)(?=\s|$)',
+            shim,
+            re.IGNORECASE,
+        )
+        script: Path | None = None
+        for script_ref in script_refs:
+            script_ref = script_ref.strip()
+            # Support both the conventional ``%~dp0`` form and the older
+            # ``%dp0%`` spelling used by some launcher generators.
+            script_ref = script_ref.replace("%~dp0%", str(path.parent))
+            script_ref = script_ref.replace("%~dp0", str(path.parent) + "\\")
+            script_ref = script_ref.replace("%dp0%", str(path.parent))
+            candidate = Path(script_ref)
+            if not candidate.is_absolute():
+                candidate = path.parent / candidate
+            if candidate.is_file():
+                script = candidate
+                break
+        if script is None:
             return None
 
         node_path = path.parent / "node.exe"
@@ -294,7 +335,14 @@ class DSHClient:
         return str(node), str(script)
 
     def check_connection(self) -> str:
-        """Check that the configured Harness command can start successfully."""
+        """Check startup and verify that a real task reaches headless DSH.
+
+        ``--version`` only proves that the executable can start.  It does not
+        catch Windows command-line truncation, which is exactly the failure
+        mode that can leave DSH running with an empty task.  Keep the version
+        check for a useful diagnostic, then send a tiny marker task through
+        the same path used by normal generation.
+        """
         executable = self.dsh_command
         if not Path(executable).is_absolute() and shutil.which(executable) is None:
             # npx.cmd and shell aliases are resolved by the subprocess layer on
@@ -323,7 +371,29 @@ class DSHClient:
             detail = result.stderr.strip() or result.stdout.strip()
             raise RuntimeError(f"dsh 无法启动。{detail}")
         version = result.stdout.strip() or result.stderr.strip()
-        return f"dsh 命令可用（{version}）" if version else "dsh 命令可用"
+        try:
+            probe = self.generate(
+                "",
+                f"这是 Novalist 的连接测试。请只回复 {DSH_PROBE_MARKER}。",
+                timeout_override=min(self.timeout, 15),
+            )
+        except RuntimeError as exc:
+            raise RuntimeError(
+                "dsh 可以启动，但实际任务探测失败。请检查任务参数传递，"
+                f"而不是只检查版本号。\n{exc}"
+            ) from exc
+        if DSH_PROBE_MARKER not in probe:
+            preview = probe[:500].replace("\r", " ").replace("\n", " ")
+            raise RuntimeError(
+                "dsh 可以启动，但没有按要求返回任务探测标记，"
+                "可能存在任务参数丢失或 headless 配置不匹配。\n"
+                f"原始返回：{preview}"
+            )
+        return (
+            f"dsh 可用，任务传递正常（{version}）"
+            if version
+            else "dsh 可用，任务传递正常"
+        )
 
     def _resolve_command(self) -> str:
         """Resolve npm command shims before passing them to CreateProcess."""
@@ -332,6 +402,12 @@ class DSHClient:
             return command
         resolved = shutil.which(command)
         return resolved or command
+
+    @staticmethod
+    def _looks_like_empty_task(output: str) -> bool:
+        """Recognize DSH's onboarding response for a missing task argument."""
+        normalized = str(output or "")
+        return any(hint in normalized for hint in EMPTY_TASK_HINTS)
 
     def generate_json(
         self,

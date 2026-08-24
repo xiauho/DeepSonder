@@ -3,6 +3,7 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 
 from core.ai_result_service import AIResultService
+from core.foreshadowing import ForeshadowingStore
 from core.project import NovelProject
 
 
@@ -39,3 +40,25 @@ class AIResultServiceTests(TestCase):
             AIResultService.prepare_memory("", {})
         with self.assertRaises(ValueError):
             AIResultService.prepare_memory("摘要", None)
+
+    def test_memory_commit_does_not_overwrite_structured_foreshadowing(self) -> None:
+        with TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            state = project.load_story_state()
+            state["foreshadowing"] = ["旧版伏笔"]
+            project.save_story_state(state)
+            note = ForeshadowingStore(project).create_note("结构化伏笔")
+
+            draft = AIResultService.prepare_memory(
+                "章节摘要",
+                {
+                    "current_chapter": 1,
+                    "current_location": "新地点",
+                    "characters": {},
+                    "foreshadowing": [],
+                },
+            )
+            AIResultService.commit_memory(project, "chapter_01", draft)
+
+            self.assertEqual(project.load_story_state()["foreshadowing"], ["旧版伏笔"])
+            self.assertEqual(ForeshadowingStore(project).get_note(note["id"])["title"], "结构化伏笔")

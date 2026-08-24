@@ -504,6 +504,7 @@ class MainWindow(QMainWindow):
         self.left_panel.toggle_requested.connect(self.toggle_navigation_panel)
         self.memory_page.sync_requested.connect(self.update_memory)
         self.memory_page.chapter_requested.connect(self._open_memory_chapter)
+        self.memory_page.foreshadowing_changed.connect(self.project_session.notify_data_changed)
         self.reports_page.run_requested.connect(self.check_consistency)
         self.export_page.export_requested.connect(self.export_manuscript)
         self.settings_page.save_requested.connect(self._apply_settings)

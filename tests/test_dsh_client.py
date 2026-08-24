@@ -80,6 +80,91 @@ class DSHClientTests(TestCase):
             self.assertEqual(command[1], str(script))
             self.assertIn("NOVALIST_TASK_START", command[-1])
 
+    def test_long_prompt_bypasses_standard_npm_cmd_shim(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            shim = root / "dsh.cmd"
+            node = root / "node.exe"
+            script = root / "node_modules" / "@deepseek-ai" / "dsh" / "dist" / "cli.js"
+            script.parent.mkdir(parents=True)
+            node.write_text("", encoding="utf-8")
+            script.write_text("", encoding="utf-8")
+            shim.write_text(
+                '@IF EXIST "%~dp0\\node.exe" (\n'
+                '  "%~dp0\\node.exe" "%~dp0\\node_modules\\@deepseek-ai\\dsh\\dist\\cli.js" %*\n'
+                ') ELSE (\n'
+                '  node "%~dp0\\node_modules\\@deepseek-ai\\dsh\\dist\\cli.js" %*\n'
+                ')\n',
+                encoding="utf-8",
+            )
+            completed = SimpleNamespace(returncode=0, stdout="generated text\n", stderr="")
+            client = DSHClient(str(shim), profile="headless")
+            with patch("core.dsh_client.subprocess.run", return_value=completed) as run:
+                client.generate("system", "x" * 9000)
+
+            command = run.call_args.args[0]
+            self.assertEqual(command[0], str(node))
+            self.assertEqual(command[1], str(script))
+            self.assertIn("NOVALIST_TASK_START", command[-1])
+
+    def test_short_prompt_also_bypasses_readable_cmd_shim(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            shim = root / "dsh.cmd"
+            node = root / "node.exe"
+            script = root / "node_modules" / "@deepseek-ai" / "dsh" / "cli.js"
+            script.parent.mkdir(parents=True)
+            node.write_text("", encoding="utf-8")
+            script.write_text("", encoding="utf-8")
+            shim.write_text(
+                '"%~dp0\\node.exe" "%~dp0\\node_modules\\@deepseek-ai\\dsh\\cli.js" %*\n',
+                encoding="utf-8",
+            )
+            completed = SimpleNamespace(returncode=0, stdout="generated text\n", stderr="")
+            client = DSHClient(str(shim), profile="headless")
+            with patch("core.dsh_client.subprocess.run", return_value=completed) as run:
+                client.generate("system", "short task")
+
+            command = run.call_args.args[0]
+            self.assertEqual(command[:2], [str(node), str(script)])
+
+    def test_empty_task_onboarding_is_reported_before_protocol_retry(self) -> None:
+        completed = SimpleNamespace(
+            returncode=0,
+            stdout="I don't see an actual task in your message yet.\n",
+            stderr="",
+        )
+        client = DSHClient("dsh")
+        with patch("core.dsh_client.subprocess.run", return_value=completed):
+            with self.assertRaisesRegex(RuntimeError, "没有收到 Novalist"):
+                client.generate("system", "user")
+
+    def test_connection_check_runs_a_real_probe(self) -> None:
+        version = SimpleNamespace(returncode=0, stdout="0.1.0-rc.7\n", stderr="")
+        probe = SimpleNamespace(returncode=0, stdout="NOVALIST_PROBE_OK\n", stderr="")
+        client = DSHClient("dsh", timeout=30)
+        with patch("core.dsh_client.shutil.which", return_value="dsh.exe"):
+            with patch("core.dsh_client.subprocess.run", side_effect=[version, probe]) as run:
+                result = client.check_connection()
+
+        self.assertIn("任务传递正常", result)
+        self.assertEqual(run.call_count, 2)
+        self.assertEqual(run.call_args_list[0].args[0][-1], "--version")
+        self.assertIn("NOVALIST_PROBE_OK", run.call_args_list[1].args[0][-1])
+
+    def test_connection_check_rejects_empty_task_response(self) -> None:
+        version = SimpleNamespace(returncode=0, stdout="0.1.0-rc.7\n", stderr="")
+        onboarding = SimpleNamespace(
+            returncode=0,
+            stdout="I don't see an actual task in your message.\n",
+            stderr="",
+        )
+        client = DSHClient("dsh", timeout=30)
+        with patch("core.dsh_client.shutil.which", return_value="dsh.exe"):
+            with patch("core.dsh_client.subprocess.run", side_effect=[version, onboarding]):
+                with self.assertRaisesRegex(RuntimeError, "没有收到 Novalist"):
+                    client.check_connection()
+
     def test_isolated_workspace_is_empty_reused_and_cleaned(self) -> None:
         client = DSHClient("dsh")
         client.use_isolated_workspace()

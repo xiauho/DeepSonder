@@ -25,6 +25,7 @@ def context_paths(project: NovelProject, chapter_id: str) -> list[Path]:
         project.canon_dir / "timeline.md",
         project.memory_dir / "story_state.json",
         project.memory_dir / "chapter_summaries.json",
+        project.memory_dir / "foreshadowing.json",
         *project.list_characters(),
         *project.list_world(),
         *project.list_power(),

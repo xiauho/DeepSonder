@@ -65,9 +65,14 @@ class AIResultService:
         store = ProjectDataStore(project)
         expected_chapter = chapter_number_from_id(chapter_id)
         received_chapter = draft.state.get("current_chapter")
+        # Foreshadowing is now author-owned data in memory/foreshadowing.json.
+        # Keep the legacy field in the generated state for protocol
+        # compatibility, but never let the old AI memory task overwrite it.
+        state_without_legacy_hooks = dict(draft.state)
+        state_without_legacy_hooks.pop("foreshadowing", None)
         merged_state = memory.merge_state_update(
             store.load_story_state(),
-            draft.state,
+            state_without_legacy_hooks,
             chapter_id,
         )
         store.commit_memory_update(chapter_id, draft.summary, merged_state)

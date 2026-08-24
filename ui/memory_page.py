@@ -6,6 +6,8 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
+    QDialog,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -15,7 +17,8 @@ from PySide6.QtWidgets import (
 from core.project import NovelProject
 from core.project import chapter_number_from_id
 from core.project_data import ProjectDataStore
-from ui.icons import IconTextButton
+from ui.foreshadowing_dialog import ForeshadowingEditorDialog
+from ui.icons import IconTextButton, set_button_icon
 
 
 class ClickableCard(QFrame):
@@ -32,6 +35,7 @@ class StoryMemoryPage(QWidget):
 
     sync_requested = Signal()
     chapter_requested = Signal(str)
+    foreshadowing_changed = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -142,11 +146,17 @@ class StoryMemoryPage(QWidget):
         state = store.load_story_state()
         summaries = store.load_chapter_summaries()
         characters = state.get("characters") or {}
-        hooks = state.get("foreshadowing") or []
+        try:
+            notes = store.load_foreshadowing()
+            note_error = ""
+        except (OSError, ValueError) as exc:
+            notes = []
+            note_error = str(exc)
+        open_notes = [note for note in notes if note.get("status") == "open"]
         health = self._context_health(state, summaries)
         for label, value in zip(
             self.metric_values,
-            (str(len(summaries)), str(len(characters)), str(len(hooks)), f"{health}%"),
+            (str(len(summaries)), str(len(characters)), str(len(open_notes)), f"{health}%"),
         ):
             label.setText(value)
 
@@ -162,15 +172,69 @@ class StoryMemoryPage(QWidget):
         self.summary_layout.addStretch(1)
 
         self.state_layout.addWidget(self._state_card(state))
-        hooks_title = QLabel("未回收伏笔")
-        hooks_title.setObjectName("sectionTitle")
-        self.state_layout.addWidget(hooks_title)
-        if hooks:
-            for index, hook in enumerate(hooks):
-                self.state_layout.addWidget(self._hook_card(str(hook), index))
+        notes_header_widget = QWidget()
+        notes_header = QHBoxLayout(notes_header_widget)
+        notes_header.setContentsMargins(0, 0, 0, 0)
+        notes_title = QLabel("伏笔笔记")
+        notes_title.setObjectName("sectionTitle")
+        notes_header.addWidget(notes_title, 1)
+        add_button = IconTextButton("add", "新建伏笔", centered=True)
+        add_button.setObjectName("secondaryButton")
+        add_button.clicked.connect(self._new_foreshadowing)
+        notes_header.addWidget(add_button)
+        self.state_layout.addWidget(notes_header_widget)
+        if note_error:
+            self.state_layout.addWidget(self._empty_card("伏笔笔记读取失败", note_error))
+        elif notes:
+            for note in sorted(notes, key=self._foreshadowing_sort_key):
+                self.state_layout.addWidget(self._foreshadowing_card(note))
         else:
-            self.state_layout.addWidget(self._empty_card("暂无未回收伏笔", "新的线索会在同步上下文后出现在这里。"))
+            self.state_layout.addWidget(
+                self._empty_card("暂无伏笔笔记", "可以手动记录需要长期追踪的故事线索。")
+            )
         self.state_layout.addStretch(1)
+
+    def _new_foreshadowing(self) -> None:
+        dialog = ForeshadowingEditorDialog(parent=self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        try:
+            ProjectDataStore(self._project).create_foreshadowing(**dialog.values())
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, "保存伏笔失败", str(exc))
+            return
+        self.foreshadowing_changed.emit()
+
+    def _edit_foreshadowing(self, note: dict) -> None:
+        dialog = ForeshadowingEditorDialog(note, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        try:
+            ProjectDataStore(self._project).update_foreshadowing(
+                str(note.get("id") or ""), **dialog.values()
+            )
+        except (KeyError, OSError, ValueError) as exc:
+            QMessageBox.warning(self, "保存伏笔失败", str(exc))
+            return
+        self.foreshadowing_changed.emit()
+
+    def _delete_foreshadowing(self, note: dict) -> None:
+        title = str(note.get("title") or "该伏笔")
+        answer = QMessageBox.question(
+            self,
+            "移入回收站",
+            f"确定将伏笔《{title}》移入回收站吗？\n\n移入后仍可在回收站恢复。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            ProjectDataStore(self._project).delete_foreshadowing(str(note.get("id") or ""))
+        except (KeyError, OSError, ValueError) as exc:
+            QMessageBox.warning(self, "删除伏笔失败", str(exc))
+            return
+        self.foreshadowing_changed.emit()
 
     def set_syncing(self, syncing: bool) -> None:
         self.sync_button.setEnabled(not syncing and self._project is not None)
@@ -243,20 +307,65 @@ class StoryMemoryPage(QWidget):
         layout.addWidget(value_label)
         return row
 
-    @staticmethod
-    def _hook_card(text: str, index: int) -> QWidget:
+    def _foreshadowing_card(self, note: dict) -> QWidget:
         card = QFrame()
         card.setObjectName("sectionCard")
         layout = QVBoxLayout(card)
         layout.setContentsMargins(12, 10, 12, 10)
-        title = QLabel(text)
+        title_row = QHBoxLayout()
+        title = QLabel(str(note.get("title") or "未命名伏笔"))
         title.setWordWrap(True)
         title.setObjectName("sectionTitle")
-        hint = QLabel(f"线索 {index + 1} · 仍待回收")
+        status = QLabel(self._status_label(str(note.get("status") or "open")))
+        status.setObjectName("savedBadge" if note.get("status") == "resolved" else "dirtyBadge")
+        title_row.addWidget(title, 1)
+        title_row.addWidget(status)
+        layout.addLayout(title_row)
+        first_seen = str(note.get("first_seen_chapter") or "未记录")
+        recent = str(note.get("recent_seen_chapter") or "未记录")
+        planned = str(note.get("planned_resolution_chapter") or "未设置")
+        hint = QLabel(f"首次：{first_seen}  ·  最近：{recent}  ·  计划回收：{planned}")
         hint.setObjectName("mutedLabel")
-        layout.addWidget(title)
         layout.addWidget(hint)
+        characters = ", ".join(note.get("related_characters") or [])
+        if characters:
+            related = QLabel(f"关联人物：{characters}")
+            related.setObjectName("mutedLabel")
+            layout.addWidget(related)
+        description = str(note.get("note") or "").strip()
+        if description:
+            body = QLabel(description)
+            body.setWordWrap(True)
+            body.setObjectName("mutedLabel")
+            layout.addWidget(body)
+        buttons = QHBoxLayout()
+        edit = QPushButton("编辑")
+        edit.setObjectName("secondaryButton")
+        set_button_icon(edit, "edit", size=16)
+        edit.clicked.connect(lambda _checked=False, item=dict(note): self._edit_foreshadowing(item))
+        remove = QPushButton("移入回收站")
+        remove.setObjectName("ghostButton")
+        set_button_icon(remove, "delete", size=16)
+        remove.clicked.connect(lambda _checked=False, item=dict(note): self._delete_foreshadowing(item))
+        buttons.addStretch(1)
+        buttons.addWidget(edit)
+        buttons.addWidget(remove)
+        layout.addLayout(buttons)
         return card
+
+    @staticmethod
+    def _foreshadowing_sort_key(note: dict) -> tuple[int, int, str]:
+        status_rank = {"open": 0, "resolved": 1, "abandoned": 2}
+        priority_rank = {"high": 0, "medium": 1, "low": 2}
+        return (
+            status_rank.get(str(note.get("status") or ""), 3),
+            priority_rank.get(str(note.get("priority") or ""), 3),
+            str(note.get("title") or "").casefold(),
+        )
+
+    @staticmethod
+    def _status_label(status: str) -> str:
+        return {"open": "未回收", "resolved": "已回收", "abandoned": "已放弃"}.get(status, status)
 
     @staticmethod
     def _empty_card(title: str, body: str) -> QWidget:

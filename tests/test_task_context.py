@@ -37,6 +37,15 @@ class AIContextSnapshotTests(TestCase):
             project.save_story_state(state)
             self.assertFalse(snapshot.matches(project, "chapter_01", text))
 
+    def test_snapshot_hash_covers_structured_foreshadowing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            text = project.load_chapter("chapter_01").raw
+            snapshot = AIContextSnapshot.capture(project, "chapter_01", text)
+            path = project.memory_dir / "foreshadowing.json"
+            path.write_text('{"version":1,"items":[{"id":"f-001"}]}', encoding="utf-8")
+            self.assertFalse(snapshot.matches(project, "chapter_01", text))
+
     def test_capture_does_not_rebuild_full_ai_context(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project = NovelProject.create(Path(tmp) / "proj", "测试")
