@@ -214,3 +214,41 @@ class DocumentControllerTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "未保存修改"):
                 controller.delete_chapter("chapter_01")
             self.assertTrue(Path(editor.path).exists())
+
+    def test_delete_current_character_clears_editor_and_notifies_canon(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            character = project.canon_dir / "characters" / "林夜.md"
+            character.write_text("# 林夜\n\n设定\n", encoding="utf-8")
+            session = ProjectSession()
+            session.set_project(project)
+            editor = FakeEditor()
+            editor.path = str(character)
+            editor.category = "角色"
+            controller = DocumentController(editor, session)
+            changes = []
+            session.data_changed.connect(changes.append)
+
+            controller.delete_character("林夜")
+
+            self.assertIsNone(editor.path)
+            self.assertFalse(character.exists())
+            self.assertEqual(editor.cleared, ["角色卡已删除"])
+            self.assertEqual(changes, [project])
+
+    def test_delete_current_dirty_character_requires_explicit_discard(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            character = project.canon_dir / "characters" / "林夜.md"
+            character.write_text("# 林夜\n", encoding="utf-8")
+            session = ProjectSession()
+            session.set_project(project)
+            editor = FakeEditor()
+            editor.path = str(character)
+            editor.category = "角色"
+            editor.dirty = True
+            controller = DocumentController(editor, session)
+
+            with self.assertRaisesRegex(RuntimeError, "未保存修改"):
+                controller.delete_character("林夜")
+            self.assertTrue(character.exists())

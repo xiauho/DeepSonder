@@ -5,9 +5,12 @@ from unittest.mock import patch
 
 from core.project import NovelProject
 from core.project_data import (
+    CharacterIdConflictError,
     ChapterIdConflictError,
     ProjectDataStore,
+    character_id_exists,
     chapter_id_exists,
+    next_available_character_id,
     next_available_chapter_id,
     sanitize_filename,
 )
@@ -117,6 +120,72 @@ class ProjectDataStoreTests(TestCase):
                 {"chapter_01": "保留摘要", "chapter_02": "删除摘要"},
             )
             self.assertEqual(store.list_trash(), [])
+
+    def test_delete_character_moves_card_to_trash_and_keeps_story_memory(self) -> None:
+        with TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            card = project.canon_dir / "characters" / "林夜.md"
+            card.write_text("# 林夜\n\n- 身份：主角\n", encoding="utf-8")
+            state = {
+                "current_chapter": 2,
+                "characters": {"林夜": {"state": "受伤"}},
+                "foreshadowing": [],
+            }
+            store = ProjectDataStore(project)
+            store.save_story_state(state)
+
+            deleted = store.delete_character("林夜")
+
+            self.assertEqual(deleted, card)
+            self.assertFalse(card.exists())
+            self.assertEqual(store.load_story_state(), state)
+            entries = store.list_character_trash()
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(entries[0].character_id, "林夜")
+            self.assertEqual(
+                (entries[0].path / "character.md").read_text(encoding="utf-8"),
+                "# 林夜\n\n- 身份：主角\n",
+            )
+
+            restored = store.restore_character_trash_item(entries[0].trash_id)
+
+            self.assertEqual(restored, card)
+            self.assertTrue(card.exists())
+            self.assertEqual(store.list_character_trash(), [])
+            self.assertTrue(character_id_exists(project, "林夜"))
+
+    def test_character_restore_conflict_can_rename_and_trash_can_be_deleted_forever(self) -> None:
+        with TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            original = project.canon_dir / "characters" / "林夜.md"
+            original.write_text("# 林夜\n旧设定\n", encoding="utf-8")
+            store = ProjectDataStore(project)
+            store.delete_character("林夜")
+            original.write_text("# 林夜\n新设定\n", encoding="utf-8")
+            entry = store.list_character_trash()[0]
+
+            with self.assertRaises(CharacterIdConflictError):
+                store.restore_character_trash_item(entry.trash_id)
+            self.assertEqual(
+                next_available_character_id(project, "林夜"), "林夜_2"
+            )
+            restored = store.restore_character_trash_item(
+                entry.trash_id, conflict_policy="rename"
+            )
+            self.assertEqual(restored.stem, "林夜_2")
+            self.assertEqual(restored.read_text(encoding="utf-8"), "# 林夜\n旧设定\n")
+
+            store.delete_character(restored.stem)
+            trash_entry = store.list_character_trash()[0]
+            store.delete_character_trash_item(trash_entry.trash_id)
+            self.assertEqual(store.list_character_trash(), [])
+
+    def test_delete_character_rejects_path_traversal(self) -> None:
+        with TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            store = ProjectDataStore(project)
+            with self.assertRaises(ValueError):
+                store.delete_character("..\\project")
 
     def test_restore_rejects_existing_original_path_and_permanent_delete_removes_entry(self) -> None:
         with TemporaryDirectory() as tmp:

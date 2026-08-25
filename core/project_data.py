@@ -58,6 +58,27 @@ def next_available_chapter_id(
     return candidate
 
 
+def character_id_exists(project: NovelProject, character_id: str) -> bool:
+    """Return whether a character card filename is occupied."""
+    normalized = sanitize_filename(character_id).casefold()
+    return any(path.stem.casefold() == normalized for path in project.list_characters())
+
+
+def next_available_character_id(
+    project: NovelProject,
+    preferred: str,
+) -> str:
+    """Return a non-conflicting character card filename stem."""
+    base = sanitize_filename(preferred)
+    existing = {path.stem.casefold() for path in project.list_characters()}
+    candidate = base
+    suffix = 2
+    while candidate.casefold() in existing:
+        candidate = f"{base}_{suffix}"
+        suffix += 1
+    return candidate
+
+
 class ChapterIdConflictError(FileExistsError):
     """Raised when a requested chapter id already belongs to another file."""
 
@@ -67,6 +88,18 @@ class ChapterIdConflictError(FileExistsError):
         self.path = Path(path)
         super().__init__(
             f"章节 ID 已存在：{self.chapter_id}。可使用：{self.suggested_id}。"
+        )
+
+
+class CharacterIdConflictError(FileExistsError):
+    """Raised when a restored character card name is already occupied."""
+
+    def __init__(self, character_id: str, suggested_id: str, path: Path):
+        self.character_id = str(character_id)
+        self.suggested_id = str(suggested_id)
+        self.path = Path(path)
+        super().__init__(
+            f"角色卡标识已存在：{self.character_id}。可使用：{self.suggested_id}。"
         )
 
 
@@ -80,6 +113,18 @@ class TrashEntry:
     original_path: str
     deleted_at: str
     has_summary: bool
+    path: Path
+
+
+@dataclass(frozen=True)
+class CharacterTrashEntry:
+    """Metadata for one character card stored in the project recycle bin."""
+
+    trash_id: str
+    character_id: str
+    title: str
+    original_path: str
+    deleted_at: str
     path: Path
 
 
@@ -111,6 +156,10 @@ class ProjectDataStore:
 
     def list_characters(self) -> list[Path]:
         return self.project.list_characters()
+
+    @property
+    def character_trash_dir(self) -> Path:
+        return self.trash_dir / "characters"
 
     def list_world(self) -> list[Path]:
         return self.project.list_world()
@@ -259,6 +308,131 @@ class ProjectDataStore:
         entry = self.move_chapter_to_trash(chapter_id)
         return self.root / entry.original_path
 
+    def move_character_to_trash(self, character_id: str) -> CharacterTrashEntry:
+        """Move a character card to the recycle bin without changing story memory."""
+        raw_id = str(character_id or "").strip()
+        characters_dir = self.project.canon_dir / "characters"
+        path = characters_dir / f"{raw_id}.md"
+        if (
+            not raw_id
+            or Path(raw_id).name != raw_id
+            or path.resolve().parent != characters_dir.resolve()
+        ):
+            raise ValueError("只能删除当前项目角色目录内的角色卡文件。")
+        if not path.is_file():
+            raise FileNotFoundError(path)
+
+        original_text = self.project.read_file(path)
+        deleted_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        trash_id = (
+            f"character_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')}"
+            f"_{raw_id}_{uuid4().hex[:8]}"
+        )
+        entry_path = self.character_trash_dir / trash_id
+        entry = CharacterTrashEntry(
+            trash_id=trash_id,
+            character_id=raw_id,
+            title=self.chapter_display_name(path),
+            original_path=str(path.relative_to(self.root)),
+            deleted_at=deleted_at,
+            path=entry_path,
+        )
+        try:
+            entry_path.mkdir(parents=True, exist_ok=False)
+            atomic_write_text(entry_path / "character.md", original_text)
+            atomic_write_text(
+                entry_path / "manifest.json",
+                json.dumps(
+                    {
+                        "trash_id": entry.trash_id,
+                        "character_id": entry.character_id,
+                        "title": entry.title,
+                        "original_path": entry.original_path,
+                        "deleted_at": entry.deleted_at,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+            )
+            path.unlink()
+        except Exception:
+            try:
+                if not path.exists():
+                    self.project.write_file(path, original_text)
+            except Exception:
+                pass
+            self._remove_trash_path(entry_path)
+            raise
+        return entry
+
+    def delete_character(self, character_id: str) -> Path:
+        """Compatibility wrapper: move a character card into the recycle bin."""
+        entry = self.move_character_to_trash(character_id)
+        return self.root / entry.original_path
+
+    def list_character_trash(self) -> list[CharacterTrashEntry]:
+        """Return valid character-card recycle-bin entries, newest first."""
+        if not self.character_trash_dir.is_dir():
+            return []
+        entries: list[CharacterTrashEntry] = []
+        for path in self.character_trash_dir.iterdir():
+            if not path.is_dir():
+                continue
+            try:
+                entries.append(self._read_character_trash_entry(path))
+            except (OSError, ValueError, UnicodeError, json.JSONDecodeError):
+                continue
+        return sorted(entries, key=lambda item: item.deleted_at, reverse=True)
+
+    def restore_character_trash_item(
+        self,
+        trash_id: str,
+        *,
+        conflict_policy: str = "error",
+    ) -> Path:
+        """Restore one character card to its original or a new card id."""
+        if conflict_policy not in {"error", "rename"}:
+            raise ValueError("无效的角色卡恢复冲突策略。")
+        entry = self._read_character_trash_entry(
+            self._character_trash_entry_path(trash_id)
+        )
+        characters_dir = self.project.canon_dir / "characters"
+        target = self.root / entry.original_path
+        if (
+            target.resolve().parent != characters_dir.resolve()
+            or target.name != f"{entry.character_id}.md"
+        ):
+            raise ValueError("回收站条目不是有效的角色卡路径。")
+        restored_id = entry.character_id
+        if target.exists() or character_id_exists(self.project, entry.character_id):
+            if conflict_policy != "rename":
+                raise CharacterIdConflictError(
+                    entry.character_id,
+                    next_available_character_id(self.project, entry.character_id),
+                    target,
+                )
+            restored_id = next_available_character_id(self.project, entry.character_id)
+            target = characters_dir / f"{restored_id}.md"
+
+        card_text = (entry.path / "character.md").read_text(encoding="utf-8")
+        try:
+            self.project.write_file(target, card_text)
+            self._remove_trash_path(entry.path)
+        except Exception:
+            try:
+                if target.exists():
+                    target.unlink()
+            except Exception:
+                pass
+            raise
+        return target
+
+    def delete_character_trash_item(self, trash_id: str) -> None:
+        """Permanently remove one validated character-card trash entry."""
+        entry_path = self._character_trash_entry_path(trash_id)
+        self._read_character_trash_entry(entry_path)
+        self._remove_trash_path(entry_path)
+
     def list_trash(self) -> list[TrashEntry]:
         """Return valid recycle-bin entries, newest first."""
         if not self.trash_dir.is_dir():
@@ -335,6 +509,19 @@ class ProjectDataStore:
             raise FileNotFoundError(path)
         return path
 
+    def _character_trash_entry_path(self, trash_id: str) -> Path:
+        raw_id = str(trash_id or "").strip()
+        path = self.character_trash_dir / raw_id
+        if (
+            not raw_id
+            or Path(raw_id).name != raw_id
+            or path.resolve().parent != self.character_trash_dir.resolve()
+        ):
+            raise ValueError("无效的角色卡回收站条目。")
+        if not path.is_dir():
+            raise FileNotFoundError(path)
+        return path
+
     @staticmethod
     def _remove_trash_path(path: Path) -> None:
         if path.is_dir():
@@ -355,6 +542,23 @@ class ProjectDataStore:
             original_path=str(data["original_path"]),
             deleted_at=str(data["deleted_at"]),
             has_summary=bool(data["has_summary"]),
+            path=Path(path),
+        )
+
+    def _read_character_trash_entry(self, path: Path) -> CharacterTrashEntry:
+        manifest_path = Path(path) / "manifest.json"
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        required = ("trash_id", "character_id", "title", "original_path", "deleted_at")
+        if any(key not in data for key in required):
+            raise ValueError("角色卡回收站条目元数据不完整。")
+        if str(data["trash_id"]) != Path(path).name:
+            raise ValueError("角色卡回收站条目标识不一致。")
+        return CharacterTrashEntry(
+            trash_id=str(data["trash_id"]),
+            character_id=str(data["character_id"]),
+            title=str(data["title"]),
+            original_path=str(data["original_path"]),
+            deleted_at=str(data["deleted_at"]),
             path=Path(path),
         )
 

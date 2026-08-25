@@ -30,6 +30,7 @@ class LeftPanel(QWidget):
     file_selected = Signal(str, str)
     new_chapter_requested = Signal()
     delete_chapter_requested = Signal(str)
+    delete_character_requested = Signal(str)
     toggle_requested = Signal()
 
     PATH_ROLE = int(Qt.ItemDataRole.UserRole)
@@ -217,13 +218,18 @@ class LeftPanel(QWidget):
             return
         path_str = item.data(0, self.PATH_ROLE)
         category = item.data(0, self.CATEGORY_ROLE) or ""
-        if not path_str or category != "章节":
+        if not path_str or category not in {"章节", "角色"}:
             return
         menu = QMenu(self.tree)
         delete_action = menu.addAction("移入回收站")
-        delete_action.triggered.connect(
-            lambda _checked=False, path=str(path_str): self.delete_chapter_requested.emit(path)
-        )
+        if category == "章节":
+            delete_action.triggered.connect(
+                lambda _checked=False, path=str(path_str): self.delete_chapter_requested.emit(path)
+            )
+        else:
+            delete_action.triggered.connect(
+                lambda _checked=False, path=str(path_str): self.delete_character_requested.emit(path)
+            )
         menu.exec(self.tree.viewport().mapToGlobal(position))
 
     def _filter_tree(self, query: str) -> None:

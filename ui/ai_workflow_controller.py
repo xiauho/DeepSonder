@@ -9,6 +9,7 @@ from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QDialog, QMessageBox
 
 from core import ai_protocol
+from core.character_cards import create_character_cards, missing_character_cards
 from core.ai_result_service import AIResultService
 from core.ai_workflow import AIWorkflowService
 from core.config import save_config
@@ -333,7 +334,39 @@ class AIWorkflowController(QObject):
             ],
             kind="memory",
         )
+        self._offer_missing_character_cards(project, commit_result.merged_state)
         self._emit_status("长期记忆已更新")
+
+    def _offer_missing_character_cards(self, project, story_state: dict) -> None:
+        candidates = missing_character_cards(project, story_state)
+        if not candidates:
+            return
+        names = "、".join(candidate.name for candidate in candidates)
+        answer = QMessageBox.question(
+            self.parent,
+            "发现未建卡角色",
+            f"故事记忆中发现 {len(candidates)} 位尚未建立角色卡的追踪角色：\n{names}\n\n"
+            "是否创建草稿角色卡？创建后仍可在左侧角色栏中继续完善。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            self._emit_output(f"已保留未建卡追踪角色：{names}")
+            return
+        try:
+            created = create_character_cards(project, candidates)
+        except (OSError, ValueError) as exc:
+            self._emit_output(f"角色卡草稿创建失败：{exc}")
+            QMessageBox.warning(self.parent, "创建角色卡失败", str(exc))
+            return
+        if not created:
+            self._emit_output("未创建新的角色卡，已有文件未被覆盖。")
+            return
+        self.project_session.notify_data_changed(created, kind="canon")
+        self._emit_output(
+            f"已创建 {len(created)} 张角色卡草稿："
+            + "、".join(path.stem for path in created)
+        )
 
     def _task_context_matches(self, token) -> bool:
         return self.ai_controller.context_matches(

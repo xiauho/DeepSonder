@@ -16,7 +16,13 @@ from PySide6.QtWidgets import (
 )
 
 from core.foreshadowing import ForeshadowingTrashEntry
-from core.project_data import ChapterIdConflictError, ProjectDataStore, TrashEntry
+from core.project_data import (
+    CharacterIdConflictError,
+    CharacterTrashEntry,
+    ChapterIdConflictError,
+    ProjectDataStore,
+    TrashEntry,
+)
 from ui.icons import set_button_icon
 
 
@@ -34,20 +40,22 @@ class TrashDialog(QDialog):
 
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
-        hint = QLabel("章节和伏笔分别保存在回收站中，恢复后会回到原来的数据位置。")
+        hint = QLabel("章节、角色卡和伏笔分别保存在回收站中，恢复后会回到原来的数据位置。")
         hint.setWordWrap(True)
         hint.setObjectName("mutedLabel")
         layout.addWidget(hint)
 
         self.tabs = QTabWidget()
         self.chapter_list = self._new_list()
+        self.character_list = self._new_list()
         self.foreshadowing_list = self._new_list()
-        for widget in (self.chapter_list, self.foreshadowing_list):
+        for widget in (self.chapter_list, self.character_list, self.foreshadowing_list):
             widget.itemSelectionChanged.connect(self._sync_buttons)
             widget.itemDoubleClicked.connect(lambda _item: self.restore_selected())
         # Keep the old attribute available for focused callers and tests.
         self.list_widget = self.chapter_list
         self.tabs.addTab(self.chapter_list, "章节")
+        self.tabs.addTab(self.character_list, "角色卡")
         self.tabs.addTab(self.foreshadowing_list, "伏笔")
         self.tabs.currentChanged.connect(lambda _index: self._sync_buttons())
         layout.addWidget(self.tabs, 1)
@@ -55,11 +63,9 @@ class TrashDialog(QDialog):
         buttons = QHBoxLayout()
         self.restore_button = QPushButton("恢复")
         self.restore_button.setObjectName("accentButton")
-        set_button_icon(self.restore_button, "restore_from_trash", size=16)
         self.restore_button.clicked.connect(self.restore_selected)
         self.delete_button = QPushButton("永久删除")
         self.delete_button.setObjectName("ghostButton")
-        set_button_icon(self.delete_button, "delete_forever", size=16)
         self.delete_button.clicked.connect(self.delete_selected)
         close_button = QPushButton("关闭")
         close_button.setObjectName("ghostButton")
@@ -82,6 +88,7 @@ class TrashDialog(QDialog):
 
     def refresh(self) -> None:
         self._refresh_chapters()
+        self._refresh_characters()
         self._refresh_foreshadowing()
         self._sync_buttons()
 
@@ -109,6 +116,19 @@ class TrashDialog(QDialog):
         if entries:
             self.foreshadowing_list.setCurrentRow(0)
 
+    def _refresh_characters(self) -> None:
+        self.character_list.clear()
+        entries = self.store.list_character_trash()
+        for entry in entries:
+            item = QListWidgetItem(self._character_label(entry))
+            item.setData(Qt.ItemDataRole.UserRole, entry.trash_id)
+            item.setToolTip(
+                f"原始路径：{entry.original_path}\n删除时间：{entry.deleted_at}"
+            )
+            self.character_list.addItem(item)
+        if entries:
+            self.character_list.setCurrentRow(0)
+
     def restore_selected(self) -> None:
         trash_id = self._selected_id()
         if trash_id is None:
@@ -116,6 +136,8 @@ class TrashDialog(QDialog):
         try:
             if self._active_kind() == "chapter":
                 self.store.restore_trash_item(trash_id)
+            elif self._active_kind() == "character":
+                self.store.restore_character_trash_item(trash_id)
             else:
                 self.store.restore_foreshadowing(trash_id)
         except ChapterIdConflictError as exc:
@@ -131,6 +153,24 @@ class TrashDialog(QDialog):
                 return
             try:
                 self.store.restore_trash_item(trash_id, conflict_policy="rename")
+            except (OSError, ValueError, KeyError) as retry_exc:
+                QMessageBox.critical(self, "恢复失败", str(retry_exc))
+                return
+        except CharacterIdConflictError as exc:
+            answer = QMessageBox.question(
+                self,
+                "角色卡名称已存在",
+                f"角色卡“{exc.character_id}”已被占用。\n\n"
+                f"是否恢复为“{exc.suggested_id}”？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+            try:
+                self.store.restore_character_trash_item(
+                    trash_id, conflict_policy="rename"
+                )
             except (OSError, ValueError, KeyError) as retry_exc:
                 QMessageBox.critical(self, "恢复失败", str(retry_exc))
                 return
@@ -151,7 +191,11 @@ class TrashDialog(QDialog):
         trash_id = self._selected_id()
         if trash_id is None:
             return
-        kind_label = "章节" if self._active_kind() == "chapter" else "伏笔"
+        kind_label = {
+            "chapter": "章节",
+            "character": "角色卡",
+            "foreshadowing": "伏笔",
+        }[self._active_kind()]
         answer = QMessageBox.question(
             self,
             "永久删除",
@@ -164,6 +208,8 @@ class TrashDialog(QDialog):
         try:
             if self._active_kind() == "chapter":
                 self.store.delete_trash_item(trash_id)
+            elif self._active_kind() == "character":
+                self.store.delete_character_trash_item(trash_id)
             else:
                 self.store.delete_foreshadowing_trash(trash_id)
         except (OSError, ValueError, KeyError) as exc:
@@ -173,10 +219,18 @@ class TrashDialog(QDialog):
         self.refresh()
 
     def _active_kind(self) -> str:
-        return "chapter" if self.tabs.currentWidget() is self.chapter_list else "foreshadowing"
+        if self.tabs.currentWidget() is self.chapter_list:
+            return "chapter"
+        if self.tabs.currentWidget() is self.character_list:
+            return "character"
+        return "foreshadowing"
 
     def _active_list(self) -> QListWidget:
-        return self.chapter_list if self._active_kind() == "chapter" else self.foreshadowing_list
+        if self._active_kind() == "chapter":
+            return self.chapter_list
+        if self._active_kind() == "character":
+            return self.character_list
+        return self.foreshadowing_list
 
     def _selected_id(self) -> str | None:
         item = self._active_list().currentItem()
@@ -199,3 +253,8 @@ class TrashDialog(QDialog):
     def _foreshadowing_label(entry: ForeshadowingTrashEntry) -> str:
         deleted_at = entry.deleted_at.replace("T", " ").replace("+00:00", " UTC")
         return f"{entry.title}  ·  {entry.foreshadowing_id}  ·  {deleted_at}"
+
+    @staticmethod
+    def _character_label(entry: CharacterTrashEntry) -> str:
+        deleted_at = entry.deleted_at.replace("T", " ").replace("+00:00", " UTC")
+        return f"{entry.title}  ·  {entry.character_id}  ·  {deleted_at}"

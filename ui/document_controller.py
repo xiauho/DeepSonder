@@ -154,6 +154,27 @@ class DocumentController(QObject):
         )
         return deleted
 
+    def delete_character(
+        self,
+        character_id: str,
+        *,
+        discard_current_changes: bool = False,
+    ) -> Path:
+        """Move a character card into the recycle bin after editor checks."""
+        project = self._require_project()
+        raw_id = str(character_id or "").strip()
+        target = project.canon_dir / "characters" / f"{raw_id}.md"
+        current = self.editor.current_path()
+        is_current = bool(current and Path(current).resolve() == target.resolve())
+        if is_current and self.editor.is_dirty() and not discard_current_changes:
+            raise RuntimeError("当前角色卡存在未保存修改，请先保存或放弃修改。")
+
+        deleted = self.project_session.require_data_store().delete_character(raw_id)
+        if is_current:
+            self.editor.clear_document("角色卡已删除")
+        self.project_session.notify_data_changed([target], kind="canon")
+        return deleted
+
     def create_character(self, name: str) -> Path:
         project = self._require_project()
         name = str(name).strip()
