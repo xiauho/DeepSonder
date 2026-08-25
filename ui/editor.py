@@ -23,6 +23,51 @@ from ui.icons import set_button_icon
 from core.storage import atomic_write_text
 
 
+_CHINESE_RE = re.compile(r"[\u3400-\u9fff]")
+_LATIN_WORD_RE = re.compile(r"[A-Za-z0-9]+(?:['’-][A-Za-z0-9]+)*")
+_PARAGRAPH_RE = re.compile(r"\n\s*\n")
+FIND_DEBOUNCE_MS = 240
+STATS_DEBOUNCE_MS = 180
+MAX_FIND_HIGHLIGHTS = 200
+MAX_FIND_MATCHES_FOR_HIGHLIGHT = 1000
+LARGE_DOCUMENT_CHARS = 200_000
+
+
+def calculate_editor_stats(text: str) -> str:
+    """Return the display label for one immutable editor text snapshot."""
+    text = str(text or "")
+    chinese = len(_CHINESE_RE.findall(text))
+    latin_words = len(_LATIN_WORD_RE.findall(text))
+    total = chinese + latin_words
+    paragraphs = len([part for part in _PARAGRAPH_RE.split(text) if part.strip()])
+    minutes = max(1, round(total / 400)) if total else 0
+    label = f"{total:,} 字 · {paragraphs} 段"
+    if total:
+        label += f" · 约 {minutes} 分钟阅读"
+    return label
+
+
+def find_highlight_config(document_length: int, match_count: int) -> tuple[int, str]:
+    """Return the highlight limit and user-facing suffix for find results."""
+    document_length = max(0, int(document_length))
+    match_count = max(0, int(match_count))
+    if document_length >= LARGE_DOCUMENT_CHARS:
+        return 0, " · 大文档暂不高亮"
+    if match_count > MAX_FIND_MATCHES_FOR_HIGHLIGHT:
+        return 0, " · 匹配过多，仅显示数量"
+    limit = min(match_count, MAX_FIND_HIGHLIGHTS)
+    suffix = f" · 仅显示前 {limit} 处" if match_count > limit else ""
+    return limit, suffix
+
+
+class ExternalFileChangedError(RuntimeError):
+    """Raised when the file changed after it was loaded into the editor."""
+
+    def __init__(self, path: Path):
+        self.path = Path(path)
+        super().__init__(f"文件在编辑期间发生了外部修改：{self.path}")
+
+
 class Editor(QWidget):
     """Focused Markdown editor with document state, stats and find/replace."""
 
@@ -36,6 +81,8 @@ class Editor(QWidget):
         self._current_category = ""
         self._dirty = False
         self._loading = False
+        self._loaded_file_revision: tuple[int, int, int] | None = None
+        self._stats_revision: int | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 14, 18, 12)
@@ -127,7 +174,7 @@ class Editor(QWidget):
 
         self.text_edit.textChanged.connect(self._on_text_changed)
         self.text_edit.cursorPositionChanged.connect(self._update_cursor_status)
-        self.find_input.textChanged.connect(self._update_match_count)
+        self.find_input.textChanged.connect(self._schedule_match_count)
         self.find_input.returnPressed.connect(self.find_next)
         previous_btn.clicked.connect(self.find_previous)
         next_btn.clicked.connect(self.find_next)
@@ -137,8 +184,13 @@ class Editor(QWidget):
 
         self._stats_timer = QTimer(self)
         self._stats_timer.setSingleShot(True)
-        self._stats_timer.setInterval(180)
+        self._stats_timer.setInterval(STATS_DEBOUNCE_MS)
         self._stats_timer.timeout.connect(self._update_stats)
+
+        self._find_timer = QTimer(self)
+        self._find_timer.setSingleShot(True)
+        self._find_timer.setInterval(FIND_DEBOUNCE_MS)
+        self._find_timer.timeout.connect(self._update_match_count)
 
     def open_file(self, category: str, path_str: str) -> bool:
         path = Path(path_str)
@@ -154,6 +206,7 @@ class Editor(QWidget):
         self._loading = True
         self._current_path = str(path)
         self._current_category = category
+        self._loaded_file_revision = self._file_revision(path)
         self.text_edit.setPlainText(content)
         self.text_edit.document().setModified(False)
         self._loading = False
@@ -170,14 +223,17 @@ class Editor(QWidget):
         self._loading = False
         self._current_path = None
         self._current_category = ""
+        self._loaded_file_revision = None
         self.title_label.setText(message)
         self.path_label.setText("从左侧选择文件，或创建一个新章节")
         self._set_dirty(False)
 
-    def save(self) -> bool:
+    def save(self, *, force: bool = False) -> bool:
         if not self._current_path:
             return False
         path = Path(self._current_path)
+        if not force and self.has_external_change():
+            raise ExternalFileChangedError(path)
         try:
             atomic_write_text(path, self.text_edit.toPlainText())
         except OSError as exc:
@@ -185,9 +241,22 @@ class Editor(QWidget):
             self.path_label.setText(f"保存失败：{exc}")
             return False
         self.text_edit.document().setModified(False)
+        self._loaded_file_revision = self._file_revision(path)
         self._set_dirty(False)
         self.file_saved.emit(str(path))
         return True
+
+    def has_external_change(self) -> bool:
+        """Return whether the loaded file changed outside this editor."""
+        if not self._current_path or self._loaded_file_revision is None:
+            return False
+        return self._file_revision(Path(self._current_path)) != self._loaded_file_revision
+
+    def reload_current_file(self) -> bool:
+        """Discard local edits and reload the current file from disk."""
+        if not self._current_path:
+            return False
+        return self.open_file(self._current_category, self._current_path)
 
     def is_dirty(self) -> bool:
         return self._dirty
@@ -197,6 +266,14 @@ class Editor(QWidget):
 
     def current_category(self) -> str:
         return self._current_category
+
+    @staticmethod
+    def _file_revision(path: Path) -> tuple[int, int, int] | None:
+        try:
+            stat = Path(path).stat()
+        except OSError:
+            return None
+        return stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size
 
     def current_chapter_id(self) -> str | None:
         if not self._current_path:
@@ -250,10 +327,12 @@ class Editor(QWidget):
         selected = self.text_edit.textCursor().selectedText()
         if selected and "\u2029" not in selected and len(selected) < 100:
             self.find_input.setText(selected)
+        self._schedule_match_count()
         self.find_input.setFocus()
         self.find_input.selectAll()
 
     def hide_find(self) -> None:
+        self._find_timer.stop()
         self.find_bar.hide()
         self._clear_find_highlights()
         self.text_edit.setFocus()
@@ -284,7 +363,7 @@ class Editor(QWidget):
         if cursor.hasSelection() and cursor.selectedText() == self.find_input.text():
             cursor.insertText(self.replace_input.text())
         self.find_next()
-        self._update_match_count()
+        self._schedule_match_count()
 
     def replace_all(self) -> None:
         needle = self.find_input.text()
@@ -305,7 +384,7 @@ class Editor(QWidget):
             self._set_dirty(True)
         self._stats_timer.start()
         if self.find_bar.isVisible():
-            self._update_match_count()
+            self._schedule_match_count()
 
     def _set_dirty(self, dirty: bool) -> None:
         changed = dirty != self._dirty
@@ -318,15 +397,11 @@ class Editor(QWidget):
             self.dirty_changed.emit(dirty)
 
     def _update_stats(self) -> None:
-        text = self.text_edit.toPlainText()
-        chinese = len(re.findall(r"[\u3400-\u9fff]", text))
-        latin_words = len(re.findall(r"[A-Za-z0-9]+(?:['’-][A-Za-z0-9]+)*", text))
-        total = chinese + latin_words
-        paragraphs = len([p for p in re.split(r"\n\s*\n", text) if p.strip()])
-        minutes = max(1, round(total / 400)) if total else 0
-        label = f"{total:,} 字 · {paragraphs} 段"
-        if total:
-            label += f" · 约 {minutes} 分钟阅读"
+        revision = int(self.text_edit.document().revision())
+        if self._stats_revision == revision:
+            return
+        label = calculate_editor_stats(self.text_edit.toPlainText())
+        self._stats_revision = revision
         self.stats_label.setText(label)
         self.stats_changed.emit(label)
 
@@ -336,20 +411,26 @@ class Editor(QWidget):
             f"第 {cursor.blockNumber() + 1} 行，第 {cursor.positionInBlock() + 1} 列"
         )
 
+    def _schedule_match_count(self) -> None:
+        self._find_timer.start()
+
     def _update_match_count(self) -> None:
         needle = self.find_input.text()
         if not needle:
             self.match_label.clear()
             self._clear_find_highlights()
             return
-        count = self.text_edit.toPlainText().count(needle)
-        self.match_label.setText(f"{count} 处")
+
+        text = self.text_edit.toPlainText()
+        count = text.count(needle)
+        highlight_limit, suffix = find_highlight_config(len(text), count)
+        self.match_label.setText(f"{count} 处{suffix}")
         selections = []
         document = self.text_edit.document()
         cursor = QTextCursor(document)
         fmt = QTextCharFormat()
         fmt.setBackground(QColor("#C08A2E"))
-        while True:
+        while len(selections) < highlight_limit:
             cursor = document.find(needle, cursor)
             if cursor.isNull():
                 break
@@ -357,8 +438,6 @@ class Editor(QWidget):
             selection.cursor = cursor
             selection.format = fmt
             selections.append(selection)
-            if len(selections) >= 500:
-                break
         self.text_edit.setExtraSelections(selections)
 
     def _clear_find_highlights(self) -> None:

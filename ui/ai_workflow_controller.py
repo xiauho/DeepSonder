@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Callable
 
 from PySide6.QtCore import QObject, Signal
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QDialog, QMessageBox
 
 from core import ai_protocol
 from core.ai_result_service import AIResultService
 from core.ai_workflow import AIWorkflowService
 from core.config import save_config
+from core.project_data import ProjectDataStore
 from ui.ai_result_coordinator import AIResultCoordinator
+from ui.foreshadowing_selection_dialog import ForeshadowingSelectionDialog
 
 
 class AIWorkflowController(QObject):
@@ -37,6 +40,7 @@ class AIWorkflowController(QObject):
         inspector,
         reports_page,
         go_to_writing: Callable[[], bool],
+        save_if_dirty: Callable[[], bool] | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -49,6 +53,7 @@ class AIWorkflowController(QObject):
         self.inspector = inspector
         self.reports_page = reports_page
         self.go_to_writing = go_to_writing
+        self.save_if_dirty = save_if_dirty
         self.parent = parent
         self.ai_result_service = AIResultService()
         self.ai_result_coordinator = AIResultCoordinator(parent)
@@ -63,6 +68,10 @@ class AIWorkflowController(QObject):
         if request is None:
             return
         project, chapter_id, workflow = request
+        selected_foreshadowing = self._choose_foreshadowing(project, chapter_id)
+        if selected_foreshadowing is None:
+            return
+        selected_foreshadowing = tuple(deepcopy(selected_foreshadowing))
         target_chars = int(self.config.get("expand_target_chars", 2000))
         history_chapters = int(self.config.get("ai_context_history_chapters", 5))
         self._start(
@@ -74,8 +83,10 @@ class AIWorkflowController(QObject):
                 chapter_id,
                 target_chars=target_chars,
                 history_chapters=history_chapters,
+                selected_foreshadowing=selected_foreshadowing,
                 cancel_event=cancel_event,
             ),
+            task_context={"selected_foreshadowing": selected_foreshadowing},
         )
 
     def check(self) -> None:
@@ -133,7 +144,8 @@ class AIWorkflowController(QObject):
         if not self.editor.current_path():
             QMessageBox.information(self.parent, "保存", "请先打开一份可编辑的故事资料。")
             return False
-        if not self.document_controller.save_if_dirty():
+        save = self.save_if_dirty or self.document_controller.save_if_dirty
+        if not save():
             QMessageBox.warning(self.parent, "保存失败", "文件未能保存，请检查写入权限。")
             return False
         return True
@@ -158,7 +170,35 @@ class AIWorkflowController(QObject):
         save_config(self.config)
         return True
 
-    def _start(self, kind: str, chapter_id: str, message: str, worker) -> bool:
+    def _choose_foreshadowing(self, project, chapter_id: str) -> list[dict] | None:
+        try:
+            notes = ProjectDataStore(project).load_foreshadowing(status="open")
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self.parent, "读取伏笔失败", str(exc))
+            return None
+        if not notes:
+            self._emit_output("当前没有未回收伏笔，本次扩写不指定伏笔。")
+            return []
+        dialog = ForeshadowingSelectionDialog(notes, chapter_id, self.parent)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            self._emit_status("已取消扩写，未启动 AI 任务")
+            return None
+        selected = dialog.selected_notes()
+        if selected:
+            self._emit_output(f"本次扩写已选择 {len(selected)} 条伏笔作为重点关注内容。")
+        else:
+            self._emit_output("本次扩写未指定伏笔。")
+        return selected
+
+    def _start(
+        self,
+        kind: str,
+        chapter_id: str,
+        message: str,
+        worker,
+        *,
+        task_context: object | None = None,
+    ) -> bool:
         project = self.project_session.project
         if project is None:
             return False
@@ -169,6 +209,7 @@ class AIWorkflowController(QObject):
             chapter_id,
             self.editor.text_edit.toPlainText(),
             worker,
+            task_context=task_context,
         ) is None:
             QMessageBox.information(self.parent, "AI 正在工作", "当前任务完成后再试一次。")
             return False
@@ -285,7 +326,13 @@ class AIWorkflowController(QObject):
                 f"已按章节 {commit_result.expected_chapter} 修正。"
             )
         self._emit_output(f"长期记忆已更新\n{draft.summary}")
-        self.project_session.notify_data_changed()
+        self.project_session.notify_data_changed(
+            [
+                project.memory_dir / "story_state.json",
+                project.memory_dir / "chapter_summaries.json",
+            ],
+            kind="memory",
+        )
         self._emit_status("长期记忆已更新")
 
     def _task_context_matches(self, token) -> bool:

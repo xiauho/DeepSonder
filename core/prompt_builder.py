@@ -37,6 +37,7 @@ def build_expansion_prompt(
     target_chars: int = 2000,
     *,
     summary_count: int = EXPANSION_SUMMARY_COUNT,
+    selected_foreshadowing: list[dict] | tuple[dict, ...] | None = None,
     context: AIContext | None = None,
 ) -> tuple[str, str]:
     """Build a compact outline-to-chapter expansion task.
@@ -60,6 +61,7 @@ def build_expansion_prompt(
         (
             "outline",
             "plot_brief",
+            "selected_foreshadowing",
             "state",
             "summaries",
             "characters",
@@ -68,6 +70,7 @@ def build_expansion_prompt(
             "timeline",
         ),
         summary_count=summary_count,
+        selected_foreshadowing=selected_foreshadowing,
         context=context,
     )
     target_chars = max(300, int(target_chars))
@@ -92,7 +95,8 @@ def build_expansion_prompt(
 2. 将本章目标、核心冲突和章节钩子落实为连续的场景、行动、对话和结果。
 3. 保持人物身份、世界观规则、时间线和能力设定一致。
 4. 让本章结尾形成明确的章节钩子，但不要替后续章节提前解决核心悬念。
-5. 只返回 NOVEL_TEXT 标记之间的正文。
+5. 如果提供了“本次重点关注的伏笔”，应结合本章规划自然推进；除非本章规划明确要求，不要强行回收。
+6. 只返回 NOVEL_TEXT 标记之间的正文。
 
 【当前章节】
 章节：{chapter.title}
@@ -121,6 +125,9 @@ def build_expansion_prompt(
 
 {related_block}
 
+【本次重点关注的伏笔】
+{_section(ctx, "selected_foreshadowing", "（本次未指定伏笔）")}
+
 【当前故事状态】
 {_section(ctx, "state")}
 
@@ -140,6 +147,7 @@ def build_expansion_retry_prompt(
     target_chars: int = 2000,
     *,
     summary_count: int = EXPANSION_SUMMARY_COUNT,
+    selected_foreshadowing: list[dict] | tuple[dict, ...] | None = None,
     context: AIContext | None = None,
 ) -> tuple[str, str]:
     """Build a correction prompt when headless returns a workspace preamble."""
@@ -148,6 +156,7 @@ def build_expansion_retry_prompt(
         chapter_id,
         target_chars,
         summary_count=summary_count,
+        selected_foreshadowing=selected_foreshadowing,
         context=context,
     )
     retry_system = f"""

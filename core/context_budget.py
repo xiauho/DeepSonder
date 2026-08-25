@@ -40,6 +40,7 @@ SECTION_RULES: dict[str, tuple[int, str, int]] = {
     "outline": (3000, "head", 0),
     "plot_brief": (2500, "head", 0),
     "content": (12000, "tail", 1),
+    "selected_foreshadowing": (3500, "head", 1),
     "state": (4000, "head", 2),
     "summaries": (2000, "head", 3),
     "characters": (3000, "head", 4),
@@ -195,6 +196,7 @@ def gather_sections(
     content_keep: str = "tail",
     content_cap: int | None = None,
     summary_count: int = EXPANSION_SUMMARY_COUNT,
+    selected_foreshadowing: list[dict] | tuple[dict, ...] | None = None,
     context: AIContext | None = None,
 ) -> list[Section]:
     """Load the named standard sections in deterministic rule order."""
@@ -206,6 +208,7 @@ def gather_sections(
         "outline": chapter.outline,
         "plot_brief": chapter.plot_brief,
         "content": chapter.content,
+        "selected_foreshadowing": _render_selected_foreshadowing(selected_foreshadowing),
         "state": json.dumps(
             compact_story_state(context.story_state),
             ensure_ascii=False,
@@ -245,6 +248,32 @@ def gather_sections(
                 cap = max(1, int(content_cap))
         sections.append(Section(key, text, cap, keep, priority))
     return sections
+
+
+def _render_selected_foreshadowing(notes: object) -> str:
+    """Render only author-selected notes with a bounded per-note payload."""
+    if not isinstance(notes, (list, tuple)):
+        return ""
+    rendered: list[str] = []
+    for note in notes[:8]:
+        if not isinstance(note, dict):
+            continue
+        title = str(note.get("title") or "未命名伏笔").strip()
+        description = str(note.get("note") or "暂无说明").strip()
+        characters = ", ".join(str(item) for item in note.get("related_characters") or [])
+        lines = [f"- 标题：{title}", f"  说明：{description}"]
+        metadata = [
+            ("首次出现", note.get("first_seen_chapter")),
+            ("最近出现", note.get("recent_seen_chapter")),
+            ("计划回收", note.get("planned_resolution_chapter")),
+            ("优先级", note.get("priority")),
+            ("关联人物", characters),
+        ]
+        for label, value in metadata:
+            if str(value or "").strip():
+                lines.append(f"  {label}：{value}")
+        rendered.append("\n".join(lines)[:700])
+    return "\n\n".join(rendered)[:3500]
 
 
 def compact_story_state(

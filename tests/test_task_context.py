@@ -46,6 +46,27 @@ class AIContextSnapshotTests(TestCase):
             path.write_text('{"version":1,"items":[{"id":"f-001"}]}', encoding="utf-8")
             self.assertFalse(snapshot.matches(project, "chapter_01", text))
 
+    def test_snapshot_hash_covers_selected_task_context(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            text = project.load_chapter("chapter_01").raw
+            selected = {"selected_foreshadowing": [{"id": "f-001", "title": "钥匙"}]}
+            snapshot = AIContextSnapshot.capture(
+                project,
+                "chapter_01",
+                text,
+                task_context=selected,
+            )
+            self.assertTrue(snapshot.matches(project, "chapter_01", text, task_context=selected))
+            self.assertFalse(
+                snapshot.matches(
+                    project,
+                    "chapter_01",
+                    text,
+                    task_context={"selected_foreshadowing": []},
+                )
+            )
+
     def test_capture_does_not_rebuild_full_ai_context(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project = NovelProject.create(Path(tmp) / "proj", "测试")
@@ -57,3 +78,23 @@ class AIContextSnapshotTests(TestCase):
                 snapshot = AIContextSnapshot.capture(project, "chapter_01", text)
 
             self.assertTrue(snapshot.matches(project, "chapter_01", text))
+
+    def test_expansion_snapshot_ignores_unrelated_world_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            text = project.load_chapter("chapter_01").raw
+            snapshot = AIContextSnapshot.capture(
+                project,
+                "chapter_01",
+                text,
+                task_kind="expand",
+            )
+            world = project.canon_dir / "world" / "规则.md"
+            world.write_text("# 规则\n\n发生了与本章无关的变化。\n", encoding="utf-8")
+
+            self.assertTrue(
+                snapshot.matches(project, "chapter_01", text, task_kind="expand")
+            )
+            self.assertFalse(
+                snapshot.matches(project, "chapter_01", text, task_kind="check")
+            )

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Iterable
 
 from PySide6.QtCore import QObject, Signal
 
@@ -10,11 +12,25 @@ from core.project import NovelProject
 from core.project_data import ProjectDataStore
 
 
+@dataclass(frozen=True)
+class ProjectChange:
+    """A narrow description of files changed in the active project."""
+
+    paths: tuple[str, ...] = ()
+    kind: str = "project"
+    full_refresh: bool = False
+
+    @property
+    def path_set(self) -> set[str]:
+        return {str(Path(path).resolve()).casefold() for path in self.paths}
+
+
 class ProjectSession(QObject):
     """Own the active project and publish changes that views can observe."""
 
     project_changed = Signal(object)
     data_changed = Signal(object)
+    data_change_detail = Signal(object, object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -51,10 +67,26 @@ class ProjectSession(QObject):
         self._data_store = ProjectDataStore(project) if project is not None else None
         self.project_changed.emit(project)
 
-    def notify_data_changed(self) -> None:
-        """Tell dependent views that files in the active project changed."""
+    def notify_data_changed(
+        self,
+        paths: Iterable[Path | str] | None = None,
+        *,
+        kind: str = "project",
+    ) -> None:
+        """Tell dependent views which project data changed.
+
+        ``data_changed`` remains a compatibility signal for existing callers.
+        New views should consume ``data_change_detail`` so they can refresh only
+        the projections affected by the changed files.
+        """
         if self._project is not None:
+            change = ProjectChange(
+                paths=tuple(str(Path(path)) for path in (paths or ())),
+                kind=str(kind or "project"),
+                full_refresh=paths is None,
+            )
             self.data_changed.emit(self._project)
+            self.data_change_detail.emit(self._project, change)
 
     def clear(self) -> None:
         self.set_project(None)

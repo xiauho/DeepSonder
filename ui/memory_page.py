@@ -35,7 +35,7 @@ class StoryMemoryPage(QWidget):
 
     sync_requested = Signal()
     chapter_requested = Signal(str)
-    foreshadowing_changed = Signal()
+    foreshadowing_changed = Signal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -203,7 +203,7 @@ class StoryMemoryPage(QWidget):
         except (OSError, ValueError) as exc:
             QMessageBox.warning(self, "保存伏笔失败", str(exc))
             return
-        self.foreshadowing_changed.emit()
+        self.foreshadowing_changed.emit([self._project.memory_dir / "foreshadowing.json"])
 
     def _edit_foreshadowing(self, note: dict) -> None:
         dialog = ForeshadowingEditorDialog(note, self)
@@ -216,7 +216,7 @@ class StoryMemoryPage(QWidget):
         except (KeyError, OSError, ValueError) as exc:
             QMessageBox.warning(self, "保存伏笔失败", str(exc))
             return
-        self.foreshadowing_changed.emit()
+        self.foreshadowing_changed.emit([self._project.memory_dir / "foreshadowing.json"])
 
     def _delete_foreshadowing(self, note: dict) -> None:
         title = str(note.get("title") or "该伏笔")
@@ -234,7 +234,7 @@ class StoryMemoryPage(QWidget):
         except (KeyError, OSError, ValueError) as exc:
             QMessageBox.warning(self, "删除伏笔失败", str(exc))
             return
-        self.foreshadowing_changed.emit()
+        self.foreshadowing_changed.emit([self._project.memory_dir / "foreshadowing.json"])
 
     def set_syncing(self, syncing: bool) -> None:
         self.sync_button.setEnabled(not syncing and self._project is not None)

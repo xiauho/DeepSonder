@@ -31,10 +31,12 @@ class AIController(QObject):
         self._task_runner = task_runner or AITaskRunner(self)
         self._task_chapter_id: str | None = None
         self._task_context_snapshot: AIContextSnapshot | None = None
+        self._task_context_data: object | None = None
         # A worker can finish before the UI has finished reviewing its result.
         # Keep snapshots by token so a nested modal event loop cannot make a
         # valid result look stale by clearing the currently running task state.
         self._result_snapshots: dict[str, AIContextSnapshot] = {}
+        self._result_context_data: dict[str, object | None] = {}
         self._pending_result_tokens: set[str] = set()
 
         self._task_runner.started.connect(self.started)
@@ -62,6 +64,7 @@ class AIController(QObject):
         chapter_id: str,
         editor_text: str | None,
         worker: Callable,
+        task_context: object | None = None,
     ) -> AITaskToken | None:
         """Capture context and start one background task.
 
@@ -71,13 +74,21 @@ class AIController(QObject):
         """
         if self.is_running():
             return None
-        snapshot = AIContextSnapshot.capture(project, chapter_id, editor_text)
+        snapshot = AIContextSnapshot.capture(
+            project,
+            chapter_id,
+            editor_text,
+            task_context=task_context,
+            task_kind=kind,
+        )
         token = self._task_runner.start(kind, chapter_id, worker)
         if token is None:
             return None
         self._task_chapter_id = chapter_id
         self._task_context_snapshot = snapshot
+        self._task_context_data = task_context
         self._result_snapshots[token.task_id] = snapshot
+        self._result_context_data[token.task_id] = task_context
         return token
 
     def cancel(self) -> bool:
@@ -97,12 +108,24 @@ class AIController(QObject):
         )
         if project is None or snapshot is None:
             return False
-        return snapshot.matches(project, chapter_id, editor_text)
+        task_context = (
+            self._result_context_data.get(token.task_id)
+            if token is not None
+            else self._task_context_data
+        )
+        return snapshot.matches(
+            project,
+            chapter_id,
+            editor_text,
+            task_context=task_context,
+            task_kind=token.kind if token is not None else None,
+        )
 
     def release_result(self, token: AITaskToken | None) -> None:
         """Release the snapshot retained while the UI reviews one result."""
         if token is not None:
             self._result_snapshots.pop(token.task_id, None)
+            self._result_context_data.pop(token.task_id, None)
             self._pending_result_tokens.discard(token.task_id)
 
     def _on_task_succeeded(self, token: AITaskToken, result) -> None:
@@ -112,7 +135,9 @@ class AIController(QObject):
     def _on_task_finished(self, token: AITaskToken) -> None:
         self._task_chapter_id = None
         self._task_context_snapshot = None
+        self._task_context_data = None
         if token.task_id not in self._pending_result_tokens:
             # Failed and cancelled tasks have no result-review phase.
             self._result_snapshots.pop(token.task_id, None)
+            self._result_context_data.pop(token.task_id, None)
         self.finished.emit(token)

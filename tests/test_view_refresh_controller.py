@@ -133,6 +133,34 @@ class ViewRefreshControllerTests(unittest.TestCase):
             self.assertEqual(len(dashboard.refreshes), dashboard_count)
             self.assertEqual(export.render_count, 0)
 
+    def test_targeted_canon_change_does_not_refresh_unrelated_pages(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            session = ProjectSession()
+            session.set_project(project)
+            editor = _Editor()
+            controller, left_panel, inspector, dashboard, memory, reports, export = self._controller(
+                session, editor
+            )
+            before = {
+                "left": len(left_panel.projects),
+                "dashboard": len(dashboard.refreshes),
+                "memory": len(memory.projects),
+                "reports": len(reports.projects),
+                "export": len(export.projects),
+            }
+            canon_path = project.canon_dir / "timeline.md"
+
+            session.notify_data_changed([canon_path], kind="canon")
+
+            self.assertEqual(len(left_panel.projects), before["left"] + 1)
+            self.assertEqual(len(dashboard.refreshes), before["dashboard"])
+            self.assertEqual(len(memory.projects), before["memory"])
+            self.assertEqual(len(reports.projects), before["reports"])
+            self.assertEqual(len(export.projects), before["export"])
+            self.assertEqual(len(inspector.calls), 1)
+            self.assertIsNotNone(controller)
+
 
 if __name__ == "__main__":
     unittest.main()

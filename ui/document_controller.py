@@ -12,7 +12,7 @@ from core.project_data import (
     next_available_chapter_id,
     sanitize_filename,
 )
-from ui.editor import Editor
+from ui.editor import Editor, ExternalFileChangedError
 from ui.project_session import ProjectSession
 
 
@@ -21,6 +21,7 @@ class DocumentController(QObject):
 
     document_saved = Signal(str)
     auto_saved = Signal(str)
+    save_conflict_detected = Signal(str)
 
     def __init__(
         self,
@@ -35,6 +36,7 @@ class DocumentController(QObject):
 
         self._auto_save_timer = QTimer(self)
         self._auto_save_timer.timeout.connect(self.auto_save)
+        self._save_conflict_path: Path | None = None
 
     @property
     def project(self):
@@ -59,8 +61,37 @@ class DocumentController(QObject):
             return False
         return self.editor.open_file(category, str(path))
 
-    def save(self) -> bool:
-        return bool(self.editor.save())
+    @property
+    def save_conflict_path(self) -> Path | None:
+        return self._save_conflict_path
+
+    def save(self, *, force: bool = False) -> bool:
+        path = self.editor.current_path()
+        self._save_conflict_path = None
+        if not force and path:
+            has_external_change = getattr(self.editor, "has_external_change", None)
+            if callable(has_external_change) and has_external_change():
+                self._save_conflict_path = Path(path)
+                self.save_conflict_detected.emit(str(path))
+                return False
+        try:
+            saved = bool(self.editor.save(force=force) if force else self.editor.save())
+        except ExternalFileChangedError as exc:
+            self._save_conflict_path = exc.path
+            self.save_conflict_detected.emit(str(exc.path))
+            return False
+        if saved and path and self.project is not None:
+            self.project_session.notify_data_changed([path], kind="file")
+        return saved
+
+    def reload_current_file(self) -> bool:
+        reload_file = getattr(self.editor, "reload_current_file", None)
+        if not callable(reload_file):
+            return False
+        reloaded = bool(reload_file())
+        if reloaded:
+            self._save_conflict_path = None
+        return reloaded
 
     def save_if_dirty(self) -> bool:
         return not self.editor.is_dirty() or self.save()
@@ -97,7 +128,7 @@ class DocumentController(QObject):
             path,
             f"# {title}\n\n## 大纲\n- 本章目标：\n- 核心冲突：\n- 章节钩子：\n\n## 剧情简写\n\n\n## 正文\n\n",
         )
-        self.project_session.notify_data_changed()
+        self.project_session.notify_data_changed([path], kind="chapter")
         return path
 
     def delete_chapter(
@@ -117,7 +148,10 @@ class DocumentController(QObject):
         deleted = self.project_session.require_data_store().delete_chapter(chapter_id)
         if is_current:
             self.editor.clear_document("章节已删除")
-        self.project_session.notify_data_changed()
+        self.project_session.notify_data_changed(
+            [target, project.memory_dir / "chapter_summaries.json"],
+            kind="chapter",
+        )
         return deleted
 
     def create_character(self, name: str) -> Path:
@@ -130,7 +164,7 @@ class DocumentController(QObject):
             path,
             f"# {name}\n\n- 身份：\n- 外貌特征：\n- 性格：\n- 核心欲望：\n- 当前目标：\n- 战力/能力：\n- 关键关系：\n- 秘密：\n",
         )
-        self.project_session.notify_data_changed()
+        self.project_session.notify_data_changed([path], kind="canon")
         return path
 
     def create_world_entry(self, title: str) -> Path:
@@ -143,7 +177,7 @@ class DocumentController(QObject):
             path,
             f"# {title}\n\n## 核心规则\n\n## 历史与现状\n\n## 对剧情的约束\n",
         )
-        self.project_session.notify_data_changed()
+        self.project_session.notify_data_changed([path], kind="canon")
         return path
 
     def import_markdown(self, sources: list[Path | str]) -> list[Path]:
@@ -163,7 +197,7 @@ class DocumentController(QObject):
             store.write_new_file(destination, text)
             imported.append(destination)
         if imported:
-            self.project_session.notify_data_changed()
+            self.project_session.notify_data_changed(imported, kind="chapter")
         return imported
 
     @staticmethod

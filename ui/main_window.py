@@ -195,6 +195,7 @@ class MainWindow(QMainWindow):
             inspector=self.inspector,
             reports_page=self.reports_page,
             go_to_writing=lambda: self._show_route("writing"),
+            save_if_dirty=self._save_if_dirty,
             parent=self,
         )
         self.ai_workflow_controller.output_requested.connect(
@@ -390,14 +391,18 @@ class MainWindow(QMainWindow):
         output_header = QHBoxLayout()
         output_title = QLabel("AI 工作记录")
         output_title.setObjectName("panelTitle")
+        copy_button = QPushButton("复制")
+        copy_button.setObjectName("ghostButton")
+        copy_button.clicked.connect(lambda: self.ai_task_view_controller.copy_output())
         clear_button = QPushButton("清空")
         clear_button.setObjectName("ghostButton")
-        clear_button.clicked.connect(lambda: self.output_panel.clear())
+        clear_button.clicked.connect(lambda: self.ai_task_view_controller.clear_output())
         close_button = QPushButton("收起")
         close_button.setObjectName("ghostButton")
         close_button.clicked.connect(self.toggle_output)
         output_header.addWidget(output_title)
         output_header.addStretch(1)
+        output_header.addWidget(copy_button)
         output_header.addWidget(clear_button)
         output_header.addWidget(close_button)
         output_layout.addLayout(output_header)
@@ -518,10 +523,10 @@ class MainWindow(QMainWindow):
         self.editor.dirty_changed.connect(self._on_dirty_changed)
         self.ai_controller.started.connect(self._on_ai_started)
         self.ai_controller.finished.connect(self._on_ai_finished)
-        self.document_controller.document_saved.connect(
-            self.view_refresh_controller.refresh_current_context
-        )
         self.document_controller.auto_saved.connect(self._on_auto_saved)
+        self.document_controller.save_conflict_detected.connect(
+            self._on_save_conflict_detected
+        )
         self.editor.exit_focus_button.clicked.connect(self._exit_focus_mode)
 
     # ------------------------------------------------------------------
@@ -597,7 +602,10 @@ class MainWindow(QMainWindow):
     def _on_project_changed(self, project: NovelProject | None) -> None:
         """Update shell state after the view refresh controller switches projects."""
         self.primary_nav.set_project(project.name if project else None)
-        self.output_panel.clear()
+        if hasattr(self, "ai_task_view_controller"):
+            self.ai_task_view_controller.clear_output()
+        else:
+            self.output_panel.clear()
         self.status_message.setText(
             f"已打开 · {project.name}" if project else "尚未打开项目"
         )
@@ -645,6 +653,8 @@ class MainWindow(QMainWindow):
                 QMessageBox.information(self, "保存", "请先打开一份可编辑的故事资料。")
             return False
         if not self.document_controller.save():
+            if self.document_controller.save_conflict_path is not None:
+                return self._resolve_save_conflict()
             if notify:
                 QMessageBox.warning(self, "保存失败", "文件未能保存，请检查写入权限。")
             return False
@@ -652,6 +662,31 @@ class MainWindow(QMainWindow):
             self.status_message.setText("已保存")
         self._update_window_title()
         return True
+
+    def _resolve_save_conflict(self) -> bool:
+        path = self.document_controller.save_conflict_path
+        if path is None:
+            return False
+        choice = QMessageBox(self)
+        choice.setIcon(QMessageBox.Icon.Warning)
+        choice.setWindowTitle("文件已被外部修改")
+        choice.setText(f"当前文件在编辑期间发生了外部修改：\n{path.name}")
+        choice.setInformativeText(
+            "重新加载会放弃当前未保存内容；覆盖保存会用编辑器中的内容替换磁盘文件。"
+        )
+        reload_button = choice.addButton(
+            "重新加载外部版本", QMessageBox.ButtonRole.DestructiveRole
+        )
+        overwrite_button = choice.addButton(
+            "覆盖外部修改", QMessageBox.ButtonRole.AcceptRole
+        )
+        choice.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+        choice.exec()
+        if choice.clickedButton() is reload_button:
+            return self.document_controller.reload_current_file()
+        if choice.clickedButton() is overwrite_button:
+            return self.document_controller.save(force=True)
+        return False
 
     def new_chapter(self) -> None:
         if not self._require_project():
@@ -840,7 +875,11 @@ class MainWindow(QMainWindow):
         current = self.editor.current_path()
         if current and Path(current) == Path(path_str):
             return
-        if self.document_controller.open_file(category, path_str) and self.project:
+        opened = self.document_controller.open_file(category, path_str)
+        if not opened and self.document_controller.save_conflict_path is not None:
+            if self._resolve_save_conflict():
+                opened = self.document_controller.open_file(category, path_str)
+        if opened and self.project:
             self.view_refresh_controller.refresh_inspector(self.project)
             self._show_route(
                 self.story_navigation_controller.route_for_category(category)
@@ -975,6 +1014,10 @@ class MainWindow(QMainWindow):
     def _on_auto_saved(self, _path: str) -> None:
         self.auto_save_status.setText("刚刚自动保存")
 
+    def _on_save_conflict_detected(self, path: str) -> None:
+        self.auto_save_status.setText("检测到外部修改，尚未覆盖")
+        self.status_message.setText(f"文件已被外部修改：{Path(path).name}")
+
     def _on_dirty_changed(self, _dirty: bool) -> None:
         self._update_window_title()
 
@@ -989,7 +1032,12 @@ class MainWindow(QMainWindow):
         )
 
     def _save_if_dirty(self) -> bool:
-        return self.document_controller.save_if_dirty()
+        # Opening the first project normally has no current document yet. In
+        # that state there is nothing to save, so project switching must be
+        # allowed to continue.
+        if not self.editor.is_dirty():
+            return True
+        return self.save_current_file(notify=False)
 
     def expand_chapter(self) -> None:
         self.ai_workflow_controller.expand()

@@ -69,3 +69,26 @@ class ExpansionTests(TestCase):
         )
         self.assertIn("最多最近 7 个已完成章节的摘要", dsh.calls[0]["user"])
         self.assertIn("最多最近 7 个已完成章节的摘要", dsh.calls[1]["user"])
+
+    def test_selected_foreshadowing_is_forwarded_to_prompt_and_retry(self) -> None:
+        dsh = FakeDSH([self.onboarding_output, self.valid_output])
+        selected = [
+            {
+                "id": "f-selected",
+                "title": "残缺古剑的来历",
+                "note": "与旧宗门有关。",
+                "planned_resolution_chapter": "chapter_08",
+                "priority": "high",
+                "status": "open",
+            }
+        ]
+        expansion.run_expansion(
+            self.project,
+            "chapter_01",
+            dsh,
+            target_chars=300,
+            selected_foreshadowing=selected,
+        )
+        for call in dsh.calls:
+            self.assertIn("残缺古剑的来历", call["user"])
+            self.assertIn("本次重点关注的伏笔", call["user"])

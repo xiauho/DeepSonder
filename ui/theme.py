@@ -187,6 +187,31 @@ QListWidget#chapterList::item:selected, QListWidget#trashList::item:selected {
     color: __TEXT__;
     border: none;
 }
+QListWidget#foreshadowingSelectionList {
+    background: __FIELD__;
+    color: __TEXT__;
+    border: 1px solid __BORDER__;
+    border-radius: 8px;
+    outline: none;
+    selection-background-color: transparent;
+    selection-color: __TEXT__;
+}
+QListWidget#foreshadowingSelectionList::item {
+    min-height: __TREE_ITEM_HEIGHT__px;
+    padding: 4px 12px;
+    margin: 2px 4px;
+    border-radius: 6px;
+    background: __FIELD__;
+    color: __TEXT__;
+}
+QListWidget#foreshadowingSelectionList::item:hover {
+    background: __HOVER__;
+}
+QListWidget#foreshadowingSelectionList::item:selected {
+    background: __FIELD__;
+    color: __TEXT__;
+    border: none;
+}
 QToolButton#panelToggleButton {
     background: transparent;
     color: __MUTED__;
@@ -307,7 +332,8 @@ QCheckBox {
     min-height: 24px;
 }
 QCheckBox::indicator,
-QListWidget#chapterList::indicator {
+QListWidget#chapterList::indicator,
+QListWidget#foreshadowingSelectionList::indicator {
     width: 18px;
     height: 18px;
     border: 1px solid __CHECK_BORDER__;
@@ -315,18 +341,21 @@ QListWidget#chapterList::indicator {
     background: __CHECK_BG__;
 }
 QCheckBox::indicator:hover,
-QListWidget#chapterList::indicator:hover {
+QListWidget#chapterList::indicator:hover,
+QListWidget#foreshadowingSelectionList::indicator:hover {
     border-color: __ACCENT__;
     background: __HOVER__;
 }
 QCheckBox::indicator:checked,
-QListWidget#chapterList::indicator:checked {
+QListWidget#chapterList::indicator:checked,
+QListWidget#foreshadowingSelectionList::indicator:checked {
     border-color: __ACCENT__;
     background: __ACCENT__;
     image: url("__CHECKMARK__");
 }
 QCheckBox::indicator:disabled,
-QListWidget#chapterList::indicator:disabled {
+QListWidget#chapterList::indicator:disabled,
+QListWidget#foreshadowingSelectionList::indicator:disabled {
     border-color: __BORDER__;
     background: __BG__;
 }

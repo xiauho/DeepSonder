@@ -17,6 +17,7 @@ def run_expansion(
     dsh: DSHClient,
     target_chars: int = 2000,
     history_chapters: int = EXPANSION_SUMMARY_COUNT,
+    selected_foreshadowing: list[dict] | tuple[dict, ...] | None = None,
     cancel_event: threading.Event | None = None,
 ) -> tuple[str, str | None]:
     """Generate a chapter draft, retrying once when the output breaks protocol.
@@ -43,6 +44,7 @@ def run_expansion(
         chapter_id,
         target_chars,
         summary_count=history_chapters,
+        selected_foreshadowing=selected_foreshadowing,
         context=context,
     )
     generate_options = {"cancel_event": cancel_event} if cancel_event is not None else {}
@@ -55,6 +57,7 @@ def run_expansion(
             chapter_id,
             target_chars=target_chars,
             summary_count=history_chapters,
+            selected_foreshadowing=selected_foreshadowing,
             context=context,
         )
         # The retry regenerates the full chapter, so it keeps the same timeout

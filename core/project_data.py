@@ -33,7 +33,12 @@ def next_available_chapter_id(
     project: NovelProject,
     preferred: str | None = None,
 ) -> str:
-    """Return a non-conflicting chapter id for a project."""
+    """Return a non-conflicting chapter id for a project.
+
+    The default id is based on the largest canonical chapter number, not the
+    number of files. This remains stable when chapters were deleted or when a
+    project contains custom/imported chapter ids.
+    """
     existing = {path.stem.casefold() for path in project.list_chapters()}
     if preferred is None:
         numeric_ids = []

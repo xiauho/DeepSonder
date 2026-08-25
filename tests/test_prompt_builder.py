@@ -47,6 +47,41 @@ class PromptBuilderTests(TestCase):
         self.assertNotIn("【世界观摘要】", user)
         self.assertNotIn("【战力规则】", user)
 
+    def test_expansion_prompt_contains_only_selected_foreshadowing(self) -> None:
+        selected = [
+            {
+                "id": "f-selected",
+                "title": "残缺古剑的来历",
+                "note": "剑身上的缺口与旧宗门有关。",
+                "first_seen_chapter": "chapter_01",
+                "recent_seen_chapter": "chapter_03",
+                "planned_resolution_chapter": "chapter_08",
+                "priority": "high",
+                "related_characters": ["林夜"],
+                "status": "open",
+            },
+        ]
+        _system, user = prompt_builder.build_expansion_prompt(
+            self.project,
+            "chapter_01",
+            2000,
+            selected_foreshadowing=selected,
+        )
+
+        self.assertIn("【本次重点关注的伏笔】", user)
+        self.assertIn("残缺古剑的来历", user)
+        self.assertIn("剑身上的缺口与旧宗门有关", user)
+        self.assertIn("chapter_08", user)
+
+    def test_expansion_prompt_can_omit_foreshadowing(self) -> None:
+        _system, user = prompt_builder.build_expansion_prompt(
+            self.project,
+            "chapter_01",
+            2000,
+            selected_foreshadowing=[],
+        )
+        self.assertIn("（本次未指定伏笔）", user)
+
     def test_prompt_history_window_is_configurable(self) -> None:
         _system, expansion_user = prompt_builder.build_expansion_prompt(
             self.project, "chapter_01", summary_count=7
@@ -93,5 +128,7 @@ class PromptBuilderTests(TestCase):
         self.assertNotIn('"current_chapter": 1,', user)
 
     def test_state_update_prompt_falls_back_to_old_state_number(self) -> None:
-        _system, user = prompt_builder.build_state_update_prompt(self.project, "序章")
+        with TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "novel", "测试作品")
+            _system, user = prompt_builder.build_state_update_prompt(project, "序章")
         self.assertIn('"current_chapter": 1', user)

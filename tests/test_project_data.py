@@ -33,6 +33,7 @@ class ProjectDataStoreTests(TestCase):
                 "# 第二章\n", encoding="utf-8"
             )
             self.assertTrue(chapter_id_exists(project, "chapter_02"))
+            # The helper's result is also stable on case-sensitive hosts.
             self.assertEqual(
                 next_available_chapter_id(project, "chapter_02"), "chapter_02_2"
             )
