@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 
 from core.config import load_config
 from core.project import NovelProject
+from core.project_data import ChapterIdConflictError
 from ui.ai_controller import AIController
 from ui.ai_engine_controller import AIEngineController
 from ui.ai_task_view_controller import AITaskViewController
@@ -668,6 +669,21 @@ class MainWindow(QMainWindow):
             return
         try:
             path = self.document_controller.create_chapter(title, chapter_id)
+        except ChapterIdConflictError as exc:
+            answer = QMessageBox.question(
+                self,
+                "章节 ID 已存在",
+                f"章节 ID“{exc.chapter_id}”已经存在。\n\n是否改用可用 ID“{exc.suggested_id}”？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+            try:
+                path = self.document_controller.create_chapter(title, exc.suggested_id)
+            except (OSError, ValueError, FileExistsError) as retry_exc:
+                QMessageBox.warning(self, "创建失败", str(retry_exc))
+                return
         except FileExistsError:
             QMessageBox.warning(self, "章节已存在", f"请换一个文件标识：{chapter_id}")
             return

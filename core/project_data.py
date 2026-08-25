@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import re
 import shutil
 from uuid import uuid4
 
@@ -20,6 +21,48 @@ def sanitize_filename(value: str) -> str:
     forbidden = '<>:"/\\|?*'
     cleaned = "".join("_" if char in forbidden else char for char in str(value)).strip(" .")
     return cleaned or "untitled"
+
+
+def chapter_id_exists(project: NovelProject, chapter_id: str) -> bool:
+    """Return whether a chapter id is occupied, case-insensitively."""
+    normalized = sanitize_filename(chapter_id).casefold()
+    return any(path.stem.casefold() == normalized for path in project.list_chapters())
+
+
+def next_available_chapter_id(
+    project: NovelProject,
+    preferred: str | None = None,
+) -> str:
+    """Return a non-conflicting chapter id for a project."""
+    existing = {path.stem.casefold() for path in project.list_chapters()}
+    if preferred is None:
+        numeric_ids = []
+        for path in project.list_chapters():
+            match = re.fullmatch(r"chapter[_-]?(\d+)", path.stem, re.IGNORECASE)
+            if match:
+                numeric_ids.append(int(match.group(1)))
+        base = f"chapter_{max(numeric_ids, default=0) + 1:02d}"
+    else:
+        base = sanitize_filename(preferred)
+
+    candidate = base
+    suffix = 2
+    while candidate.casefold() in existing:
+        candidate = f"{base}_{suffix}"
+        suffix += 1
+    return candidate
+
+
+class ChapterIdConflictError(FileExistsError):
+    """Raised when a requested chapter id already belongs to another file."""
+
+    def __init__(self, chapter_id: str, suggested_id: str, path: Path):
+        self.chapter_id = str(chapter_id)
+        self.suggested_id = str(suggested_id)
+        self.path = Path(path)
+        super().__init__(
+            f"章节 ID 已存在：{self.chapter_id}。可使用：{self.suggested_id}。"
+        )
 
 
 @dataclass(frozen=True)
@@ -225,8 +268,15 @@ class ProjectDataStore:
                 continue
         return sorted(entries, key=lambda item: item.deleted_at, reverse=True)
 
-    def restore_trash_item(self, trash_id: str) -> Path:
-        """Restore one recycle-bin entry to its original chapter path."""
+    def restore_trash_item(
+        self,
+        trash_id: str,
+        *,
+        conflict_policy: str = "error",
+    ) -> Path:
+        """Restore one recycle-bin entry to its original or a new chapter path."""
+        if conflict_policy not in {"error", "rename"}:
+            raise ValueError("无效的章节恢复冲突策略。")
         entry = self._read_trash_entry(self._trash_entry_path(trash_id))
         target = self.root / entry.original_path
         if (
@@ -234,8 +284,16 @@ class ProjectDataStore:
             or target.name != f"{entry.chapter_id}.md"
         ):
             raise ValueError("回收站条目不是有效的章节路径。")
-        if target.exists():
-            raise FileExistsError(target)
+        restored_id = entry.chapter_id
+        if target.exists() or chapter_id_exists(self.project, entry.chapter_id):
+            if conflict_policy != "rename":
+                raise ChapterIdConflictError(
+                    entry.chapter_id,
+                    next_available_chapter_id(self.project, entry.chapter_id),
+                    target,
+                )
+            restored_id = next_available_chapter_id(self.project, entry.chapter_id)
+            target = self.project.chapters_dir / f"{restored_id}.md"
 
         old_summaries = deepcopy(self.load_chapter_summaries())
         chapter_text = (entry.path / "chapter.md").read_text(encoding="utf-8")
@@ -244,7 +302,7 @@ class ProjectDataStore:
             if entry.has_summary:
                 summary = json.loads((entry.path / "summary.json").read_text(encoding="utf-8"))
                 summaries = deepcopy(old_summaries)
-                summaries[entry.chapter_id] = summary
+                summaries[restored_id] = summary
                 self.save_chapter_summaries(summaries)
             self._remove_trash_path(entry.path)
         except Exception:

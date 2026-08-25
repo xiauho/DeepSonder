@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from core.foreshadowing import ForeshadowingTrashEntry
-from core.project_data import ProjectDataStore, TrashEntry
+from core.project_data import ChapterIdConflictError, ProjectDataStore, TrashEntry
 from ui.icons import set_button_icon
 
 
@@ -118,6 +118,22 @@ class TrashDialog(QDialog):
                 self.store.restore_trash_item(trash_id)
             else:
                 self.store.restore_foreshadowing(trash_id)
+        except ChapterIdConflictError as exc:
+            answer = QMessageBox.question(
+                self,
+                "章节 ID 已存在",
+                f"原章节 ID“{exc.chapter_id}”已被占用。\n\n"
+                f"是否恢复为“{exc.suggested_id}”？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+            try:
+                self.store.restore_trash_item(trash_id, conflict_policy="rename")
+            except (OSError, ValueError, KeyError) as retry_exc:
+                QMessageBox.critical(self, "恢复失败", str(retry_exc))
+                return
         except FileExistsError:
             QMessageBox.warning(
                 self,

@@ -4,11 +4,39 @@ from unittest import TestCase
 from unittest.mock import patch
 
 from core.project import NovelProject
-from core.project_data import ProjectDataStore, sanitize_filename
+from core.project_data import (
+    ChapterIdConflictError,
+    ProjectDataStore,
+    chapter_id_exists,
+    next_available_chapter_id,
+    sanitize_filename,
+)
 from core.foreshadowing import ForeshadowingStore
 
 
 class ProjectDataStoreTests(TestCase):
+    def test_next_chapter_id_uses_maximum_number_and_skips_conflicts(self) -> None:
+        with TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            (project.chapters_dir / "chapter_03.md").write_text(
+                "# 第三章\n", encoding="utf-8"
+            )
+            self.assertEqual(next_available_chapter_id(project), "chapter_04")
+            self.assertEqual(
+                next_available_chapter_id(project, "chapter_03"), "chapter_03_2"
+            )
+
+    def test_chapter_id_conflict_is_case_insensitive(self) -> None:
+        with TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            (project.chapters_dir / "Chapter_02.md").write_text(
+                "# 第二章\n", encoding="utf-8"
+            )
+            self.assertTrue(chapter_id_exists(project, "chapter_02"))
+            self.assertEqual(
+                next_available_chapter_id(project, "chapter_02"), "chapter_02_2"
+            )
+
     def test_sanitize_filename_is_shared_and_stable(self) -> None:
         self.assertEqual(sanitize_filename('  a:b?.md  '), "a_b_.md")
         self.assertEqual(sanitize_filename("..."), "untitled")
@@ -105,6 +133,25 @@ class ProjectDataStoreTests(TestCase):
             store.delete_trash_item(entry.trash_id)
             self.assertEqual(store.list_trash(), [])
             self.assertEqual(chapter.read_text(encoding="utf-8"), "# 新的第二章\n")
+
+    def test_restore_can_rename_when_original_id_is_occupied(self) -> None:
+        with TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            original = project.chapters_dir / "chapter_02.md"
+            original.write_text("# 第二章\n", encoding="utf-8")
+            store = ProjectDataStore(project)
+            store.save_chapter_summaries({"chapter_02": "旧摘要"})
+            store.delete_chapter("chapter_02")
+            original.write_text("# 新的第二章\n", encoding="utf-8")
+
+            entry = store.list_trash()[0]
+            restored = store.restore_trash_item(entry.trash_id, conflict_policy="rename")
+
+            self.assertEqual(restored.stem, "chapter_02_2")
+            self.assertTrue(restored.exists())
+            self.assertEqual(
+                store.load_chapter_summaries(), {"chapter_02_2": "旧摘要"}
+            )
 
     def test_delete_chapter_rejects_path_traversal_and_rolls_back_metadata_failure(self) -> None:
         with TemporaryDirectory() as tmp:

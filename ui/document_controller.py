@@ -6,7 +6,12 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
-from core.project_data import sanitize_filename
+from core.project_data import (
+    ChapterIdConflictError,
+    chapter_id_exists,
+    next_available_chapter_id,
+    sanitize_filename,
+)
 from ui.editor import Editor
 from ui.project_session import ProjectSession
 
@@ -72,7 +77,7 @@ class DocumentController(QObject):
 
     def next_chapter_id(self) -> str:
         store = self.project_session.require_data_store()
-        return f"chapter_{len(store.list_chapters()) + 1:02d}"
+        return next_available_chapter_id(store.project)
 
     def create_chapter(self, title: str, chapter_id: str) -> Path:
         project = self._require_project()
@@ -82,6 +87,12 @@ class DocumentController(QObject):
             raise ValueError("章节标题和文件标识不能为空。")
         chapter_id = sanitize_filename(raw_chapter_id)
         path = project.chapters_dir / f"{chapter_id}.md"
+        if chapter_id_exists(project, chapter_id):
+            raise ChapterIdConflictError(
+                chapter_id,
+                next_available_chapter_id(project, chapter_id),
+                path,
+            )
         self.project_session.require_data_store().write_new_file(
             path,
             f"# {title}\n\n## 大纲\n- 本章目标：\n- 核心冲突：\n- 章节钩子：\n\n## 剧情简写\n\n\n## 正文\n\n",
@@ -142,11 +153,8 @@ class DocumentController(QObject):
         for source_value in sources:
             source = Path(source_value)
             stem = sanitize_filename(source.stem) or "imported_chapter"
-            destination = project.chapters_dir / f"{stem}.md"
-            suffix = 2
-            while destination.exists():
-                destination = project.chapters_dir / f"{stem}_{suffix}.md"
-                suffix += 1
+            chapter_id = next_available_chapter_id(project, stem)
+            destination = project.chapters_dir / f"{chapter_id}.md"
             text = self._read_import_text(source)
             if not text.lstrip().startswith("# "):
                 text = f"# {source.stem}\n\n## 正文\n\n{text.strip()}\n"

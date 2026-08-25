@@ -5,6 +5,7 @@ from pathlib import Path
 from PySide6.QtCore import QCoreApplication, QObject, Signal
 
 from core.project import NovelProject
+from core.project_data import ChapterIdConflictError
 from ui.document_controller import DocumentController
 from ui.project_session import ProjectSession
 
@@ -94,6 +95,33 @@ class DocumentControllerTests(unittest.TestCase):
             self.assertTrue(world.exists())
             self.assertEqual(len(imported), 1)
             self.assertEqual(len(changes), 4)
+
+    def test_next_chapter_id_does_not_reuse_existing_number(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            (project.chapters_dir / "chapter_03.md").write_text(
+                "# 第三章\n", encoding="utf-8"
+            )
+            session = ProjectSession()
+            session.set_project(project)
+            controller = DocumentController(FakeEditor(), session)
+
+            self.assertEqual(controller.next_chapter_id(), "chapter_04")
+
+    def test_create_chapter_reports_suggestion_without_overwriting(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            existing = project.chapters_dir / "chapter_02.md"
+            existing.write_text("# 原章节\n", encoding="utf-8")
+            session = ProjectSession()
+            session.set_project(project)
+            controller = DocumentController(FakeEditor(), session)
+
+            with self.assertRaises(ChapterIdConflictError) as raised:
+                controller.create_chapter("新章节", "Chapter_02")
+
+            self.assertEqual(raised.exception.suggested_id, "Chapter_02_2")
+            self.assertEqual(existing.read_text(encoding="utf-8"), "# 原章节\n")
 
     def test_auto_save_reports_success_only_after_save(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
