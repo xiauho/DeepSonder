@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 
 
 class ForeshadowingEditorDialog(QDialog):
-    """Edit author-controlled fields while keeping lifecycle fields read-only."""
+    """Edit author-controlled fields, including the explicit lifecycle state."""
 
     def __init__(self, note: dict | None = None, parent=None):
         super().__init__(parent)
@@ -27,7 +27,7 @@ class ForeshadowingEditorDialog(QDialog):
         root = QVBoxLayout(self)
         root.setSpacing(10)
         hint = QLabel(
-            "伏笔内容由作者维护；最近出现章节、回收章节和当前状态将在后续 AI 任务确认后自动更新。"
+            "伏笔内容和状态由作者维护；AI 扩写只会提供可能已回收的参考建议，不会自行改变状态。"
         )
         hint.setWordWrap(True)
         hint.setObjectName("mutedLabel")
@@ -67,12 +67,20 @@ class ForeshadowingEditorDialog(QDialog):
         form.addRow("标签", self.tags)
 
         if note:
-            status = _status_label(str(note.get("status") or "open"))
+            self.status = QComboBox()
+            self.status.addItem("未回收", "open")
+            self.status.addItem("已回收", "resolved")
+            self.status.addItem("已放弃", "abandoned")
+            status_index = self.status.findData(str(note.get("status") or "open"))
+            self.status.setCurrentIndex(max(0, status_index))
             recent = str(note.get("recent_seen_chapter") or "尚未记录")
-            resolved = str(note.get("resolved_chapter") or "尚未回收")
-            form.addRow("当前状态", _readonly_label(status))
+            self.resolved_chapter = QLineEdit(str(note.get("resolved_chapter") or ""))
+            self.resolved_chapter.setPlaceholderText("可选，例如：chapter_20")
+            self.status.currentIndexChanged.connect(self._sync_resolved_chapter)
+            form.addRow("当前状态", self.status)
             form.addRow("最近出现章节", _readonly_label(recent))
-            form.addRow("回收章节", _readonly_label(resolved))
+            form.addRow("回收章节", self.resolved_chapter)
+            self._sync_resolved_chapter()
 
         root.addLayout(form)
         buttons = QDialogButtonBox(
@@ -83,7 +91,7 @@ class ForeshadowingEditorDialog(QDialog):
         root.addWidget(buttons)
 
     def values(self) -> dict:
-        return {
+        values = {
             "title": self.title.text().strip(),
             "note": self.description.toPlainText().strip(),
             "first_seen_chapter": self.first_seen.text().strip(),
@@ -92,18 +100,25 @@ class ForeshadowingEditorDialog(QDialog):
             "related_characters": _split_list(self.characters.text()),
             "tags": _split_list(self.tags.text()),
         }
+        if self.note:
+            status = str(self.status.currentData() or "open")
+            values["status"] = status
+            values["resolved_chapter"] = (
+                self.resolved_chapter.text().strip() if status == "resolved" else ""
+            )
+        return values
+
+    def _sync_resolved_chapter(self) -> None:
+        if not self.note:
+            return
+        is_resolved = self.status.currentData() == "resolved"
+        self.resolved_chapter.setEnabled(is_resolved)
+        if not is_resolved:
+            self.resolved_chapter.clear()
 
 
 def _split_list(value: str) -> list[str]:
     return [part.strip() for part in str(value or "").split(",") if part.strip()]
-
-
-def _status_label(status: str) -> str:
-    return {
-        "open": "未回收",
-        "resolved": "已回收",
-        "abandoned": "已放弃",
-    }.get(status, status)
 
 
 def _readonly_label(text: str) -> QLabel:

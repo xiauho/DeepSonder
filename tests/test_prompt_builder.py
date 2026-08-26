@@ -38,14 +38,22 @@ class PromptBuilderTests(TestCase):
             characters = project.canon_dir / "characters"
             (characters / "计划角色.md").write_text("# 计划角色\n计划设定\n", encoding="utf-8")
             (characters / "正文角色.md").write_text("# 正文角色\n正文设定\n", encoding="utf-8")
+            (project.canon_dir / "world" / "世界规则.md").write_text(
+                "# 世界规则\n昼夜由潮汐决定。\n", encoding="utf-8"
+            )
+            (project.canon_dir / "power" / "能力体系.md").write_text(
+                "# 能力体系\n能力使用会消耗记忆。\n", encoding="utf-8"
+            )
             _system, user = prompt_builder.build_expansion_prompt(project, "chapter_01")
 
         self.assertIn("【本次上下文范围】", user)
         self.assertIn("最近 5 个已完成章节的摘要", user)
         self.assertIn("计划角色", user)
         self.assertNotIn("正文角色", user)
-        self.assertNotIn("【世界观摘要】", user)
-        self.assertNotIn("【战力规则】", user)
+        self.assertIn("【世界观摘要】", user)
+        self.assertIn("昼夜由潮汐决定", user)
+        self.assertIn("【其他体系设定·低优先级背景】", user)
+        self.assertIn("能力使用会消耗记忆", user)
 
     def test_expansion_prompt_contains_only_selected_foreshadowing(self) -> None:
         selected = [
@@ -72,6 +80,17 @@ class PromptBuilderTests(TestCase):
         self.assertIn("残缺古剑的来历", user)
         self.assertIn("剑身上的缺口与旧宗门有关", user)
         self.assertIn("chapter_08", user)
+        self.assertIn("伏笔 ID：f-selected", user)
+
+        review_system, review_user = prompt_builder.build_foreshadowing_review_prompt(
+            "chapter_01",
+            "古剑铭文揭示了铸剑者。",
+            selected,
+        )
+        self.assertIn("foreshadowing_review", review_system)
+        self.assertIn("伏笔 ID：f-selected", review_user)
+        self.assertIn('"possibly_resolved"', review_user)
+        self.assertIn("古剑铭文揭示了铸剑者", review_user)
 
     def test_expansion_prompt_can_omit_foreshadowing(self) -> None:
         _system, user = prompt_builder.build_expansion_prompt(

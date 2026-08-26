@@ -9,6 +9,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 from core.project_data import (
     ChapterIdConflictError,
     chapter_id_exists,
+    normalize_canon_entry_kind,
     next_available_chapter_id,
     sanitize_filename,
 )
@@ -175,29 +176,62 @@ class DocumentController(QObject):
         self.project_session.notify_data_changed([target], kind="canon")
         return deleted
 
-    def create_character(self, name: str) -> Path:
+    def delete_canon_entry(
+        self,
+        kind: str,
+        path: Path | str,
+        *,
+        discard_current_changes: bool = False,
+    ) -> Path:
+        """Move a world, ordinary power, or timeline document to trash."""
         project = self._require_project()
-        name = str(name).strip()
-        if not name:
-            raise ValueError("角色姓名不能为空。")
-        path = project.canon_dir / "characters" / f"{sanitize_filename(name)}.md"
-        self.project_session.require_data_store().write_new_file(
-            path,
-            f"# {name}\n\n- 身份：\n- 外貌特征：\n- 性格：\n- 核心欲望：\n- 当前目标：\n- 战力/能力：\n- 关键关系：\n- 秘密：\n",
+        entry_kind = normalize_canon_entry_kind(kind)
+        if entry_kind == "character":
+            raise ValueError("角色卡请使用角色卡专用删除接口。")
+        target = Path(path)
+        if not target.is_absolute():
+            target = project.root / target
+        current = self.editor.current_path()
+        is_current = bool(current and Path(current).resolve() == target.resolve())
+        if is_current and self.editor.is_dirty() and not discard_current_changes:
+            raise RuntimeError("当前故事资料存在未保存修改，请先保存或放弃修改。")
+
+        deleted = self.project_session.require_data_store().delete_canon_entry(
+            entry_kind, target
+        )
+        if is_current:
+            self.editor.clear_document("故事资料已删除")
+        changed_paths = [target]
+        if entry_kind == "power":
+            changed_paths.append(
+                self.project_session.require_data_store().system_registry_path
+            )
+        self.project_session.notify_data_changed(changed_paths, kind="canon")
+        return deleted
+
+    def create_character(self, name: str) -> Path:
+        return self.create_canon_entry("character", name)
+
+    def create_canon_entry(self, kind: str, title: str) -> Path:
+        """Create a templated story-data entry and publish the change."""
+        self._require_project()
+        entry_kind = normalize_canon_entry_kind(kind)
+        path = self.project_session.require_data_store().create_canon_entry(
+            entry_kind, title
         )
         self.project_session.notify_data_changed([path], kind="canon")
         return path
 
     def create_world_entry(self, title: str) -> Path:
-        project = self._require_project()
-        title = str(title).strip()
-        if not title:
-            raise ValueError("世界观条目名称不能为空。")
-        path = project.canon_dir / "world" / f"{sanitize_filename(title)}.md"
-        self.project_session.require_data_store().write_new_file(
-            path,
-            f"# {title}\n\n## 核心规则\n\n## 历史与现状\n\n## 对剧情的约束\n",
-        )
+        return self.create_canon_entry("world", title)
+
+    def create_power_entry(self, title: str) -> Path:
+        return self.create_canon_entry("power", title)
+
+    def create_timeline(self) -> Path:
+        """Create the singleton timeline document when it is missing."""
+        self._require_project()
+        path = self.project_session.require_data_store().create_timeline()
         self.project_session.notify_data_changed([path], kind="canon")
         return path
 

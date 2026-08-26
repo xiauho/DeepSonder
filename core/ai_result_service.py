@@ -34,12 +34,25 @@ class AIResultService:
     """Keep AI result parsing and project writes independent from Qt widgets."""
 
     @staticmethod
-    def parse_expansion(raw: str, target_chars: int) -> ai_protocol.ContinuationResult:
+    def parse_expansion(
+        raw: str,
+        target_chars: int,
+        *,
+        chapter_id: str | None = None,
+        selected_foreshadowing: list[dict] | tuple[dict, ...] | None = None,
+    ) -> ai_protocol.ExpansionResult:
         target_chars = max(300, int(target_chars))
+        allowed_ids = {
+            str(note.get("id") or "").strip()
+            for note in (selected_foreshadowing or ())
+            if isinstance(note, dict) and str(note.get("id") or "").strip()
+        }
         return ai_protocol.parse_expansion(
             raw,
             min_chars=round(target_chars * 0.85),
             max_chars=round(target_chars * 1.15),
+            expected_chapter_id=chapter_id,
+            allowed_foreshadowing_ids=allowed_ids,
         )
 
     @staticmethod

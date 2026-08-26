@@ -170,10 +170,47 @@ class ForeshadowingStore:
                 updated[key] = value
         if not updated["title"]:
             raise ValueError("伏笔标题不能为空。")
+        if updated["status"] != "resolved":
+            updated["resolved_chapter"] = ""
         updated["updated_at"] = _now()
         notes[notes.index(target)] = updated
         self.save_notes(notes)
         return deepcopy(updated)
+
+    def resolve_notes(self, note_ids: list[str] | tuple[str, ...], chapter_id: str) -> list[dict]:
+        """Mark existing open notes as resolved in one idempotent file write."""
+        raw_chapter_id = str(chapter_id or "").strip()
+        if not raw_chapter_id or Path(raw_chapter_id).name != raw_chapter_id:
+            raise ValueError("无效的回收章节 ID。")
+        resolved_ids: list[str] = []
+        seen: set[str] = set()
+        for note_id in note_ids:
+            raw_id = self._validate_id(note_id)
+            if raw_id not in seen:
+                seen.add(raw_id)
+                resolved_ids.append(raw_id)
+        if not resolved_ids:
+            return []
+
+        notes = self.load_notes()
+        by_id = {note["id"]: note for note in notes}
+        missing = [note_id for note_id in resolved_ids if note_id not in by_id]
+        if missing:
+            raise KeyError(missing[0])
+
+        now = _now()
+        changed: list[dict] = []
+        for note_id in resolved_ids:
+            note = by_id[note_id]
+            if note["status"] != "open":
+                continue
+            note["status"] = "resolved"
+            note["resolved_chapter"] = raw_chapter_id
+            note["updated_at"] = now
+            changed.append(deepcopy(note))
+        if changed:
+            self.save_notes(notes)
+        return changed
 
     def delete_note(self, note_id: str) -> ForeshadowingTrashEntry:
         """Soft-delete one note into the foreshadowing recycle-bin area."""

@@ -11,6 +11,7 @@ from .context_budget import (
     build_ai_context,
     build_task_context,
     gather_sections,
+    render_selected_foreshadowing,
 )
 from .project import NovelProject, chapter_number_from_id
 
@@ -38,6 +39,7 @@ def build_expansion_prompt(
     *,
     summary_count: int = EXPANSION_SUMMARY_COUNT,
     selected_foreshadowing: list[dict] | tuple[dict, ...] | None = None,
+    selected_power: list[str] | tuple[str, ...] | None = None,
     context: AIContext | None = None,
 ) -> tuple[str, str]:
     """Build a compact outline-to-chapter expansion task.
@@ -50,9 +52,10 @@ def build_expansion_prompt(
         project,
         chapter_id,
         character_scope="planning",
-        include_world=False,
-        include_power=False,
+        include_world=True,
+        include_power=True,
         include_timeline=True,
+        selected_power=selected_power,
     )
     chapter = context.chapter
     sections = gather_sections(
@@ -62,15 +65,21 @@ def build_expansion_prompt(
             "outline",
             "plot_brief",
             "selected_foreshadowing",
+            "core_power",
+            "core_systems",
+            "selected_power",
             "state",
             "summaries",
             "characters",
             "future_plan",
             "main_arc",
             "timeline",
+            "world",
+            "power",
         ),
         summary_count=summary_count,
         selected_foreshadowing=selected_foreshadowing,
+        selected_power=selected_power,
         context=context,
     )
     target_chars = max(300, int(target_chars))
@@ -96,7 +105,8 @@ def build_expansion_prompt(
 3. 保持人物身份、世界观规则、时间线和能力设定一致。
 4. 让本章结尾形成明确的章节钩子，但不要替后续章节提前解决核心悬念。
 5. 如果提供了“本次重点关注的伏笔”，应结合本章规划自然推进；除非本章规划明确要求，不要强行回收。
-6. 只返回 NOVEL_TEXT 标记之间的正文。
+6. 全局核心规则始终有效；标记为“核心”的体系设定自动纳入重点范围；用户本次选择的非核心体系设定优先参考；其他体系设定仅作为低优先级背景资料，除非规划明确要求，不要主动引入。
+7. 只返回 NOVEL_TEXT 标记之间的正文。
 
 【当前章节】
 章节：{chapter.title}
@@ -106,7 +116,7 @@ def build_expansion_prompt(
 - 历史剧情：最多最近 {summary_count} 个已完成章节的摘要
 - 当前正文：未加载，扩写只依据本章规划生成
 - 角色资料：仅加载本章标题、大纲和剧情简写中命中的角色卡
-- 世界观与战力：不加载全量资料，以主线、后续规划和故事状态为约束
+- 世界观与体系设定：全局规则始终加载；核心体系自动纳入重点范围；其他体系作为低优先级背景资料加载
 
 【本章规划与用户剧情简写】
 {_section(ctx, "outline", "（暂无规划，请根据故事状态生成合理但克制的章节正文）")}
@@ -148,6 +158,7 @@ def build_expansion_retry_prompt(
     *,
     summary_count: int = EXPANSION_SUMMARY_COUNT,
     selected_foreshadowing: list[dict] | tuple[dict, ...] | None = None,
+    selected_power: list[str] | tuple[str, ...] | None = None,
     context: AIContext | None = None,
 ) -> tuple[str, str]:
     """Build a correction prompt when headless returns a workspace preamble."""
@@ -157,6 +168,7 @@ def build_expansion_retry_prompt(
         target_chars,
         summary_count=summary_count,
         selected_foreshadowing=selected_foreshadowing,
+        selected_power=selected_power,
         context=context,
     )
     retry_system = f"""
@@ -176,6 +188,54 @@ def build_expansion_retry_prompt(
 {user_prompt}
 """.strip()
     return retry_system, retry_user
+
+
+def build_foreshadowing_review_prompt(
+    chapter_id: str,
+    novel_text: str,
+    selected_foreshadowing: list[dict] | tuple[dict, ...],
+) -> tuple[str, str]:
+    """Build a focused post-expansion review against the generated prose."""
+    candidates = render_selected_foreshadowing(selected_foreshadowing)
+    system_prompt = f"""
+{COMMON_RULES}
+
+任务类型：foreshadowing_review。
+只判断本章正文是否明确回收了给定伏笔，不要改写或续写正文。
+只输出合法 JSON，不要输出 Markdown 代码围栏或解释。
+""".strip()
+    user_prompt = f"""
+请复核下方已经生成的章节正文，找出其中已经明确回收的伏笔。
+
+判断规则：
+1. 伏笔只是再次出现、被提及、增强悬念或得到部分推进时，不算回收。
+2. 只有伏笔的核心疑问在正文中得到明确回答或完整闭合时，才列入 possibly_resolved。
+3. 只能返回候选列表中给出的稳定伏笔 ID，不得创造、猜测或改写 ID。
+4. evidence 必须引用能够直接支持判断的正文内容，reason 简要说明闭合了什么疑问。
+5. 没有明确回收时返回空数组。
+
+【当前章节 ID】
+{chapter_id}
+
+【候选伏笔】
+{candidates or "（无候选伏笔）"}
+
+【本章正文】
+{str(novel_text or "").strip()}
+
+返回格式：
+{{
+  "chapter_id": "{chapter_id}",
+  "possibly_resolved": [
+    {{
+      "foreshadowing_id": "候选伏笔的稳定 ID",
+      "evidence": "正文证据",
+      "reason": "回收判断理由"
+    }}
+  ]
+}}
+""".strip()
+    return system_prompt, user_prompt
 
 
 def build_write_prompt(
@@ -319,7 +379,7 @@ def build_summary_prompt(
     sections = gather_sections(
         project,
         chapter_id,
-        ("state", "summaries", "characters", "timeline", "world", "power", "outline", "plot_brief", "content"),
+        ("state", "summaries", "characters", "timeline", "core_power", "core_systems", "world", "power", "outline", "plot_brief", "content"),
         content_keep="head",
         context=context,
     )
@@ -460,7 +520,7 @@ def build_check_prompt(
     sections = gather_sections(
         project,
         chapter_id,
-        ("outline", "plot_brief", "content", "state", "summaries", "characters", "main_arc", "timeline", "world", "power"),
+        ("outline", "plot_brief", "content", "state", "summaries", "characters", "main_arc", "timeline", "core_power", "core_systems", "world", "power"),
         content_keep="head",
         context=context,
     )
@@ -542,8 +602,16 @@ def _related_block(ctx: dict[str, str]) -> str:
     parts = []
     if ctx.get("world"):
         parts.append(f"【世界观摘要】\n{ctx['world']}")
+    if ctx.get("core_power"):
+        parts.append(f"【常驻核心规则】\n{ctx['core_power']}")
+    if ctx.get("core_systems"):
+        parts.append(f"【核心体系设定】\n{ctx['core_systems']}")
+    if ctx.get("selected_power"):
+        parts.append(f"【本次重点体系设定】\n{ctx['selected_power']}")
     if ctx.get("power"):
-        parts.append(f"【战力规则】\n{ctx['power']}")
+        parts.append(
+            f"【其他体系设定·低优先级背景】\n{ctx['power']}"
+        )
     if ctx.get("timeline"):
         parts.append(f"【时间线摘要】\n{ctx['timeline']}")
     if ctx.get("characters"):

@@ -41,6 +41,9 @@ SECTION_RULES: dict[str, tuple[int, str, int]] = {
     "plot_brief": (2500, "head", 0),
     "content": (12000, "tail", 1),
     "selected_foreshadowing": (3500, "head", 1),
+    "core_power": (1800, "head", 1),
+    "core_systems": (3500, "head", 1),
+    "selected_power": (3500, "head", 1),
     "state": (4000, "head", 2),
     "summaries": (2000, "head", 3),
     "characters": (3000, "head", 4),
@@ -89,6 +92,9 @@ class AIContext:
                 "characters": self.related.characters,
                 "world": self.related.world,
                 "power": self.related.power,
+                "core_power": self.related.core_power,
+                "core_systems": self.related.core_systems,
+                "selected_power": self.related.selected_power,
                 "timeline": self.related.timeline,
             },
             "story_state": self.story_state,
@@ -109,6 +115,7 @@ def build_ai_context(
     include_world: bool = True,
     include_power: bool = True,
     include_timeline: bool = True,
+    selected_power: list[str] | tuple[str, ...] | None = None,
 ) -> AIContext:
     """Load prompt sources through one project data facade.
 
@@ -123,6 +130,7 @@ def build_ai_context(
         include_world=include_world,
         include_power=include_power,
         include_timeline=include_timeline,
+        selected_power=selected_power,
     )
 
 
@@ -134,6 +142,7 @@ def build_task_context(
     include_world: bool = True,
     include_power: bool = True,
     include_timeline: bool = True,
+    selected_power: list[str] | tuple[str, ...] | None = None,
 ) -> AIContext:
     """Build an AI context with an explicit canon loading profile."""
     store = ProjectDataStore(project)
@@ -143,6 +152,8 @@ def build_task_context(
         character_query = "\n".join(
             part for part in (chapter.title, chapter.outline, chapter.plot_brief) if part
         )
+    core_systems = store.list_core_systems()
+    selected_systems = tuple(core_systems) + tuple(selected_power or ())
     return AIContext(
         project_root=str(store.root.resolve()).casefold(),
         chapter_id=str(chapter_id),
@@ -153,6 +164,8 @@ def build_task_context(
             include_world=include_world,
             include_power=include_power,
             include_timeline=include_timeline,
+            selected_power=selected_systems,
+            core_power_paths=core_systems,
         ),
         story_state=store.load_story_state(),
         chapter_summaries=store.load_chapter_summaries(),
@@ -197,10 +210,15 @@ def gather_sections(
     content_cap: int | None = None,
     summary_count: int = EXPANSION_SUMMARY_COUNT,
     selected_foreshadowing: list[dict] | tuple[dict, ...] | None = None,
+    selected_power: list[str] | tuple[str, ...] | None = None,
     context: AIContext | None = None,
 ) -> list[Section]:
     """Load the named standard sections in deterministic rule order."""
-    context = context or build_ai_context(project, chapter_id)
+    context = context or build_ai_context(
+        project,
+        chapter_id,
+        selected_power=selected_power,
+    )
     chapter = context.chapter
     related = context.related
     summary_count = max(0, int(summary_count))
@@ -208,7 +226,10 @@ def gather_sections(
         "outline": chapter.outline,
         "plot_brief": chapter.plot_brief,
         "content": chapter.content,
-        "selected_foreshadowing": _render_selected_foreshadowing(selected_foreshadowing),
+        "selected_foreshadowing": render_selected_foreshadowing(selected_foreshadowing),
+        "core_power": related.core_power,
+        "core_systems": related.core_systems,
+        "selected_power": related.selected_power,
         "state": json.dumps(
             compact_story_state(context.story_state),
             ensure_ascii=False,
@@ -250,7 +271,7 @@ def gather_sections(
     return sections
 
 
-def _render_selected_foreshadowing(notes: object) -> str:
+def render_selected_foreshadowing(notes: object) -> str:
     """Render only author-selected notes with a bounded per-note payload."""
     if not isinstance(notes, (list, tuple)):
         return ""
@@ -258,10 +279,11 @@ def _render_selected_foreshadowing(notes: object) -> str:
     for note in notes[:8]:
         if not isinstance(note, dict):
             continue
+        note_id = str(note.get("id") or "").strip()
         title = str(note.get("title") or "未命名伏笔").strip()
         description = str(note.get("note") or "暂无说明").strip()
         characters = ", ".join(str(item) for item in note.get("related_characters") or [])
-        lines = [f"- 标题：{title}", f"  说明：{description}"]
+        lines = [f"- 伏笔 ID：{note_id}", f"  标题：{title}", f"  说明：{description}"]
         metadata = [
             ("首次出现", note.get("first_seen_chapter")),
             ("最近出现", note.get("recent_seen_chapter")),

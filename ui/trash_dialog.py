@@ -1,4 +1,4 @@
-"""Project recycle-bin dialog for deleted chapters and foreshadowing notes."""
+"""Project recycle-bin dialog for deleted project data."""
 
 from __future__ import annotations
 
@@ -17,6 +17,8 @@ from PySide6.QtWidgets import (
 
 from core.foreshadowing import ForeshadowingTrashEntry
 from core.project_data import (
+    CanonEntryConflictError,
+    CanonTrashEntry,
     CharacterIdConflictError,
     CharacterTrashEntry,
     ChapterIdConflictError,
@@ -40,7 +42,9 @@ class TrashDialog(QDialog):
 
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
-        hint = QLabel("章节、角色卡和伏笔分别保存在回收站中，恢复后会回到原来的数据位置。")
+        hint = QLabel(
+            "章节、角色卡、设定资料和伏笔分别保存在回收站中，恢复后会回到原来的数据位置。"
+        )
         hint.setWordWrap(True)
         hint.setObjectName("mutedLabel")
         layout.addWidget(hint)
@@ -48,14 +52,21 @@ class TrashDialog(QDialog):
         self.tabs = QTabWidget()
         self.chapter_list = self._new_list()
         self.character_list = self._new_list()
+        self.canon_list = self._new_list()
         self.foreshadowing_list = self._new_list()
-        for widget in (self.chapter_list, self.character_list, self.foreshadowing_list):
+        for widget in (
+            self.chapter_list,
+            self.character_list,
+            self.canon_list,
+            self.foreshadowing_list,
+        ):
             widget.itemSelectionChanged.connect(self._sync_buttons)
             widget.itemDoubleClicked.connect(lambda _item: self.restore_selected())
         # Keep the old attribute available for focused callers and tests.
         self.list_widget = self.chapter_list
         self.tabs.addTab(self.chapter_list, "章节")
         self.tabs.addTab(self.character_list, "角色卡")
+        self.tabs.addTab(self.canon_list, "设定资料")
         self.tabs.addTab(self.foreshadowing_list, "伏笔")
         self.tabs.currentChanged.connect(lambda _index: self._sync_buttons())
         layout.addWidget(self.tabs, 1)
@@ -89,6 +100,7 @@ class TrashDialog(QDialog):
     def refresh(self) -> None:
         self._refresh_chapters()
         self._refresh_characters()
+        self._refresh_canon()
         self._refresh_foreshadowing()
         self._sync_buttons()
 
@@ -116,6 +128,19 @@ class TrashDialog(QDialog):
         if entries:
             self.foreshadowing_list.setCurrentRow(0)
 
+    def _refresh_canon(self) -> None:
+        self.canon_list.clear()
+        entries = self.store.list_canon_trash()
+        for entry in entries:
+            item = QListWidgetItem(self._canon_label(entry))
+            item.setData(Qt.ItemDataRole.UserRole, entry.trash_id)
+            item.setToolTip(
+                f"原始路径：{entry.original_path}\n删除时间：{entry.deleted_at}"
+            )
+            self.canon_list.addItem(item)
+        if entries:
+            self.canon_list.setCurrentRow(0)
+
     def _refresh_characters(self) -> None:
         self.character_list.clear()
         entries = self.store.list_character_trash()
@@ -138,6 +163,8 @@ class TrashDialog(QDialog):
                 self.store.restore_trash_item(trash_id)
             elif self._active_kind() == "character":
                 self.store.restore_character_trash_item(trash_id)
+            elif self._active_kind() == "canon":
+                self.store.restore_canon_trash_item(trash_id)
             else:
                 self.store.restore_foreshadowing(trash_id)
         except ChapterIdConflictError as exc:
@@ -174,6 +201,33 @@ class TrashDialog(QDialog):
             except (OSError, ValueError, KeyError) as retry_exc:
                 QMessageBox.critical(self, "恢复失败", str(retry_exc))
                 return
+        except CanonEntryConflictError as exc:
+            labels = {"world": "世界观条目", "power": "体系设定", "timeline": "时间线"}
+            label = labels.get(exc.kind, "故事资料")
+            if not exc.suggested_id:
+                QMessageBox.warning(
+                    self,
+                    "无法恢复",
+                    f"{label}的原始位置已经存在内容，请先处理当前文件后再恢复。",
+                )
+                return
+            answer = QMessageBox.question(
+                self,
+                f"{label}名称已存在",
+                f"{label}“{exc.entry_id}”已被占用。\n\n"
+                f"是否恢复为“{exc.suggested_id}”？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+            try:
+                self.store.restore_canon_trash_item(
+                    trash_id, conflict_policy="rename"
+                )
+            except (OSError, ValueError, KeyError) as retry_exc:
+                QMessageBox.critical(self, "恢复失败", str(retry_exc))
+                return
         except FileExistsError:
             QMessageBox.warning(
                 self,
@@ -194,6 +248,7 @@ class TrashDialog(QDialog):
         kind_label = {
             "chapter": "章节",
             "character": "角色卡",
+            "canon": "设定资料",
             "foreshadowing": "伏笔",
         }[self._active_kind()]
         answer = QMessageBox.question(
@@ -210,6 +265,8 @@ class TrashDialog(QDialog):
                 self.store.delete_trash_item(trash_id)
             elif self._active_kind() == "character":
                 self.store.delete_character_trash_item(trash_id)
+            elif self._active_kind() == "canon":
+                self.store.delete_canon_trash_item(trash_id)
             else:
                 self.store.delete_foreshadowing_trash(trash_id)
         except (OSError, ValueError, KeyError) as exc:
@@ -223,6 +280,8 @@ class TrashDialog(QDialog):
             return "chapter"
         if self.tabs.currentWidget() is self.character_list:
             return "character"
+        if self.tabs.currentWidget() is self.canon_list:
+            return "canon"
         return "foreshadowing"
 
     def _active_list(self) -> QListWidget:
@@ -230,6 +289,8 @@ class TrashDialog(QDialog):
             return self.chapter_list
         if self._active_kind() == "character":
             return self.character_list
+        if self._active_kind() == "canon":
+            return self.canon_list
         return self.foreshadowing_list
 
     def _selected_id(self) -> str | None:
@@ -258,3 +319,10 @@ class TrashDialog(QDialog):
     def _character_label(entry: CharacterTrashEntry) -> str:
         deleted_at = entry.deleted_at.replace("T", " ").replace("+00:00", " UTC")
         return f"{entry.title}  ·  {entry.character_id}  ·  {deleted_at}"
+
+    @staticmethod
+    def _canon_label(entry: CanonTrashEntry) -> str:
+        deleted_at = entry.deleted_at.replace("T", " ").replace("+00:00", " UTC")
+        labels = {"world": "世界观", "power": "体系设定", "timeline": "时间线"}
+        label = labels.get(entry.kind, "故事资料")
+        return f"[{label}] {entry.title}  ·  {entry.entry_id}  ·  {deleted_at}"

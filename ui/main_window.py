@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
 
 from core.config import load_config
 from core.project import NovelProject
-from core.project_data import ChapterIdConflictError
+from core.project_data import ChapterIdConflictError, ProjectDataStore
 from ui.ai_controller import AIController
 from ui.ai_engine_controller import AIEngineController
 from ui.ai_task_view_controller import AITaskViewController
@@ -42,6 +42,7 @@ from ui.navigation import PrimaryNavigation
 from ui.pages import DashboardPage, ExportPage, ReportsPage, SettingsPage
 from ui.project_session import ProjectSession
 from ui.project_lifecycle_controller import ProjectLifecycleController, ProjectSwitchCancelled
+from ui.project_setup_dialog import ProjectSetupDialog
 from ui.settings_controller import SettingsController
 from ui.story_navigation_controller import StoryNavigationController
 from ui.trash_dialog import TrashDialog
@@ -84,6 +85,7 @@ class MainWindow(QMainWindow):
         self.ai_controller = AIController(self)
         self.config = dict(config) if config is not None else load_config()
         self._action_icon_buttons: dict[str, IconTextButton] = {}
+        self.project_setup_dialog: ProjectSetupDialog | None = None
         self.ai_engine_controller = AIEngineController(
             self.config,
             self.ai_controller.is_running,
@@ -254,6 +256,8 @@ class MainWindow(QMainWindow):
         self.actions["delete_chapter"].setEnabled(False)
         action("new_character", "新建角色", self.new_character, "Ctrl+Alt+C")
         action("new_world", "新建世界观条目", self.new_world_entry)
+        action("new_power", "新建体系设定", self.new_power_entry)
+        action("new_timeline", "新建时间线", self.new_timeline)
         action("undo", "撤销", lambda: self.editor.text_edit.undo(), "Ctrl+Z")
         action("redo", "重做", lambda: self.editor.text_edit.redo(), "Ctrl+Y")
         action("find", "查找与替换", lambda: self.editor.show_find(), "Ctrl+F")
@@ -466,6 +470,8 @@ class MainWindow(QMainWindow):
         create_menu.addAction(self.actions["delete_chapter"])
         create_menu.addAction(self.actions["new_character"])
         create_menu.addAction(self.actions["new_world"])
+        create_menu.addAction(self.actions["new_power"])
+        create_menu.addAction(self.actions["new_timeline"])
         create_menu.addSeparator()
         create_menu.addAction(self.actions["continue"])
         create_menu.addAction(self.actions["check"])
@@ -506,8 +512,12 @@ class MainWindow(QMainWindow):
         self.dashboard_page.continue_requested.connect(lambda: self._show_route("writing"))
         self.left_panel.file_selected.connect(self._on_file_selected)
         self.left_panel.new_chapter_requested.connect(self.new_chapter)
+        self.left_panel.new_canon_requested.connect(self.new_canon_entry)
+        self.left_panel.system_importance_requested.connect(self.set_system_importance)
         self.left_panel.delete_chapter_requested.connect(self.delete_chapter_by_path)
         self.left_panel.delete_character_requested.connect(self.delete_character_by_path)
+        self.left_panel.delete_canon_requested.connect(self.delete_canon_by_path)
+        self.left_panel.new_timeline_requested.connect(self.new_timeline)
         self.left_panel.toggle_requested.connect(self.toggle_navigation_panel)
         self.memory_page.sync_requested.connect(self.update_memory)
         self.memory_page.chapter_requested.connect(self._open_memory_chapter)
@@ -646,7 +656,8 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "创建失败", str(exc))
             return
         if project is not None:
-            self._show_route("writing")
+            self._show_route("canon")
+            self._show_project_setup(project)
 
     def save_current_file(self, notify: bool = True) -> bool:
         if not self.editor.current_path():
@@ -743,9 +754,14 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def delete_current_chapter(self) -> None:
-        if self.editor.current_category() == "角色":
+        category = self.editor.current_category()
+        if category == "角色":
             current = self.editor.current_path()
             self._delete_character(Path(current) if current else None)
+            return
+        if category in {"世界观", "体系设定", "时间线"}:
+            current = self.editor.current_path()
+            self._delete_canon(category, Path(current) if current else None)
             return
         chapter_id = self.editor.current_chapter_id()
         if chapter_id is None:
@@ -928,36 +944,235 @@ class MainWindow(QMainWindow):
         self._show_route("canon")
         self._refresh_delete_action()
 
+    def delete_canon_by_path(self, category: str, path_str: str) -> None:
+        kind_map = {
+            "世界观": "world",
+            "world": "world",
+            "体系设定": "power",
+            "power": "power",
+            "时间线": "timeline",
+            "timeline": "timeline",
+        }
+        kind = kind_map.get(str(category or ""))
+        if kind is None:
+            return
+        display = {"world": "世界观", "power": "体系设定", "timeline": "时间线"}[kind]
+        self._delete_canon(display, Path(path_str))
+
+    def _delete_canon(self, category: str, path: Path | None) -> None:
+        project = self.project
+        if project is None or path is None:
+            return
+        kind_map = {"世界观": "world", "体系设定": "power", "时间线": "timeline"}
+        kind = kind_map.get(str(category or ""))
+        if kind is None:
+            return
+        target = Path(path)
+        if not target.is_absolute():
+            target = project.root / target
+        expected_parent = {
+            "world": project.canon_dir / "world",
+            "power": project.canon_dir / "power",
+            "timeline": project.canon_dir,
+        }[kind]
+        try:
+            resolved = target.resolve()
+            if resolved.parent != expected_parent.resolve():
+                raise ValueError
+            if kind == "timeline" and resolved.name != "timeline.md":
+                raise ValueError
+            if target.suffix.casefold() != ".md":
+                raise ValueError
+        except (OSError, ValueError):
+            QMessageBox.warning(self, "删除失败", "只能删除当前项目中的故事资料文件。")
+            return
+        store = self.project_session.require_data_store()
+        if kind == "power" and store.is_core_power_path(target):
+            QMessageBox.information(
+                self,
+                "核心规则不可删除",
+                "核心规则是项目常驻资料，如需修改请直接编辑该文件。",
+            )
+            return
+        if not target.is_file():
+            QMessageBox.warning(self, "删除失败", "目标故事资料不存在，项目资料可能已经发生变化。")
+            self.project_session.notify_data_changed()
+            return
+        if self.ai_controller.is_running():
+            QMessageBox.information(self, "AI 正在工作", "当前 AI 任务完成后才能删除故事资料。")
+            return
+
+        title = store.chapter_display_name(target)
+        if kind == "timeline":
+            detail = "整份时间线文档之后仍可在回收站恢复；永久删除后可重新创建空白时间线。"
+        elif kind == "power":
+            detail = "体系的 AI 加载策略会一并保存，故事正文和故事记忆不会被修改。"
+        else:
+            detail = "该条目之后仍可在回收站恢复。"
+        answer = QMessageBox.question(
+            self,
+            "移入回收站",
+            f"确定将{category}“{title}”移入回收站吗？\n\n{detail}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        current_path = self.editor.current_path()
+        is_current = bool(current_path and Path(current_path).resolve() == target.resolve())
+        discard_current_changes = False
+        if is_current and self.editor.is_dirty():
+            choice = QMessageBox(self)
+            choice.setIcon(QMessageBox.Icon.Warning)
+            choice.setWindowTitle("故事资料尚未保存")
+            choice.setText(f"当前{category}有未保存修改，删除前如何处理？")
+            save_button = choice.addButton("保存后删除", QMessageBox.ButtonRole.AcceptRole)
+            discard_button = choice.addButton(
+                "放弃修改并删除", QMessageBox.ButtonRole.DestructiveRole
+            )
+            choice.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+            choice.exec()
+            if choice.clickedButton() is save_button:
+                if not self.document_controller.save():
+                    QMessageBox.warning(self, "删除失败", "当前故事资料保存失败，已取消删除。")
+                    return
+            elif choice.clickedButton() is discard_button:
+                discard_current_changes = True
+            else:
+                return
+
+        try:
+            self.document_controller.delete_canon_entry(
+                kind,
+                target,
+                discard_current_changes=discard_current_changes,
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            QMessageBox.critical(self, "删除失败", str(exc))
+            return
+        self.status_message.setText(f"已移入回收站 · {title}")
+        self._show_route("canon")
+        self._refresh_delete_action()
+
     def new_character(self) -> None:
+        self.new_canon_entry("character")
+
+    def new_world_entry(self) -> None:
+        self.new_canon_entry("world")
+
+    def new_power_entry(self) -> None:
+        self.new_canon_entry("power")
+
+    def new_timeline(self) -> None:
         if not self._require_project():
             return
-        name, ok = QInputDialog.getText(self, "新建角色", "角色姓名：", text="新角色")
-        if not ok or not name.strip():
-            return
         try:
-            path = self.document_controller.create_character(name)
+            path = self.document_controller.create_timeline()
         except FileExistsError:
-            QMessageBox.warning(self, "角色已存在", "同名角色卡已经存在。")
+            QMessageBox.information(self, "时间线已存在", "当前项目已经有一份时间线。")
             return
         except (OSError, ValueError) as exc:
             QMessageBox.warning(self, "创建失败", str(exc))
             return
         self._show_route("canon")
         self.left_panel.select_path(path)
+        self.status_message.setText("已创建 · 时间线")
 
-    def new_world_entry(self) -> None:
+    def new_canon_entry(self, kind: str) -> None:
+        if kind == "timeline":
+            self.new_timeline()
+            return
         if not self._require_project():
             return
-        title, ok = QInputDialog.getText(self, "新建世界观条目", "条目名称：", text="新设定")
+        labels = {
+            "character": ("角色", "角色姓名：", "新角色", "角色已存在", "同名角色卡已经存在。"),
+            "world": ("世界观条目", "条目名称：", "新设定", "条目已存在", "同名世界观条目已经存在。"),
+            "power": ("体系设定", "体系名称：", "新体系", "条目已存在", "同名体系设定已经存在。"),
+        }
+        title_data = labels.get(kind)
+        if title_data is None:
+            QMessageBox.warning(self, "创建失败", "不支持的故事资料类型。")
+            return
+        dialog_title, prompt, default, conflict_title, conflict_message = title_data
+        title, ok = QInputDialog.getText(self, f"新建{dialog_title}", prompt, text=default)
         if not ok or not title.strip():
             return
         try:
-            path = self.document_controller.create_world_entry(title)
+            path = self.document_controller.create_canon_entry(kind, title)
         except FileExistsError:
-            QMessageBox.warning(self, "条目已存在", "同名世界观条目已经存在。")
+            QMessageBox.warning(self, conflict_title, conflict_message)
             return
         except (OSError, ValueError) as exc:
             QMessageBox.warning(self, "创建失败", str(exc))
+            return
+        self._show_route("canon")
+        self.left_panel.select_path(path)
+        if self.project_setup_dialog is not None:
+            self.project_setup_dialog.refresh(self.project)
+
+    def set_system_importance(self, path_str: str, importance: str) -> None:
+        project = self.project
+        if project is None:
+            return
+        path = Path(path_str)
+        if not path.is_absolute():
+            project_path = project.root / path
+            path = project_path if project_path.exists() else path.resolve()
+        path = path.resolve()
+        try:
+            store = ProjectDataStore(project)
+            current = store.system_metadata(path).get("importance", "non_core")
+            if current == importance:
+                label = "核心 · 自动加载" if importance == "core" else "非核心加载"
+                self.status_message.setText(f"“{path.stem}”当前已使用{label}")
+                return
+            store.set_system_importance(path, importance)
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, "设置体系重要性失败", str(exc))
+            return
+        self.project_session.notify_data_changed(
+            [store.system_registry_path], kind="system_importance"
+        )
+        if importance == "core":
+            message = f"已将“{path.stem}”设为核心 · 后续 AI 任务将自动加载"
+        else:
+            message = f"已将“{path.stem}”设为非核心 · 可在 AI 扩写时手动选择"
+        core_count = len(store.list_core_systems())
+        if core_count >= 8:
+            message += f"（当前 {core_count} 项核心体系，可能占用较多上下文）"
+        self.status_message.setText(message)
+
+    def _show_project_setup(self, project: NovelProject) -> None:
+        if self.project_setup_dialog is not None:
+            self.project_setup_dialog.close()
+        dialog = ProjectSetupDialog(project, self)
+        dialog.new_entry_requested.connect(self.new_canon_entry)
+        dialog.entry_open_requested.connect(self._open_setup_entry)
+        dialog.done_requested.connect(lambda: self._finish_project_setup(dialog))
+        dialog.finished.connect(lambda _result: self._clear_project_setup(dialog))
+        self.project_setup_dialog = dialog
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _clear_project_setup(self, dialog: ProjectSetupDialog) -> None:
+        if self.project_setup_dialog is dialog:
+            self.project_setup_dialog = None
+
+    def _finish_project_setup(self, dialog: ProjectSetupDialog) -> None:
+        if self.project_setup_dialog is not dialog:
+            return
+        dialog.close()
+        self._show_route("writing")
+        self.status_message.setText("初始化资料完成，可以开始写作")
+
+    def _open_setup_entry(self, path_str: str) -> None:
+        project = self.project
+        if project is None:
+            return
+        path = Path(path_str)
+        if not path.is_file() or project.canon_dir.resolve() not in path.resolve().parents:
             return
         self._show_route("canon")
         self.left_panel.select_path(path)
@@ -1116,12 +1331,18 @@ class MainWindow(QMainWindow):
         action = self.actions.get("delete_chapter")
         if action is None:
             return
-        action.setEnabled(
+        enabled = (
             self.project is not None
-            and self.editor.current_category() in {"章节", "角色"}
+            and self.editor.current_category()
+            in {"章节", "角色", "世界观", "体系设定", "时间线"}
             and self.editor.current_path() is not None
             and not self.ai_controller.is_running()
         )
+        if enabled and self.editor.current_category() == "体系设定":
+            enabled = not ProjectDataStore(self.project).is_core_power_path(
+                Path(self.editor.current_path())
+            )
+        action.setEnabled(enabled)
 
     def _save_if_dirty(self) -> bool:
         # Opening the first project normally has no current document yet. In

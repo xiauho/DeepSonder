@@ -24,6 +24,8 @@ class ThemeConfigTests(TestCase):
         self.assertIn("QListWidget#foreshadowingSelectionList {", light_qss)
         self.assertIn("selection-background-color: transparent", light_qss)
         self.assertIn("QListWidget#foreshadowingSelectionList::item:hover", light_qss)
+        self.assertIn("QListWidget#powerSelectionList {", light_qss)
+        self.assertIn("QListWidget#powerSelectionList::indicator", light_qss)
         # The light theme uses the panel color for an unchecked indicator;
         # the dark theme uses the field color to preserve contrast.
         self.assertIn(LIGHT_COLORS["panel_color"], light_qss)

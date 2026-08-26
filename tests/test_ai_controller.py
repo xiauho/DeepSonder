@@ -109,6 +109,31 @@ class AIControllerTests(unittest.TestCase):
             # be open.  The token-scoped snapshot must remain usable then.
             self.assertTrue(controller.context_matches(project, "chapter_01", text, token))
             self.assertFalse(controller.context_matches(project, "chapter_01", text))
+            self.assertIsNone(controller.result_context(token))
 
             controller.release_result(token)
             self.assertFalse(controller.context_matches(project, "chapter_01", text, token))
+
+    def test_result_context_exposes_task_selection_until_release(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            text = project.load_chapter("chapter_01").raw
+            controller = AIController()
+            task_context = {"selected_foreshadowing": ({"id": "f-one"},)}
+            token = controller.start(
+                "expand",
+                project,
+                "chapter_01",
+                text,
+                lambda _cancel_event: "生成结果",
+                task_context=task_context,
+            )
+            self.assertIsNotNone(token)
+            thread = controller.task_runner._thread
+            self.assertIsNotNone(thread)
+            thread.wait(1000)
+            self._drain()
+
+            self.assertEqual(controller.result_context(token), task_context)
+            controller.release_result(token)
+            self.assertIsNone(controller.result_context(token))

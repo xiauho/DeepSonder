@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from core.project import NovelProject
 from core.project_data import (
+    CanonEntryConflictError,
     CharacterIdConflictError,
     ChapterIdConflictError,
     ProjectDataStore,
@@ -59,6 +60,87 @@ class ProjectDataStoreTests(TestCase):
             self.assertEqual(store.read_text(target), "# 新设定\n")
             with self.assertRaises(FileExistsError):
                 store.write_new_file(target, "覆盖\n")
+
+    def test_canon_entry_factory_creates_all_supported_templates(self) -> None:
+        with TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            store = ProjectDataStore(project)
+
+            self.assertTrue(store.core_power_path.is_file())
+            self.assertNotIn(store.core_power_path, store.list_power_entries())
+
+            character = store.create_canon_entry("角色", "新角色")
+            world = store.create_canon_entry("world", "新世界")
+            power = store.create_canon_entry("能力体系", "新体系")
+
+            self.assertEqual(character, project.canon_dir / "characters" / "新角色.md")
+            self.assertEqual(world, project.canon_dir / "world" / "新世界.md")
+            self.assertEqual(power, project.canon_dir / "power" / "新体系.md")
+            self.assertIn("## 秘密与人物弧线", character.read_text(encoding="utf-8"))
+            self.assertIn("## 对剧情的约束", world.read_text(encoding="utf-8"))
+            self.assertIn("## 代价与副作用", power.read_text(encoding="utf-8"))
+
+            with self.assertRaises(ValueError):
+                store.create_canon_entry("未知类型", "条目")
+
+    def test_new_project_seeds_system_templates_and_registry(self) -> None:
+        with TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            store = ProjectDataStore(project)
+            ability = project.canon_dir / "power" / "能力体系设定.md"
+            space = project.canon_dir / "power" / "空间体系设定.md"
+
+            self.assertTrue(ability.is_file())
+            self.assertTrue(space.is_file())
+            registry_text = project.system_registry_path.read_text(encoding="utf-8")
+            self.assertIn("canon/power/能力体系设定.md", registry_text)
+            self.assertEqual(store.system_metadata(ability)["importance"], "non_core")
+            self.assertIn(space, store.list_non_core_systems())
+
+            store.set_system_importance(ability, "core")
+            self.assertIn(ability, store.list_core_systems())
+            self.assertNotIn(ability, store.list_non_core_systems())
+
+            related = project.find_related_canon(
+                "chapter_01",
+                selected_power=store.list_core_systems(),
+                core_power_paths=store.list_core_systems(),
+            )
+            self.assertIn("能力体系设定", related.core_systems)
+            self.assertNotIn("能力体系设定", related.power)
+
+    def test_legacy_system_registry_keys_are_migrated(self) -> None:
+        with TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            store = ProjectDataStore(project)
+            ability = project.canon_dir / "power" / "能力体系设定.md"
+            project.system_registry_path.write_text(
+                '{"version": 1, "entries": {"power/能力体系设定.md": '
+                '{"type": "ability", "importance": "core"}}}',
+                encoding="utf-8",
+            )
+
+            self.assertEqual(store.system_metadata(ability)["importance"], "core")
+            store.ensure_system_registry()
+            migrated = project.system_registry_path.read_text(encoding="utf-8")
+            self.assertIn("canon/power/能力体系设定.md", migrated)
+
+    def test_related_canon_separates_core_selected_and_background_power(self) -> None:
+        with TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            selected = project.canon_dir / "power" / "重点体系.md"
+            background = project.canon_dir / "power" / "背景体系.md"
+            selected.write_text("# 重点体系\n本章优先规则。\n", encoding="utf-8")
+            background.write_text("# 背景体系\n仅作背景参考。\n", encoding="utf-8")
+
+            related = project.find_related_canon(
+                "chapter_01", selected_power=[selected]
+            )
+
+            self.assertIn("# 核心规则", related.core_power)
+            self.assertIn("本章优先规则", related.selected_power)
+            self.assertNotIn("本章优先规则", related.power)
+            self.assertIn("仅作背景参考", related.power)
 
     def test_memory_commit_rolls_back_when_second_file_write_fails(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -186,6 +268,106 @@ class ProjectDataStoreTests(TestCase):
             store = ProjectDataStore(project)
             with self.assertRaises(ValueError):
                 store.delete_character("..\\project")
+
+    def test_canon_trash_round_trip_covers_world_power_and_timeline(self) -> None:
+        with TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            store = ProjectDataStore(project)
+            world = store.create_canon_entry("world", "旧世界")
+            power = store.create_canon_entry("power", "旧体系")
+            store.set_system_importance(power, "core")
+            timeline = project.canon_dir / "timeline.md"
+
+            world_entry = store.move_canon_entry_to_trash("world", world)
+            power_entry = store.move_canon_entry_to_trash("power", power)
+            timeline_entry = store.move_canon_entry_to_trash("timeline", timeline)
+
+            self.assertFalse(world.exists())
+            self.assertFalse(power.exists())
+            self.assertFalse(timeline.exists())
+            self.assertNotIn(
+                "canon/power/旧体系.md",
+                store.load_system_registry()["entries"],
+            )
+            self.assertEqual(
+                {entry.kind for entry in store.list_canon_trash()},
+                {"world", "power", "timeline"},
+            )
+
+            self.assertEqual(store.restore_canon_trash_item(world_entry.trash_id), world)
+            self.assertEqual(store.restore_canon_trash_item(power_entry.trash_id), power)
+            self.assertEqual(
+                store.system_metadata(power)["importance"], "core"
+            )
+            self.assertEqual(
+                store.restore_canon_trash_item(timeline_entry.trash_id), timeline
+            )
+            self.assertEqual(store.list_canon_trash(), [])
+
+    def test_canon_restore_rename_updates_power_registry_and_timeline_conflicts(self) -> None:
+        with TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            store = ProjectDataStore(project)
+            power = store.create_canon_entry("power", "秘术")
+            store.set_system_importance(power, "core")
+            deleted_power = store.move_canon_entry_to_trash("power", power)
+            power.write_text("# 秘术\n新版本\n", encoding="utf-8")
+
+            with self.assertRaises(CanonEntryConflictError):
+                store.restore_canon_trash_item(deleted_power.trash_id)
+            restored = store.restore_canon_trash_item(
+                deleted_power.trash_id, conflict_policy="rename"
+            )
+            self.assertEqual(restored.stem, "秘术_2")
+            self.assertEqual(store.system_metadata(restored)["importance"], "core")
+            self.assertIn(
+                "canon/power/秘术_2.md",
+                store.load_system_registry()["entries"],
+            )
+
+            timeline = project.canon_dir / "timeline.md"
+            deleted_timeline = store.move_canon_entry_to_trash("timeline", timeline)
+            store.create_timeline()
+            with self.assertRaises(CanonEntryConflictError):
+                store.restore_canon_trash_item(deleted_timeline.trash_id)
+
+    def test_canon_trash_permanent_delete_and_core_rule_protection(self) -> None:
+        with TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            store = ProjectDataStore(project)
+            with self.assertRaises(ValueError):
+                store.move_canon_entry_to_trash("power", store.core_power_path)
+
+            world = store.create_canon_entry("world", "待清理")
+            entry = store.move_canon_entry_to_trash("world", world)
+            store.delete_canon_trash_item(entry.trash_id)
+            self.assertEqual(store.list_canon_trash(), [])
+            self.assertFalse(world.exists())
+
+    def test_deleted_canon_is_removed_from_related_context_and_restore_readds_it(self) -> None:
+        with TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            store = ProjectDataStore(project)
+            world = store.create_canon_entry("world", "上下文规则")
+            power = store.create_canon_entry("power", "上下文体系")
+            (project.chapters_dir / "chapter_01.md").write_text(
+                "# 第一章\n\n正文\n", encoding="utf-8"
+            )
+            related = project.find_related_canon("chapter_01")
+            self.assertIn("上下文规则", related.world)
+            self.assertIn("上下文体系", related.power)
+
+            world_entry = store.move_canon_entry_to_trash("world", world)
+            power_entry = store.move_canon_entry_to_trash("power", power)
+            related_after_delete = project.find_related_canon("chapter_01")
+            self.assertNotIn("上下文规则", related_after_delete.world)
+            self.assertNotIn("上下文体系", related_after_delete.power)
+
+            store.restore_canon_trash_item(world_entry.trash_id)
+            store.restore_canon_trash_item(power_entry.trash_id)
+            related_after_restore = project.find_related_canon("chapter_01")
+            self.assertIn("上下文规则", related_after_restore.world)
+            self.assertIn("上下文体系", related_after_restore.power)
 
     def test_restore_rejects_existing_original_path_and_permanent_delete_removes_entry(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -329,3 +511,29 @@ class ProjectDataStoreTests(TestCase):
             deleted_again = store.delete_note(created["id"])
             store.delete_trash_item(deleted_again.trash_id)
             self.assertEqual(store.list_trash(), [])
+
+    def test_foreshadowing_resolution_is_batched_idempotent_and_reversible(self) -> None:
+        with TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            store = ForeshadowingStore(project)
+            first = store.create_note("古剑来历")
+            second = store.create_note("玉佩来源")
+
+            resolved = store.resolve_notes(
+                [first["id"], first["id"], second["id"]],
+                "chapter_08",
+            )
+
+            self.assertEqual(len(resolved), 2)
+            self.assertTrue(all(note["status"] == "resolved" for note in resolved))
+            self.assertTrue(
+                all(note["resolved_chapter"] == "chapter_08" for note in resolved)
+            )
+            self.assertEqual(
+                store.resolve_notes([first["id"]], "chapter_08"),
+                [],
+            )
+
+            reopened = store.update_note(first["id"], status="open")
+            self.assertEqual(reopened["status"], "open")
+            self.assertEqual(reopened["resolved_chapter"], "")

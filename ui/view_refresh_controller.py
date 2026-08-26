@@ -74,6 +74,17 @@ class ViewRefreshController(QObject):
             self.refresh_inspector(project)
             return
 
+        if change.kind == "system_importance":
+            refresh_importance = getattr(
+                self.left_panel, "refresh_system_importance", None
+            )
+            if callable(refresh_importance):
+                refresh_importance()
+            else:
+                self.left_panel.set_project(project)
+            self.refresh_inspector(project)
+            return
+
         changed = change.path_set
         chapter_dir = project.chapters_dir.resolve()
         memory_paths = {

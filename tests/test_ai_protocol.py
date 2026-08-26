@@ -43,6 +43,56 @@ class AIProtocolTests(TestCase):
         with self.assertRaises(AIProtocolError):
             parse_expansion('{"type":"continuation","content":"正文。"}')
 
+    def test_expansion_parses_scoped_foreshadowing_feedback(self) -> None:
+        result = parse_expansion(
+            '<NOVEL_TEXT>古剑铭文揭示了铸剑者。</NOVEL_TEXT>'
+            '<FORESHADOWING_FEEDBACK>{'
+            '"chapter_id":"chapter_08","possibly_resolved":['
+            '{"foreshadowing_id":"f-selected","evidence":"铭文揭示了铸剑者",'
+            '"reason":"古剑来源得到明确回答"},'
+            '{"foreshadowing_id":"f-unselected","evidence":"其他证据",'
+            '"reason":"不应被采用"}]}</FORESHADOWING_FEEDBACK>',
+            min_chars=1,
+            expected_chapter_id="chapter_08",
+            allowed_foreshadowing_ids={"f-selected"},
+        )
+
+        self.assertEqual(
+            [item.foreshadowing_id for item in result.foreshadowing_feedback],
+            ["f-selected"],
+        )
+        self.assertIn("安全忽略", result.feedback_warning)
+
+    def test_invalid_foreshadowing_feedback_does_not_invalidate_prose(self) -> None:
+        result = parse_expansion(
+            "<NOVEL_TEXT>完整正文。</NOVEL_TEXT>"
+            "<FORESHADOWING_FEEDBACK>{bad json}</FORESHADOWING_FEEDBACK>",
+            min_chars=1,
+        )
+
+        self.assertEqual(result.text, "完整正文。")
+        self.assertEqual(result.foreshadowing_feedback, ())
+        self.assertIn("已忽略", result.feedback_warning)
+
+    def test_malformed_markers_are_repaired_without_leaking_into_prose(self) -> None:
+        result = parse_expansion(
+            "<NOVEL_TEXT>\n青云宗的夜，被喊杀声撕碎了。\n"
+            "这个消息必须尽快传回教中。\n</NOVALIST_TASK_DONE>",
+            min_chars=1,
+        )
+
+        self.assertEqual(
+            result.text,
+            "青云宗的夜，被喊杀声撕碎了。\n这个消息必须尽快传回教中。",
+        )
+        self.assertNotIn("NOVEL_TEXT", result.text)
+        self.assertNotIn("NOVALIST_TASK_DONE", result.text)
+        self.assertIn("标记不完整", result.protocol_warning)
+
+    def test_protocol_artifacts_without_repairable_body_are_not_plain_prose(self) -> None:
+        with self.assertRaisesRegex(AIProtocolError, "未识别出小说正文"):
+            parse_expansion("正文之前出现错误结束标记。</NOVALIST_TASK_DONE>")
+
     def test_consistency_report_is_validated_and_rendered(self) -> None:
         report = parse_consistency_report(
             '{"type":"consistency_report","status":"warning",'

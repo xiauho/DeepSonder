@@ -18,9 +18,9 @@ def context_paths(
 ) -> list[Path]:
     """Return files that can contribute to one task's AI prompt.
 
-    Expansion deliberately uses the same narrow canon profile as the prompt
-    builder.  Checks and memory updates still retain the complete project
-    fingerprint because their prompts inspect the complete canon.
+    Expansion uses the same world/power canon profile as the prompt builder.
+    Checks and memory updates retain the complete project fingerprint because
+    their prompts inspect the complete canon.
     """
     paths = [
         project.root / "project.json",
@@ -28,6 +28,7 @@ def context_paths(
         project.outline_dir / "main_arc.md",
         project.outline_dir / "future_plan.md",
         project.canon_dir / "timeline.md",
+        project.system_registry_path,
         project.memory_dir / "story_state.json",
         project.memory_dir / "chapter_summaries.json",
         project.memory_dir / "foreshadowing.json",
@@ -40,6 +41,8 @@ def context_paths(
         paths.extend(
             path for path in project.list_characters() if path.stem and path.stem in query
         )
+        paths.extend(project.list_world())
+        paths.extend(project.list_power())
     else:
         paths.extend(project.list_characters())
         paths.extend(project.list_world())

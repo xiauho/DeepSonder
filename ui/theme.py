@@ -196,7 +196,41 @@ QListWidget#foreshadowingSelectionList {
     selection-background-color: transparent;
     selection-color: __TEXT__;
 }
+QListWidget#powerSelectionList {
+    background: __FIELD__;
+    color: __TEXT__;
+    border: 1px solid __BORDER__;
+    border-radius: 8px;
+    outline: none;
+    selection-background-color: transparent;
+    selection-color: __TEXT__;
+}
+QListWidget#coreSystemSelectionList {
+    background: __FIELD__;
+    color: __TEXT__;
+    border: 1px solid __BORDER__;
+    border-radius: 8px;
+    outline: none;
+    selection-background-color: transparent;
+    selection-color: __TEXT__;
+}
 QListWidget#foreshadowingSelectionList::item {
+    min-height: __TREE_ITEM_HEIGHT__px;
+    padding: 4px 12px;
+    margin: 2px 4px;
+    border-radius: 6px;
+    background: __FIELD__;
+    color: __TEXT__;
+}
+QListWidget#powerSelectionList::item {
+    min-height: __TREE_ITEM_HEIGHT__px;
+    padding: 4px 12px;
+    margin: 2px 4px;
+    border-radius: 6px;
+    background: __FIELD__;
+    color: __TEXT__;
+}
+QListWidget#coreSystemSelectionList::item {
     min-height: __TREE_ITEM_HEIGHT__px;
     padding: 4px 12px;
     margin: 2px 4px;
@@ -207,7 +241,23 @@ QListWidget#foreshadowingSelectionList::item {
 QListWidget#foreshadowingSelectionList::item:hover {
     background: __HOVER__;
 }
+QListWidget#powerSelectionList::item:hover {
+    background: __HOVER__;
+}
+QListWidget#coreSystemSelectionList::item:hover {
+    background: __FIELD__;
+}
 QListWidget#foreshadowingSelectionList::item:selected {
+    background: __FIELD__;
+    color: __TEXT__;
+    border: none;
+}
+QListWidget#powerSelectionList::item:selected {
+    background: __FIELD__;
+    color: __TEXT__;
+    border: none;
+}
+QListWidget#coreSystemSelectionList::item:selected {
     background: __FIELD__;
     color: __TEXT__;
     border: none;
@@ -333,7 +383,9 @@ QCheckBox {
 }
 QCheckBox::indicator,
 QListWidget#chapterList::indicator,
-QListWidget#foreshadowingSelectionList::indicator {
+QListWidget#foreshadowingSelectionList::indicator,
+QListWidget#powerSelectionList::indicator,
+QListWidget#coreSystemSelectionList::indicator {
     width: 18px;
     height: 18px;
     border: 1px solid __CHECK_BORDER__;
@@ -342,20 +394,26 @@ QListWidget#foreshadowingSelectionList::indicator {
 }
 QCheckBox::indicator:hover,
 QListWidget#chapterList::indicator:hover,
-QListWidget#foreshadowingSelectionList::indicator:hover {
+QListWidget#foreshadowingSelectionList::indicator:hover,
+QListWidget#powerSelectionList::indicator:hover,
+QListWidget#coreSystemSelectionList::indicator:hover {
     border-color: __ACCENT__;
     background: __HOVER__;
 }
 QCheckBox::indicator:checked,
 QListWidget#chapterList::indicator:checked,
-QListWidget#foreshadowingSelectionList::indicator:checked {
+QListWidget#foreshadowingSelectionList::indicator:checked,
+QListWidget#powerSelectionList::indicator:checked,
+QListWidget#coreSystemSelectionList::indicator:checked {
     border-color: __ACCENT__;
     background: __ACCENT__;
     image: url("__CHECKMARK__");
 }
 QCheckBox::indicator:disabled,
 QListWidget#chapterList::indicator:disabled,
-QListWidget#foreshadowingSelectionList::indicator:disabled {
+QListWidget#foreshadowingSelectionList::indicator:disabled,
+QListWidget#powerSelectionList::indicator:disabled,
+QListWidget#coreSystemSelectionList::indicator:disabled {
     border-color: __BORDER__;
     background: __BG__;
 }

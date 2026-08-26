@@ -28,6 +28,7 @@ class AIWorkflowService:
         target_chars: int = 2000,
         history_chapters: int = 5,
         selected_foreshadowing: list[dict] | tuple[dict, ...] | None = None,
+        selected_power: list[str] | tuple[str, ...] | None = None,
         cancel_event: threading.Event | None = None,
     ) -> tuple[str, str | None]:
         return expansion.run_expansion(
@@ -37,6 +38,7 @@ class AIWorkflowService:
             target_chars=target_chars,
             history_chapters=history_chapters,
             selected_foreshadowing=selected_foreshadowing,
+            selected_power=selected_power,
             cancel_event=cancel_event,
         )
 

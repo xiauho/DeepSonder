@@ -152,8 +152,8 @@ class Inspector(QWidget):
         )
         if related.world:
             context += "<h3>世界观已接入</h3><p class='good'>✓ AI 扩写会携带世界观设定</p>"
-        if related.power:
-            context += "<h3>战力体系已接入</h3><p class='good'>✓ 一致性检查会核对战力规则</p>"
+        if related.power or related.core_power or related.core_systems or related.selected_power:
+            context += "<h3>体系设定已接入</h3><p class='good'>✓ 一致性检查会核对相关体系规则</p>"
         self._set_browser_html(self.context_browser, context)
         self._set_browser_html(
             self.memory_browser,

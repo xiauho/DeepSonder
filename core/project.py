@@ -34,6 +34,35 @@ DEFAULT_STORY_STATE = {
 }
 
 DEFAULT_CHAPTER_SUMMARIES = {}
+DEFAULT_TIMELINE = "# 时间线\n\n| 时间 | 事件 |\n|---|---|\n"
+CORE_POWER_FILENAME = "_核心规则.md"
+DEFAULT_CORE_POWER_RULES = (
+    "# 核心规则\n\n"
+    "## 全书不可违背的规则\n\n"
+    "## 基础限制\n\n"
+    "## 全局例外\n"
+)
+SYSTEM_REGISTRY_FILENAME = "system_registry.json"
+DEFAULT_ABILITY_SYSTEM = (
+    "# 能力体系设定\n\n"
+    "## 体系定位\n\n"
+    "## 等级与阶段\n\n"
+    "## 能力规则\n\n"
+    "## 使用限制\n\n"
+    "## 消耗与代价\n\n"
+    "## 晋升与突破\n\n"
+    "## 特殊例外\n"
+)
+DEFAULT_SPACE_SYSTEM = (
+    "# 空间体系设定\n\n"
+    "## 空间层级\n\n"
+    "## 空间之间的关系\n\n"
+    "## 进入与离开条件\n\n"
+    "## 时间流速差异\n\n"
+    "## 空间边界与限制\n\n"
+    "## 空间资源\n\n"
+    "## 与主世界的关系\n"
+)
 
 
 def chapter_number_from_id(chapter_id: str) -> int | None:
@@ -61,7 +90,10 @@ def chapter_sort_key(value: str | Path) -> tuple[int, int, str]:
 
 class NovelProject:
     def __init__(self, root: Path):
-        self.root = Path(root)
+        # Keep every project-owned path absolute.  UI actions may be emitted
+        # long after a project was opened, and relative paths would otherwise
+        # be resolved against whichever working directory launched the app.
+        self.root = Path(root).expanduser().resolve()
         self.meta = self._read_json(self.root / "project.json")
         self._related_canon_cache: dict[
             tuple[object, ...], tuple[tuple[tuple[str, int, int], ...], RelatedCanon]
@@ -102,7 +134,37 @@ class NovelProject:
         )
         atomic_write_text(
             root / "canon" / "timeline.md",
-            "# 时间线\n\n| 时间 | 事件 |\n|---|---|\n", encoding="utf-8"
+            DEFAULT_TIMELINE, encoding="utf-8"
+        )
+        atomic_write_text(
+            root / "canon" / "power" / CORE_POWER_FILENAME,
+            DEFAULT_CORE_POWER_RULES,
+            encoding="utf-8",
+        )
+        ability_path = root / "canon" / "power" / "能力体系设定.md"
+        space_path = root / "canon" / "power" / "空间体系设定.md"
+        atomic_write_text(ability_path, DEFAULT_ABILITY_SYSTEM, encoding="utf-8")
+        atomic_write_text(space_path, DEFAULT_SPACE_SYSTEM, encoding="utf-8")
+        atomic_write_text(
+            root / "canon" / SYSTEM_REGISTRY_FILENAME,
+            json.dumps(
+                {
+                    "version": 1,
+                    "entries": {
+                        "canon/power/能力体系设定.md": {
+                            "type": "ability",
+                            "importance": "non_core",
+                        },
+                        "canon/power/空间体系设定.md": {
+                            "type": "space",
+                            "importance": "non_core",
+                        },
+                    },
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
         )
         atomic_write_text(
             root / "memory" / "story_state.json",
@@ -152,6 +214,14 @@ class NovelProject:
     @property
     def canon_dir(self) -> Path:
         return self.root / "canon"
+
+    @property
+    def core_power_path(self) -> Path:
+        return self.canon_dir / "power" / CORE_POWER_FILENAME
+
+    @property
+    def system_registry_path(self) -> Path:
+        return self.canon_dir / SYSTEM_REGISTRY_FILENAME
 
     @property
     def memory_dir(self) -> Path:
@@ -206,7 +276,7 @@ class NovelProject:
         items += [("大纲", p) for p in self.list_chapters()]
         items += [("角色", p) for p in self.list_characters()]
         items += [("世界观", p) for p in self.list_world()]
-        items += [("战力", p) for p in self.list_power()]
+        items += [("体系设定", p) for p in self.list_power()]
         return [(cat, p) for cat, p in items if p.exists()]
 
     # ------------------------------------------------------------------
@@ -358,6 +428,8 @@ class NovelProject:
         include_world: bool = True,
         include_power: bool = True,
         include_timeline: bool = True,
+        selected_power: list[str | Path] | tuple[str | Path, ...] | None = None,
+        core_power_paths: list[str | Path] | tuple[str | Path, ...] | None = None,
     ) -> RelatedCanon:
         """Load canon relevant to one task without forcing every canon file in.
 
@@ -372,12 +444,16 @@ class NovelProject:
             bool(include_world),
             bool(include_power),
             bool(include_timeline),
+            tuple(self._selected_power_keys(selected_power)),
+            tuple(self._selected_power_keys(core_power_paths)),
         )
         signature = self._related_canon_signature(
             chapter_id,
             include_world=include_world,
             include_power=include_power,
             include_timeline=include_timeline,
+            selected_power=selected_power,
+            core_power_paths=core_power_paths,
         )
         cached = self._related_canon_cache.get(cache_key)
         if cached is not None and cached[0] == signature:
@@ -396,10 +472,36 @@ class NovelProject:
         if include_world:
             for path in self.list_world():
                 world_parts.append(self.read_file(path).strip())
+        core_power = ""
+        core_system_parts = []
+        selected_power_parts = []
         power_parts = []
         if include_power:
+            core_path = self.core_power_path
+            if core_path.exists():
+                core_power = self.read_file(core_path).strip()
+            selected_paths = self._selected_power_paths(selected_power)
+            core_paths = self._selected_power_paths(core_power_paths)
+            selected_keys = {str(path).casefold() for path in selected_paths}
+            core_keys = {str(path).casefold() for path in core_paths}
+            for path in core_paths:
+                core_system_parts.append(
+                    f"### {path.stem}\n{self.read_file(path).strip()}"
+                )
+            for path in selected_paths:
+                if str(path).casefold() in core_keys:
+                    continue
+                selected_power_parts.append(
+                    f"### {path.stem}\n{self.read_file(path).strip()}"
+                )
             for path in self.list_power():
-                power_parts.append(self.read_file(path).strip())
+                if (
+                    path.resolve() == core_path.resolve()
+                    or str(path.resolve()).casefold() in core_keys
+                    or str(path.resolve()).casefold() in selected_keys
+                ):
+                    continue
+                power_parts.append(f"### {path.stem}\n{self.read_file(path).strip()}")
 
         timeline = ""
         timeline_path = self.canon_dir / "timeline.md"
@@ -411,6 +513,9 @@ class NovelProject:
             power="\n\n".join(power_parts),
             timeline=timeline,
             characters="\n\n".join(characters_parts),
+            core_power=core_power,
+            core_systems="\n\n".join(core_system_parts),
+            selected_power="\n\n".join(selected_power_parts),
         )
         self._related_canon_cache[cache_key] = (signature, related)
         return related
@@ -422,6 +527,8 @@ class NovelProject:
         include_world: bool = True,
         include_power: bool = True,
         include_timeline: bool = True,
+        selected_power: list[str | Path] | tuple[str | Path, ...] | None = None,
+        core_power_paths: list[str | Path] | tuple[str | Path, ...] | None = None,
     ) -> tuple[tuple[str, int, int], ...]:
         paths = [
             self.chapters_dir / f"{chapter_id}.md",
@@ -433,6 +540,9 @@ class NovelProject:
             paths.extend(self.list_world())
         if include_power:
             paths.extend(self.list_power())
+            paths.append(self.system_registry_path)
+        paths.extend(self._selected_power_paths(selected_power))
+        paths.extend(self._selected_power_paths(core_power_paths))
         signature: list[tuple[str, int, int]] = []
         for path in paths:
             path = Path(path)
@@ -444,6 +554,30 @@ class NovelProject:
             else:
                 signature.append((key, stat.st_mtime_ns, stat.st_size))
         return tuple(signature)
+
+    def _selected_power_paths(
+        self,
+        selected_power: list[str | Path] | tuple[str | Path, ...] | None,
+    ) -> list[Path]:
+        power_dir = (self.canon_dir / "power").resolve()
+        result: list[Path] = []
+        for raw_path in selected_power or ():
+            path = Path(raw_path)
+            try:
+                resolved = path.resolve()
+            except OSError:
+                continue
+            if resolved.parent != power_dir or resolved == self.core_power_path.resolve():
+                continue
+            if resolved.is_file() and resolved.suffix.lower() == ".md":
+                result.append(resolved)
+        return sorted(set(result), key=lambda item: item.name.casefold())
+
+    def _selected_power_keys(
+        self,
+        selected_power: list[str | Path] | tuple[str | Path, ...] | None,
+    ) -> list[str]:
+        return [str(path).casefold() for path in self._selected_power_paths(selected_power)]
 
     # ------------------------------------------------------------------
     # Internal helpers

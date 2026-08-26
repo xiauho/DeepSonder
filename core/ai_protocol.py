@@ -25,6 +25,26 @@ class ContinuationResult:
     length_ok: bool
     used_marker: bool = False
     completion_message: str = "续写任务已完成"
+    protocol_warning: str = ""
+
+
+@dataclass(frozen=True)
+class ForeshadowingSuggestion:
+    foreshadowing_id: str
+    evidence: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class ExpansionResult:
+    text: str
+    char_count: int
+    length_ok: bool
+    used_marker: bool = False
+    completion_message: str = "扩写任务已完成"
+    foreshadowing_feedback: tuple[ForeshadowingSuggestion, ...] = ()
+    feedback_warning: str = ""
+    protocol_warning: str = ""
 
 
 @dataclass(frozen=True)
@@ -61,15 +81,32 @@ def parse_expansion(
     *,
     min_chars: int = 0,
     max_chars: int | None = None,
-) -> ContinuationResult:
+    expected_chapter_id: str | None = None,
+    allowed_foreshadowing_ids: set[str] | None = None,
+) -> ExpansionResult:
     """Extract a complete current-chapter draft from the expansion contract."""
-    return _parse_novel_text(
+    base = _parse_novel_text(
         raw,
         min_chars=min_chars,
         max_chars=max_chars,
         expected_types={"chapter_expansion"},
         default_completion="扩写任务已完成",
         task_label="扩写",
+    )
+    suggestions, warning = _parse_foreshadowing_feedback(
+        str(raw or ""),
+        expected_chapter_id=expected_chapter_id,
+        allowed_foreshadowing_ids=allowed_foreshadowing_ids,
+    )
+    return ExpansionResult(
+        text=base.text,
+        char_count=base.char_count,
+        length_ok=base.length_ok,
+        used_marker=base.used_marker,
+        completion_message=base.completion_message,
+        foreshadowing_feedback=suggestions,
+        feedback_warning=warning,
+        protocol_warning=base.protocol_warning,
     )
 
 
@@ -85,6 +122,7 @@ def _parse_novel_text(
     text = str(raw or "").strip()
     content = ""
     used_marker = False
+    protocol_warning = ""
     completion_message = default_completion
 
     done_match = re.search(
@@ -100,8 +138,13 @@ def _parse_novel_text(
         content = match.group(1).strip()
         used_marker = True
     else:
+        repaired = _extract_repairable_novel_text(text)
+        if repaired:
+            content = repaired
+            used_marker = True
+            protocol_warning = "AI 返回的正文标记不完整，系统已安全清理后再用于预览。"
         try:
-            value = _extract_json(text)
+            value = _extract_json(text) if not content else None
         except AIProtocolError:
             value = None
         if isinstance(value, dict):
@@ -110,7 +153,7 @@ def _parse_novel_text(
                 completion_message = str(
                     value.get("completion_message") or completion_message
                 ).strip()
-        elif _looks_like_narrative(text):
+        elif not content and not _contains_protocol_artifact(text) and _looks_like_narrative(text):
             # Some valid headless runners return the final answer as plain
             # prose even when the task asks for a marker. Keep this safe
             # fallback, but reject obvious Agent onboarding responses below.
@@ -124,11 +167,12 @@ def _parse_novel_text(
         max_chars is None or char_count <= int(max_chars)
     )
     return ContinuationResult(
-        content,
-        char_count,
-        length_ok,
-        used_marker,
-        completion_message,
+        text=content,
+        char_count=char_count,
+        length_ok=length_ok,
+        used_marker=used_marker,
+        completion_message=completion_message,
+        protocol_warning=protocol_warning,
     )
 
 
@@ -227,8 +271,101 @@ def _extract_json(text: str) -> Any:
         raise AIProtocolError("DSh 返回内容不是合法 JSON。") from exc
 
 
+def _parse_foreshadowing_feedback(
+    raw: str,
+    *,
+    expected_chapter_id: str | None,
+    allowed_foreshadowing_ids: set[str] | None,
+) -> tuple[tuple[ForeshadowingSuggestion, ...], str]:
+    """Parse optional advisory metadata without invalidating valid prose."""
+    match = re.search(
+        r"<FORESHADOWING_FEEDBACK>\s*([\s\S]*?)\s*</FORESHADOWING_FEEDBACK>",
+        raw,
+        re.IGNORECASE,
+    )
+    if match is None:
+        warning = (
+            "本次选择了伏笔，但 AI 未返回可用的伏笔复核结果；正文仍可正常使用。"
+            if allowed_foreshadowing_ids
+            else ""
+        )
+        return (), warning
+    try:
+        value = _extract_json(match.group(1))
+    except AIProtocolError:
+        return (), "伏笔反馈不是合法 JSON，已忽略；正文仍可正常使用。"
+    if not isinstance(value, dict):
+        return (), "伏笔反馈不是有效对象，已忽略；正文仍可正常使用。"
+
+    chapter_id = str(value.get("chapter_id") or "").strip()
+    if expected_chapter_id is not None and chapter_id != str(expected_chapter_id):
+        return (), "伏笔反馈的章节与当前章节不一致，已忽略。"
+    items = value.get("possibly_resolved")
+    if not isinstance(items, list):
+        return (), "伏笔反馈缺少 possibly_resolved 数组，已忽略。"
+
+    suggestions: list[ForeshadowingSuggestion] = []
+    seen: set[str] = set()
+    ignored = False
+    for item in items:
+        if not isinstance(item, dict):
+            ignored = True
+            continue
+        note_id = str(item.get("foreshadowing_id") or "").strip()
+        evidence = str(item.get("evidence") or "").strip()
+        reason = str(item.get("reason") or "").strip()
+        if (
+            not note_id
+            or note_id in seen
+            or not evidence
+            or not reason
+            or (
+                allowed_foreshadowing_ids is not None
+                and note_id not in allowed_foreshadowing_ids
+            )
+        ):
+            ignored = True
+            continue
+        seen.add(note_id)
+        suggestions.append(ForeshadowingSuggestion(note_id, evidence, reason))
+    warning = "伏笔反馈中有无效或非本次选择的条目，已安全忽略。" if ignored else ""
+    return tuple(suggestions), warning
+
+
 def _content_length(text: str) -> int:
     return len(re.sub(r"\s+", "", text))
+
+
+def _extract_repairable_novel_text(text: str) -> str:
+    """Salvage prose after an opening marker without leaking protocol tags."""
+    opening = re.search(r"<NOVEL_TEXT\s*>", text, re.IGNORECASE)
+    if opening is None:
+        return ""
+    tail = text[opening.end() :]
+    boundaries = []
+    for pattern in (
+        r"</NOVEL_TEXT\s*>",
+        r"</?NOVALIST_TASK_DONE\s*>",
+        r"<FORESHADOWING_FEEDBACK\s*>",
+    ):
+        boundary = re.search(pattern, tail, re.IGNORECASE)
+        if boundary is not None:
+            boundaries.append(boundary.start())
+    candidate = tail[: min(boundaries)] if boundaries else tail
+    candidate = candidate.strip()
+    if not candidate or _contains_protocol_artifact(candidate):
+        return ""
+    return candidate if _looks_like_narrative(candidate) else ""
+
+
+def _contains_protocol_artifact(text: str) -> bool:
+    return bool(
+        re.search(
+            r"</?(?:NOVEL_TEXT|NOVALIST_TASK_DONE|FORESHADOWING_FEEDBACK)\b",
+            str(text or ""),
+            re.IGNORECASE,
+        )
+    )
 
 
 def _looks_like_narrative(text: str) -> bool:

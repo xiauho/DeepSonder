@@ -128,6 +128,12 @@ class AIController(QObject):
             self._result_context_data.pop(token.task_id, None)
             self._pending_result_tokens.discard(token.task_id)
 
+    def result_context(self, token: AITaskToken | None) -> object | None:
+        """Return the task-scoped selection data while its result is reviewed."""
+        if token is None:
+            return None
+        return self._result_context_data.get(token.task_id)
+
     def _on_task_succeeded(self, token: AITaskToken, result) -> None:
         self._pending_result_tokens.add(token.task_id)
         self.succeeded.emit(token, result)

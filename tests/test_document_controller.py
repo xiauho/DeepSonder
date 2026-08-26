@@ -107,6 +107,21 @@ class DocumentControllerTests(unittest.TestCase):
             self.assertEqual(len(imported), 1)
             self.assertEqual(len(changes), 4)
 
+    def test_create_power_entry_uses_canon_notification_flow(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            session = ProjectSession()
+            changes = []
+            session.data_changed.connect(changes.append)
+            session.set_project(project)
+            controller = DocumentController(FakeEditor(), session)
+
+            power = controller.create_power_entry("新能力体系")
+
+            self.assertTrue(power.exists())
+            self.assertIn("## 使用限制", power.read_text(encoding="utf-8"))
+            self.assertEqual(changes, [project])
+
     def test_next_chapter_id_does_not_reuse_existing_number(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project = NovelProject.create(Path(tmp) / "proj", "测试")
@@ -252,3 +267,40 @@ class DocumentControllerTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "未保存修改"):
                 controller.delete_character("林夜")
             self.assertTrue(character.exists())
+
+    def test_delete_current_world_clears_editor_and_notifies_canon(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            world = project.canon_dir / "world" / "旧世界.md"
+            world.write_text("# 旧世界\n\n规则\n", encoding="utf-8")
+            session = ProjectSession()
+            session.set_project(project)
+            editor = FakeEditor()
+            editor.path = str(world)
+            editor.category = "世界观"
+            controller = DocumentController(editor, session)
+            changes = []
+            session.data_changed.connect(changes.append)
+
+            controller.delete_canon_entry("world", world)
+
+            self.assertIsNone(editor.path)
+            self.assertFalse(world.exists())
+            self.assertEqual(editor.cleared, ["故事资料已删除"])
+            self.assertEqual(changes, [project])
+
+    def test_delete_current_dirty_timeline_requires_explicit_discard(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            timeline = project.canon_dir / "timeline.md"
+            session = ProjectSession()
+            session.set_project(project)
+            editor = FakeEditor()
+            editor.path = str(timeline)
+            editor.category = "时间线"
+            editor.dirty = True
+            controller = DocumentController(editor, session)
+
+            with self.assertRaisesRegex(RuntimeError, "未保存修改"):
+                controller.delete_canon_entry("timeline", timeline)
+            self.assertTrue(timeline.exists())

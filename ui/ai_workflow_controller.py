@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable
 
 from PySide6.QtCore import QObject, Signal
@@ -15,7 +17,14 @@ from core.ai_workflow import AIWorkflowService
 from core.config import save_config
 from core.project_data import ProjectDataStore
 from ui.ai_result_coordinator import AIResultCoordinator
-from ui.foreshadowing_selection_dialog import ForeshadowingSelectionDialog
+from ui.expansion_context_selection_dialog import ExpansionContextSelectionDialog
+
+
+@dataclass(frozen=True)
+class PendingForeshadowingResolution:
+    project_root: str
+    chapter_id: str
+    note_ids: tuple[str, ...]
 
 
 class AIWorkflowController(QObject):
@@ -58,8 +67,13 @@ class AIWorkflowController(QObject):
         self.parent = parent
         self.ai_result_service = AIResultService()
         self.ai_result_coordinator = AIResultCoordinator(parent)
+        self._pending_foreshadowing_resolutions: dict[
+            str, PendingForeshadowingResolution
+        ] = {}
 
         ai_controller.succeeded.connect(self._on_task_succeeded)
+        document_controller.document_saved.connect(self._on_document_saved)
+        project_session.project_changed.connect(self._on_project_changed)
 
     def set_config(self, config: dict) -> None:
         self.config = dict(config)
@@ -69,10 +83,12 @@ class AIWorkflowController(QObject):
         if request is None:
             return
         project, chapter_id, workflow = request
-        selected_foreshadowing = self._choose_foreshadowing(project, chapter_id)
-        if selected_foreshadowing is None:
+        selection = self._choose_expansion_context(project, chapter_id)
+        if selection is None:
             return
+        selected_foreshadowing, selected_power = selection
         selected_foreshadowing = tuple(deepcopy(selected_foreshadowing))
+        selected_power = tuple(str(path) for path in selected_power)
         target_chars = int(self.config.get("expand_target_chars", 2000))
         history_chapters = int(self.config.get("ai_context_history_chapters", 5))
         self._start(
@@ -85,9 +101,13 @@ class AIWorkflowController(QObject):
                 target_chars=target_chars,
                 history_chapters=history_chapters,
                 selected_foreshadowing=selected_foreshadowing,
+                selected_power=selected_power,
                 cancel_event=cancel_event,
             ),
-            task_context={"selected_foreshadowing": selected_foreshadowing},
+            task_context={
+                "selected_foreshadowing": selected_foreshadowing,
+                "selected_power": selected_power,
+            },
         )
 
     def check(self) -> None:
@@ -171,25 +191,36 @@ class AIWorkflowController(QObject):
         save_config(self.config)
         return True
 
-    def _choose_foreshadowing(self, project, chapter_id: str) -> list[dict] | None:
+    def _choose_expansion_context(
+        self, project, chapter_id: str
+    ) -> tuple[list[dict], list[str]] | None:
+        store = ProjectDataStore(project)
         try:
-            notes = ProjectDataStore(project).load_foreshadowing(status="open")
+            notes = store.load_foreshadowing(status="open")
+            core_system_paths = store.list_core_systems()
+            power_paths = store.list_non_core_systems()
         except (OSError, ValueError) as exc:
-            QMessageBox.warning(self.parent, "读取伏笔失败", str(exc))
+            QMessageBox.warning(self.parent, "读取扩写资料失败", str(exc))
             return None
-        if not notes:
-            self._emit_output("当前没有未回收伏笔，本次扩写不指定伏笔。")
-            return []
-        dialog = ForeshadowingSelectionDialog(notes, chapter_id, self.parent)
+        dialog = ExpansionContextSelectionDialog(
+            notes,
+            power_paths,
+            chapter_id,
+            core_system_paths=core_system_paths,
+            core_power_path=store.core_power_path,
+            parent=self.parent,
+        )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             self._emit_status("已取消扩写，未启动 AI 任务")
             return None
-        selected = dialog.selected_notes()
-        if selected:
-            self._emit_output(f"本次扩写已选择 {len(selected)} 条伏笔作为重点关注内容。")
-        else:
-            self._emit_output("本次扩写未指定伏笔。")
-        return selected
+        selected_notes = dialog.selected_notes()
+        selected_power = dialog.selected_power_paths()
+        self._emit_output(
+            f"本次扩写已选择 {len(selected_notes)} 条伏笔、自动纳入 {len(core_system_paths)} 项核心体系、"
+            f"手动选择 {max(0, len(selected_power) - len(core_system_paths))} 项非核心体系；"
+            "其余体系将作为低优先级背景资料。"
+        )
+        return selected_notes, selected_power
 
     def _start(
         self,
@@ -238,13 +269,30 @@ class AIWorkflowController(QObject):
                 f"{first_raw}"
             )
         target = int(self.config.get("expand_target_chars", 2000))
+        task_context_getter = getattr(self.ai_controller, "result_context", None)
+        task_context = task_context_getter(token) if callable(task_context_getter) else None
+        selected_foreshadowing = ()
+        if isinstance(task_context, dict):
+            raw_selected = task_context.get("selected_foreshadowing")
+            if isinstance(raw_selected, (list, tuple)):
+                selected_foreshadowing = tuple(
+                    note for note in raw_selected if isinstance(note, dict)
+                )
         try:
-            parsed = self.ai_result_service.parse_expansion(raw, target)
+            parsed = self.ai_result_service.parse_expansion(
+                raw,
+                target,
+                chapter_id=token.chapter_id,
+                selected_foreshadowing=selected_foreshadowing,
+            )
         except ai_protocol.AIProtocolError as exc:
             self._emit_output(f"扩写结果无效\n{exc}\n原始返回：\n{raw}")
             self._emit_status("扩写结果无效，未写入正文")
             QMessageBox.warning(self.parent, "扩写结果无效", str(exc))
             return
+
+        if parsed.feedback_warning:
+            self._emit_output(parsed.feedback_warning)
 
         self._emit_output(
             f"✅ {parsed.completion_message}；扩写结果已通过格式校验（约 {parsed.char_count} 字），等待确认写入"
@@ -254,6 +302,10 @@ class AIWorkflowController(QObject):
         project = self.project_session.project
         chapter = project.load_chapter(chapter_id) if project and chapter_id else None
         has_existing_content = bool(chapter and chapter.content.strip())
+        foreshadowing_titles = {
+            str(note.get("id") or ""): str(note.get("title") or "未命名伏笔")
+            for note in selected_foreshadowing
+        }
         outcome = self.ai_result_coordinator.confirm_expansion(
             text=parsed.text,
             char_count=parsed.char_count,
@@ -261,6 +313,9 @@ class AIWorkflowController(QObject):
             has_existing_content=has_existing_content,
             context_matches=lambda: self._task_context_matches(token),
             replace_body=self.editor.replace_chapter_body,
+            foreshadowing_feedback=parsed.foreshadowing_feedback,
+            foreshadowing_titles=foreshadowing_titles,
+            foreshadowing_warning=parsed.feedback_warning,
         )
         if outcome.status == "cancelled":
             self._emit_output("扩写结果未确认写入，未修改正文。")
@@ -271,8 +326,72 @@ class AIWorkflowController(QObject):
             self._emit_status("章节已变化，扩写结果仅保留在 AI 记录中")
             return
         action = outcome.action or ("替换" if has_existing_content else "写入")
+        current_path = self.editor.current_path()
+        if current_path:
+            path_key = self._path_key(current_path)
+            resolution_ids = tuple(
+                str(note_id)
+                for note_id in (outcome.value or ())
+                if str(note_id or "").strip()
+            )
+            if resolution_ids and project is not None and chapter_id:
+                self._pending_foreshadowing_resolutions[path_key] = (
+                    PendingForeshadowingResolution(
+                        project_root=str(project.root.resolve()).casefold(),
+                        chapter_id=chapter_id,
+                        note_ids=resolution_ids,
+                    )
+                )
+                self._emit_output(
+                    f"已暂存 {len(resolution_ids)} 条伏笔状态修改，将在章节保存成功后应用。"
+                )
+            else:
+                self._pending_foreshadowing_resolutions.pop(path_key, None)
         self._emit_status(f"扩写已{action}当前正文，请审阅后保存")
         self._emit_output(f"已确认{action}扩写结果，尚未自动保存。")
+
+    def _on_document_saved(self, saved_path: str) -> None:
+        path_key = self._path_key(saved_path)
+        pending = self._pending_foreshadowing_resolutions.get(path_key)
+        if pending is None:
+            return
+        project = self.project_session.project
+        if project is None or str(project.root.resolve()).casefold() != pending.project_root:
+            return
+        expected_path = project.chapters_dir / f"{pending.chapter_id}.md"
+        if self._path_key(expected_path) != path_key:
+            return
+        try:
+            updated = ProjectDataStore(project).resolve_foreshadowing(
+                pending.note_ids,
+                pending.chapter_id,
+            )
+        except OSError as exc:
+            self._emit_output(f"伏笔状态暂未更新，将在下次保存时重试：{exc}")
+            QMessageBox.warning(self.parent, "伏笔状态更新失败", str(exc))
+            return
+        except (KeyError, ValueError) as exc:
+            self._pending_foreshadowing_resolutions.pop(path_key, None)
+            self._emit_output(f"伏笔状态未更新：{exc}")
+            QMessageBox.warning(self.parent, "伏笔状态未更新", str(exc))
+            return
+
+        self._pending_foreshadowing_resolutions.pop(path_key, None)
+        if not updated:
+            self._emit_output("伏笔状态无需更新，相关伏笔可能已由作者处理。")
+            return
+        foreshadowing_path = project.memory_dir / "foreshadowing.json"
+        self.project_session.notify_data_changed([foreshadowing_path], kind="memory")
+        titles = "、".join(str(note.get("title") or "未命名伏笔") for note in updated)
+        self._emit_output(f"章节已保存；已将伏笔标记为已回收：{titles}")
+        self._emit_status(f"章节已保存并更新 {len(updated)} 条伏笔状态")
+
+    def _on_project_changed(self, _project) -> None:
+        self._pending_foreshadowing_resolutions.clear()
+
+    @staticmethod
+    def _path_key(path: Path | str) -> str:
+        return str(Path(path).resolve()).casefold()
 
     def _on_check_done(self, result: str) -> None:
         try:

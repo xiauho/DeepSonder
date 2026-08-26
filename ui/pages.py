@@ -260,7 +260,7 @@ class ReportsPage(QWidget):
         else:
             self.browser.setHtml(
                 "<h2>尚未检查当前章节</h2>"
-                "<p>检查结果会显示角色状态、世界观、战力体系和时间线的潜在冲突。</p>"
+                "<p>检查结果会显示角色状态、世界观、体系设定和时间线的潜在冲突。</p>"
             )
 
     def show_result(self, result: str) -> None:

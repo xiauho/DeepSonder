@@ -14,6 +14,7 @@ class _ProjectView:
         self.projects = []
         self.refreshes = []
         self.render_count = 0
+        self.importance_refresh_count = 0
 
     def set_project(self, project):
         self.projects.append(project)
@@ -26,6 +27,9 @@ class _ProjectView:
 
     def render_preview(self):
         self.render_count += 1
+
+    def refresh_system_importance(self):
+        self.importance_refresh_count += 1
 
 
 class _Inspector:
@@ -158,6 +162,30 @@ class ViewRefreshControllerTests(unittest.TestCase):
             self.assertEqual(len(memory.projects), before["memory"])
             self.assertEqual(len(reports.projects), before["reports"])
             self.assertEqual(len(export.projects), before["export"])
+            self.assertEqual(len(inspector.calls), 1)
+            self.assertIsNotNone(controller)
+
+    def test_system_importance_change_refreshes_badges_without_rebuilding_tree(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            session = ProjectSession()
+            session.set_project(project)
+            editor = _Editor()
+            controller, left_panel, inspector, dashboard, memory, reports, export = self._controller(
+                session, editor
+            )
+            before_projects = len(left_panel.projects)
+
+            session.notify_data_changed(
+                [project.system_registry_path], kind="system_importance"
+            )
+
+            self.assertEqual(left_panel.importance_refresh_count, 1)
+            self.assertEqual(len(left_panel.projects), before_projects)
+            self.assertEqual(len(dashboard.refreshes), 0)
+            self.assertEqual(len(memory.projects), 0)
+            self.assertEqual(len(reports.projects), 0)
+            self.assertEqual(len(export.projects), 0)
             self.assertEqual(len(inspector.calls), 1)
             self.assertIsNotNone(controller)
 

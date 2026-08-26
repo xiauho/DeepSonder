@@ -57,6 +57,10 @@ class ProjectSession(QObject):
         if not NovelProject.is_project(path):
             raise ValueError(f"该目录不是有效的 Novalist 创作项目：\n{path}")
         project = NovelProject(path)
+        # Migrate projects created before the always-on ability core existed.
+        store = ProjectDataStore(project)
+        store.ensure_core_power_entry()
+        store.ensure_system_registry()
         self.set_project(project)
         return project
 

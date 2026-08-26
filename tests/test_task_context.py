@@ -79,7 +79,7 @@ class AIContextSnapshotTests(TestCase):
 
             self.assertTrue(snapshot.matches(project, "chapter_01", text))
 
-    def test_expansion_snapshot_ignores_unrelated_world_files(self) -> None:
+    def test_expansion_snapshot_covers_world_and_power_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project = NovelProject.create(Path(tmp) / "proj", "测试")
             text = project.load_chapter("chapter_01").raw
@@ -92,7 +92,7 @@ class AIContextSnapshotTests(TestCase):
             world = project.canon_dir / "world" / "规则.md"
             world.write_text("# 规则\n\n发生了与本章无关的变化。\n", encoding="utf-8")
 
-            self.assertTrue(
+            self.assertFalse(
                 snapshot.matches(project, "chapter_01", text, task_kind="expand")
             )
             self.assertFalse(
