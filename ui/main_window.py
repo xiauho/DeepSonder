@@ -198,6 +198,7 @@ class MainWindow(QMainWindow):
             reports_page=self.reports_page,
             go_to_writing=lambda: self._show_route("writing"),
             save_if_dirty=self._save_if_dirty,
+            left_panel=self.left_panel,
             parent=self,
         )
         self.ai_workflow_controller.output_requested.connect(
@@ -510,6 +511,13 @@ class MainWindow(QMainWindow):
         self.dashboard_page.open_project_requested.connect(self.open_project)
         self.dashboard_page.import_requested.connect(self._import_markdown_chapters)
         self.dashboard_page.continue_requested.connect(lambda: self._show_route("writing"))
+        self.dashboard_page.recent_chapter_requested.connect(
+            self._open_memory_chapter
+        )
+        self.dashboard_page.new_chapter_requested.connect(self.new_chapter)
+        self.dashboard_page.outline_requested.connect(self._open_dashboard_main_arc)
+        self.dashboard_page.memory_requested.connect(lambda: self._show_route("memory"))
+        self.dashboard_page.canon_requested.connect(lambda: self._show_route("canon"))
         self.left_panel.file_selected.connect(self._on_file_selected)
         self.left_panel.new_chapter_requested.connect(self.new_chapter)
         self.left_panel.new_canon_requested.connect(self.new_canon_entry)
@@ -522,7 +530,11 @@ class MainWindow(QMainWindow):
         self.memory_page.sync_requested.connect(self.update_memory)
         self.memory_page.chapter_requested.connect(self._open_memory_chapter)
         self.memory_page.foreshadowing_changed.connect(self.project_session.notify_data_changed)
-        self.reports_page.run_requested.connect(self.check_consistency)
+        self.reports_page.run_requested.connect(
+            self.ai_workflow_controller.check_from_reports
+        )
+        self.reports_page.jump_requested.connect(self.ai_workflow_controller.jump_to_issue)
+        self.reports_page.repair_requested.connect(self.ai_workflow_controller.repair_issue)
         self.export_page.export_requested.connect(self.export_manuscript)
         self.settings_page.save_requested.connect(self._apply_settings)
         self.settings_page.test_requested.connect(self._test_dsh)
@@ -539,6 +551,12 @@ class MainWindow(QMainWindow):
             self._on_save_conflict_detected
         )
         self.editor.exit_focus_button.clicked.connect(self._exit_focus_mode)
+
+    def _open_dashboard_main_arc(self) -> None:
+        project = self.project
+        if project is None or not self._show_route("canon"):
+            return
+        self.left_panel.select_path(project.outline_dir / "main_arc.md")
 
     # ------------------------------------------------------------------
     # Routing and shared shell
@@ -625,11 +643,13 @@ class MainWindow(QMainWindow):
         self._update_page_header(self.window_state_controller.current_route)
 
     def _on_ai_started(self, _token) -> None:
+        self.reports_page.set_check_running(True)
         self._refresh_delete_action()
         self.primary_nav.set_trash_enabled(False)
         self.actions["trash"].setEnabled(False)
 
     def _on_ai_finished(self, _token) -> None:
+        self.reports_page.set_check_running(False)
         self._refresh_delete_action()
         self._refresh_trash_access()
 

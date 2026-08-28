@@ -127,6 +127,25 @@ class PromptBuilderTests(TestCase):
         self.assertIn("consistency_check", system)
         self.assertIn('"type": "consistency_report"', user)
         self.assertIn('"completion_message"', user)
+        self.assertIn('"kind": "hard_conflict"', user)
+        self.assertIn("资料未同步", user)
+
+    def test_repair_prompt_is_minimal_and_anchored(self) -> None:
+        system, user = prompt_builder.build_consistency_repair_prompt(
+            self.project,
+            "chapter_01",
+            {
+                "issue_id": "issue_1",
+                "kind": "hard_conflict",
+                "chapter_quote": "林夜拔剑。",
+                "description": "能力设定冲突",
+                "evidence": "正文证据",
+            },
+        )
+        self.assertIn("consistency_repair", system)
+        self.assertIn("只允许修改章节正文中的一个连续文本区间", user)
+        self.assertIn("林夜拔剑。", user)
+        self.assertIn('"expected_original"', user)
 
     def test_memory_prompts_require_structured_results(self) -> None:
         summary_system, summary_user = prompt_builder.build_summary_prompt(

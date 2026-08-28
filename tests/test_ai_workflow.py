@@ -62,3 +62,34 @@ class AIWorkflowTests(TestCase):
             self.assertEqual(build_context.call_count, 1)
             self.assertIn("chapter_summary", dsh.generate_calls[0][1])
             self.assertIn("story_state_update", dsh.json_calls[0][1])
+
+    def test_consistency_repair_uses_json_protocol(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            dsh = FakeDSH(
+                "unused",
+                {
+                    "type": "consistency_repair",
+                    "chapter_id": "chapter_01",
+                    "issue_id": "issue_1",
+                    "status": "ready",
+                    "target": "chapter",
+                    "expected_original": "原句",
+                    "replacement": "修复句",
+                    "explanation": "修复冲突",
+                    "preserved_facts": [],
+                },
+            )
+            result = AIWorkflowService(dsh).repair_consistency(
+                project,
+                "chapter_01",
+                {
+                    "issue_id": "issue_1",
+                    "chapter_quote": "原句",
+                    "description": "冲突",
+                    "evidence": "证据",
+                },
+            )
+            self.assertEqual(result["replacement"], "修复句")
+            self.assertEqual(len(dsh.json_calls), 1)
+            self.assertIn("consistency_repair", dsh.json_calls[0][1])

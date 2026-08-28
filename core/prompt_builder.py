@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from .context_budget import (
     AIContext,
     CONTINUATION_SUMMARY_COUNT,
@@ -14,6 +16,7 @@ from .context_budget import (
     render_selected_foreshadowing,
 )
 from .project import NovelProject, chapter_number_from_id
+from .text_anchor import render_anchor_context
 
 COMMON_RULES = """
 你是 Novalist 的小说创作 AI。
@@ -545,6 +548,19 @@ def build_check_prompt(
 7. 章节大纲与正文；
 8. 伏笔、地点和事件的前后关系。
 
+判断原则：
+1. 正文已发生的剧情事实优先于大纲中的计划；不要把合理的剧情推进直接判为硬冲突。
+2. 角色卡或故事记忆落后于正文时，优先标记为 sync_gap（资料未同步），不要要求回退正文。
+3. 正文偏离本章大纲时，标记为 outline_deviation（大纲偏差），并建议作者确认以正文还是大纲为准。
+4. 只有两个事实无法同时成立时，才使用 hard_conflict（硬冲突）。证据不足时使用 missing_information（信息不足）。
+5. 同一事实只报告一次，issues 为空表示未发现明显风险。
+6. 每条问题必须提供稳定且唯一的 issue_id；如涉及正文，chapter_quote 必须是本章正文中的连续逐字原句（不要自行改写）。
+7. 只有能够安全替换一处正文连续片段的硬冲突或连续性风险，才将 repairability 设为 automatic；资料同步、偏离大纲或证据不足应设为 manual 或 choice_required。
+
+category 只能使用：relationship、character、state、location、power、item、timeline、world、outline、foreshadowing、place、event。
+kind 只能使用：hard_conflict、continuity_risk、sync_gap、outline_deviation、missing_information、suggestion。
+severity 只能使用：high、medium、low。
+
 【主线大纲】
 {_section(ctx, "main_arc")}
 
@@ -569,18 +585,119 @@ def build_check_prompt(
 {{
   "type": "consistency_report",
   "chapter_id": "{chapter_id}",
-  "status": "ok",
+  "status": "warning",
   "completion_message": "一致性检查任务已完成",
   "issues": [
     {{
       "severity": "high",
       "category": "timeline",
+      "kind": "hard_conflict",
+      "issue_id": "issue_1",
       "description": "问题描述",
       "evidence": "正文中的具体证据",
+      "chapter_quote": "正文中连续逐字摘录的原文",
+      "recommended_target": "chapter",
+      "repairability": "automatic",
+      "source_hint": "冲突设定来源，例如角色卡/故事状态/大纲",
       "location_hint": "相关段落或句子",
       "suggestion": "建议处理方式"
     }}
   ]
+}}
+""".strip()
+
+    return _finalize(system_prompt, render, sections)
+
+
+def build_consistency_repair_prompt(
+    project: NovelProject,
+    chapter_id: str,
+    issue: dict,
+    *,
+    context: AIContext | None = None,
+) -> tuple[str, str]:
+    """Build a constrained one-range repair proposal for one report issue."""
+    context = context or build_ai_context(project, chapter_id)
+    chapter = context.chapter
+    sections = gather_sections(
+        project,
+        chapter_id,
+        (
+            "outline",
+            "plot_brief",
+            "content",
+            "state",
+            "summaries",
+            "characters",
+            "main_arc",
+            "timeline",
+            "core_power",
+            "core_systems",
+            "world",
+            "power",
+        ),
+        content_keep="head",
+        context=context,
+    )
+    issue_json = json.dumps(dict(issue), ensure_ascii=False, indent=2)
+    system_prompt = f"""
+{COMMON_RULES}
+
+任务类型：consistency_repair。
+只输出合法 JSON，不要输出 Markdown 代码围栏或解释。
+本任务只生成修复方案，绝不直接修改文件。
+""".strip()
+
+    def render(ctx: dict[str, str]) -> str:
+        quote = str(issue.get("chapter_quote") or "").strip()
+        window = render_anchor_context(chapter.raw, quote)
+        return f"""
+请针对下面这一条一致性问题，生成一个可供作者预览的最小修复方案。
+
+硬性要求：
+1. 只允许修改章节正文中的一个连续文本区间；不要改写整章，不要修改角色卡、故事状态、大纲或其他文件。
+2. expected_original 必须逐字等于给定的 chapter_quote；replacement 只包含替换后的正文片段，不要附加说明。
+3. 保持原有叙事视角、语气、段落结构和 Markdown 标记；不得引入上下文中不存在的新事实。
+4. 正文事实优先于落后资料；如果问题实际是资料未同步、需要作者选择，或证据不足，请返回 choice_required / not_applicable / insufficient_context，不要强行改正文。
+5. status=ready 时 target 必须是 chapter，且 replacement 必须与 expected_original 不同；其他状态不要返回 replacement。
+
+【当前章节】
+章节：{chapter.title}
+章节 ID：{chapter_id}
+
+【待处理问题】
+{issue_json}
+
+【正文定位窗口】
+以下是 chapter_quote 附近的当前正文，仅用于定位和保持上下文：
+---
+{window}
+---
+
+【相关故事资料】
+{_related_block(ctx) or "（暂无）"}
+
+【当前故事状态】
+{_section(ctx, "state")}
+
+【本章大纲】
+{_section(ctx, "outline", "（暂无）")}
+
+【剧情简写】
+{_section(ctx, "plot_brief")}
+
+返回格式：
+{{
+  "type": "consistency_repair",
+  "chapter_id": "{chapter_id}",
+  "issue_id": "{str(issue.get("issue_id") or "issue_1")}",
+  "status": "ready",
+  "target": "chapter",
+  "expected_original": "逐字等于 chapter_quote",
+  "replacement": "仅一个连续正文片段",
+  "explanation": "为什么这样修改以及解决了什么冲突",
+  "preserved_facts": ["保持不变的关键事实"],
+  "completion_message": "一致性修复方案已生成"
 }}
 """.strip()
 

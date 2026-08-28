@@ -56,9 +56,31 @@ class AIResultService:
         )
 
     @staticmethod
-    def parse_consistency(raw: str) -> tuple[dict[str, Any], str]:
-        report = ai_protocol.parse_consistency_report(raw)
+    def parse_consistency(
+        raw: str,
+        *,
+        expected_chapter_id: str | None = None,
+    ) -> tuple[dict[str, Any], str]:
+        report = ai_protocol.parse_consistency_report(
+            raw,
+            expected_chapter_id=expected_chapter_id,
+        )
         return report, ai_protocol.format_consistency_report(report)
+
+    @staticmethod
+    def parse_consistency_repair(
+        raw: str | dict[str, Any],
+        *,
+        expected_chapter_id: str,
+        expected_issue_id: str,
+        expected_original: str,
+    ) -> ai_protocol.ConsistencyRepairResult:
+        return ai_protocol.parse_consistency_repair(
+            raw,
+            expected_chapter_id=expected_chapter_id,
+            expected_issue_id=expected_issue_id,
+            expected_original=expected_original,
+        )
 
     @staticmethod
     def prepare_memory(summary: str, new_state: object) -> MemoryDraft:

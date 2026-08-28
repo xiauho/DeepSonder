@@ -302,6 +302,40 @@ class Editor(QWidget):
         self.text_edit.setTextCursor(cursor)
         self.text_edit.ensureCursorVisible()
 
+    def reveal_range(self, start: int, end: int) -> bool:
+        """Select and reveal a zero-based character range in the editor."""
+        document_length = self.text_edit.document().characterCount() - 1
+        start = max(0, min(int(start), document_length))
+        end = max(start, min(int(end), document_length))
+        cursor = self.text_edit.textCursor()
+        cursor.setPosition(start)
+        cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+        self.text_edit.setTextCursor(cursor)
+        self.text_edit.ensureCursorVisible()
+        self.text_edit.setFocus()
+        return end > start
+
+    def replace_range_if_matches(
+        self,
+        start: int,
+        end: int,
+        expected: str,
+        replacement: str,
+    ) -> bool:
+        """Replace one range only when its current text still matches exactly."""
+        current = self.text_edit.toPlainText()
+        start = max(0, int(start))
+        end = min(len(current), max(start, int(end)))
+        if current[start:end] != str(expected):
+            return False
+        cursor = self.text_edit.textCursor()
+        cursor.setPosition(start)
+        cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+        cursor.insertText(str(replacement))
+        self.text_edit.setTextCursor(cursor)
+        self.text_edit.ensureCursorVisible()
+        return True
+
     def cursor_snapshot(self) -> tuple[int, int]:
         cursor = self.text_edit.textCursor()
         return cursor.position(), cursor.anchor()

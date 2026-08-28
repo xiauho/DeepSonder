@@ -111,3 +111,32 @@ class AIResultCoordinatorTests(TestCase):
                 )
         self.assertEqual(stale.status, "stale")
         commit.assert_not_called()
+
+    def test_repair_cancel_and_stale_context_do_not_apply(self) -> None:
+        apply_replacement = Mock()
+        dialog = SimpleNamespace(confirmed=False, exec=Mock())
+        with patch("ui.ai_result_coordinator.RepairPreviewDialog", return_value=dialog):
+            cancelled = AIResultCoordinator().confirm_repair(
+                expected_original="原文",
+                replacement="修复",
+                explanation="说明",
+                preserved_facts=(),
+                context_matches=lambda: True,
+                apply_replacement=apply_replacement,
+            )
+        self.assertEqual(cancelled.status, "cancelled")
+        apply_replacement.assert_not_called()
+
+        dialog = SimpleNamespace(confirmed=True, exec=Mock())
+        with patch("ui.ai_result_coordinator.RepairPreviewDialog", return_value=dialog):
+            with patch("ui.ai_result_coordinator.QMessageBox.warning"):
+                stale = AIResultCoordinator().confirm_repair(
+                    expected_original="原文",
+                    replacement="修复",
+                    explanation="说明",
+                    preserved_facts=(),
+                    context_matches=lambda: False,
+                    apply_replacement=apply_replacement,
+                )
+        self.assertEqual(stale.status, "stale")
+        apply_replacement.assert_not_called()

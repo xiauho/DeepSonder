@@ -50,6 +50,17 @@ class AIWorkflowService:
     ) -> str:
         return consistency.run_consistency_check(project, chapter_id, self.dsh, cancel_event)
 
+    def repair_consistency(
+        self,
+        project: NovelProject,
+        chapter_id: str,
+        issue: dict,
+        cancel_event: threading.Event | None = None,
+    ):
+        return consistency.run_consistency_repair(
+            project, chapter_id, issue, self.dsh, cancel_event
+        )
+
     def update_memory(
         self,
         project: NovelProject,

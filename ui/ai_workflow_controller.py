@@ -16,7 +16,9 @@ from core.ai_result_service import AIResultService
 from core.ai_workflow import AIWorkflowService
 from core.config import save_config
 from core.project_data import ProjectDataStore
+from core.text_anchor import enrich_report_anchors, resolve_text_anchor
 from ui.ai_result_coordinator import AIResultCoordinator
+from ui.chapter_selection_dialog import ChapterSelectionDialog
 from ui.expansion_context_selection_dialog import ExpansionContextSelectionDialog
 
 
@@ -51,6 +53,7 @@ class AIWorkflowController(QObject):
         reports_page,
         go_to_writing: Callable[[], bool],
         save_if_dirty: Callable[[], bool] | None = None,
+        left_panel=None,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -64,6 +67,7 @@ class AIWorkflowController(QObject):
         self.reports_page = reports_page
         self.go_to_writing = go_to_writing
         self.save_if_dirty = save_if_dirty
+        self.left_panel = left_panel
         self.parent = parent
         self.ai_result_service = AIResultService()
         self.ai_result_coordinator = AIResultCoordinator(parent)
@@ -122,6 +126,71 @@ class AIWorkflowController(QObject):
             lambda cancel_event: workflow.check(project, chapter_id, cancel_event=cancel_event),
         )
 
+    def check_from_reports(self) -> None:
+        """Choose a chapter and run consistency checking without leaving reports."""
+        project = self.project_session.project
+        if project is None:
+            QMessageBox.information(self.parent, "尚未打开项目", "请先打开或新建一个小说项目。")
+            return
+        try:
+            chapters = []
+            for path in project.list_chapters():
+                chapter = project.load_chapter(path.stem)
+                chapters.append((path.stem, chapter.title or path.stem, path))
+        except (OSError, UnicodeError, ValueError) as exc:
+            QMessageBox.warning(self.parent, "读取章节失败", str(exc))
+            return
+        if not chapters:
+            QMessageBox.information(self.parent, "没有章节", "当前项目还没有可检查的章节。")
+            return
+        current_chapter_id = self.editor.current_chapter_id()
+        if not current_chapter_id:
+            previous = getattr(self.reports_page, "last_report_chapter_id", None)
+            current_chapter_id = previous() if callable(previous) else None
+        dialog = ChapterSelectionDialog(
+            chapters,
+            default_chapter_id=current_chapter_id,
+            parent=self.parent,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            self._emit_status("已取消一致性检查")
+            return
+        chapter_id = dialog.selected_chapter_id()
+        if not chapter_id:
+            QMessageBox.information(self.parent, "需要选择章节", "请选择一个章节后再运行检查。")
+            return
+        if not self._ensure_ai_notice() or not self._save_dirty_document():
+            return
+        dsh = self.ai_engine_controller.client
+        if dsh is None:
+            QMessageBox.warning(
+                self.parent,
+                "AI 未就绪",
+                "当前没有可用的 dsh 客户端，请先检查设置。",
+            )
+            return
+        try:
+            chapter = project.load_chapter(chapter_id)
+        except (OSError, UnicodeError, ValueError) as exc:
+            QMessageBox.warning(self.parent, "读取章节失败", str(exc))
+            return
+        title = chapter.title or chapter_id
+        workflow = AIWorkflowService(dsh)
+        self._start(
+            "check",
+            chapter_id,
+            f"正在检查设定 · {title}",
+            lambda cancel_event: workflow.check(
+                project, chapter_id, cancel_event=cancel_event
+            ),
+            task_context={
+                "origin": "reports",
+                "chapter_title": title,
+                "source_text": chapter.raw,
+            },
+            editor_text=chapter.raw,
+        )
+
     def update_memory(self) -> None:
         request = self._prepare_request()
         if request is None:
@@ -136,6 +205,95 @@ class AIWorkflowController(QObject):
                 chapter_id,
                 cancel_event=cancel_event,
             ),
+        )
+
+    def jump_to_issue(self, issue: object) -> bool:
+        """Open the reported chapter and reveal its exact quoted passage."""
+        if not isinstance(issue, dict):
+            return False
+        project = self.project_session.project
+        chapter_id = str(issue.get("chapter_id") or "").strip()
+        quote = str(issue.get("chapter_quote") or "").strip()
+        if project is None or not chapter_id or not quote:
+            QMessageBox.information(self.parent, "无法定位正文", "该问题没有可用的章节原句锚点。")
+            return False
+        if not self.go_to_writing():
+            return False
+        path = project.chapters_dir / f"{chapter_id}.md"
+        if not path.exists():
+            QMessageBox.warning(self.parent, "无法定位正文", f"章节文件不存在：{path.name}")
+            return False
+        if not self.document_controller.open_file("章节", path):
+            return False
+        if self.left_panel is not None:
+            reveal = getattr(self.left_panel, "reveal_path", None)
+            if callable(reveal):
+                reveal(path)
+        resolution = resolve_text_anchor(self.editor.text_edit.toPlainText(), issue.get("chapter_anchor") or quote)
+        if resolution.start is None or resolution.end is None:
+            QMessageBox.warning(
+                self.parent,
+                "正文原句已变化",
+                "已打开对应章节，但报告中的原句在当前正文中找不到唯一位置，请重新运行检查。",
+            )
+            return False
+        self.editor.reveal_range(resolution.start, resolution.end)
+        self._emit_status("已跳转到一致性问题所在正文")
+        return True
+
+    def repair_issue(self, issue: object) -> None:
+        if not isinstance(issue, dict):
+            return
+        if issue.get("recommended_target") != "chapter" or issue.get("repairability") != "automatic":
+            QMessageBox.information(self.parent, "暂不支持自动修复", "该问题需要人工判断后处理。")
+            return
+        project = self.project_session.project
+        chapter_id = str(issue.get("chapter_id") or "").strip()
+        quote = str(issue.get("chapter_quote") or "").strip()
+        if project is None or not chapter_id or not quote:
+            QMessageBox.information(self.parent, "无法修复", "该问题没有可用的正文原句锚点。")
+            return
+        if not self.go_to_writing():
+            return
+        if not self._ensure_ai_notice():
+            return
+        path = project.chapters_dir / f"{chapter_id}.md"
+        if not path.exists() or not self.document_controller.open_file("章节", path):
+            return
+        # Repair prompts read the authoritative project files in the worker;
+        # persist an already-open dirty target before capturing that context.
+        if not self._save_current_file():
+            return
+        if self.left_panel is not None:
+            reveal = getattr(self.left_panel, "reveal_path", None)
+            if callable(reveal):
+                reveal(path)
+        resolution = resolve_text_anchor(self.editor.text_edit.toPlainText(), issue.get("chapter_anchor") or quote)
+        if resolution.start is None or resolution.end is None or resolution.status == "ambiguous":
+            QMessageBox.warning(self.parent, "无法安全修复", "正文原句不再唯一匹配，请重新运行检查后再试。")
+            return
+        current_text = self.editor.text_edit.toPlainText()
+        current_quote = current_text[resolution.start : resolution.end]
+        issue_for_task = dict(issue)
+        issue_for_task["chapter_quote"] = current_quote
+        issue_for_task["chapter_anchor"] = {
+            "quote": current_quote,
+            "start": resolution.start,
+            "end": resolution.end,
+        }
+        dsh = self.ai_engine_controller.client
+        if dsh is None:
+            QMessageBox.warning(self.parent, "AI 未就绪", "当前没有可用的 dsh 客户端，请先检查设置。")
+            return
+        workflow = AIWorkflowService(dsh)
+        self._start(
+            "repair",
+            chapter_id,
+            f"正在生成修复方案 · {chapter_id}",
+            lambda cancel_event: workflow.repair_consistency(
+                project, chapter_id, issue_for_task, cancel_event=cancel_event
+            ),
+            task_context={"issue": issue_for_task},
         )
 
     def _prepare_request(self):
@@ -170,6 +328,16 @@ class AIWorkflowController(QObject):
             QMessageBox.warning(self.parent, "保存失败", "文件未能保存，请检查写入权限。")
             return False
         return True
+
+    def _save_dirty_document(self) -> bool:
+        """Save the visible document only when it has unsaved changes."""
+        if not self.editor.is_dirty():
+            return True
+        save = self.save_if_dirty or self.document_controller.save_if_dirty
+        if save():
+            return True
+        QMessageBox.warning(self.parent, "保存失败", "文件未能保存，请检查写入权限。")
+        return False
 
     def _ensure_ai_notice(self) -> bool:
         if self.config.get("ai_notice_acknowledged", False):
@@ -230,6 +398,7 @@ class AIWorkflowController(QObject):
         worker,
         *,
         task_context: object | None = None,
+        editor_text: str | None = None,
     ) -> bool:
         project = self.project_session.project
         if project is None:
@@ -239,7 +408,7 @@ class AIWorkflowController(QObject):
             kind,
             project,
             chapter_id,
-            self.editor.text_edit.toPlainText(),
+            self.editor.text_edit.toPlainText() if editor_text is None else editor_text,
             worker,
             task_context=task_context,
         ) is None:
@@ -252,7 +421,9 @@ class AIWorkflowController(QObject):
             if token.kind == "expand":
                 self._on_expansion_done(token, result)
             elif token.kind == "check":
-                self._on_check_done(result)
+                self._on_check_done(token, result)
+            elif token.kind == "repair":
+                self._on_repair_done(token, result)
             elif token.kind == "memory":
                 self._on_memory_done(token, result)
         finally:
@@ -393,19 +564,126 @@ class AIWorkflowController(QObject):
     def _path_key(path: Path | str) -> str:
         return str(Path(path).resolve()).casefold()
 
-    def _on_check_done(self, result: str) -> None:
+    def _on_check_done(self, token, result: str | None = None) -> None:
+        # Keep the old private-call shape usable for lightweight integrations;
+        # normal signal delivery always supplies the task token.
+        if result is None:
+            result = str(token or "")
+            token = None
+        if token is not None and not self._task_context_matches(token):
+            message = "一致性检查结果已过期：项目或当前章节在检查期间发生了变化，请重新运行检查。"
+            self._emit_output(message)
+            self._emit_status("一致性检查结果已过期")
+            QMessageBox.warning(self.parent, "检查结果已过期", message)
+            return
         try:
-            report, rendered = self.ai_result_service.parse_consistency(result)
+            report, rendered = self.ai_result_service.parse_consistency(
+                result,
+                expected_chapter_id=getattr(token, "chapter_id", None),
+            )
         except ai_protocol.AIProtocolError as exc:
             self._emit_output(f"一致性检查结果无效\n{exc}\n原始返回：\n{result}")
             self._emit_status("一致性检查结果无效")
             QMessageBox.warning(self.parent, "检查结果无效", str(exc))
             return
+        task_context_getter = getattr(self.ai_controller, "result_context", None)
+        task_context = task_context_getter(token) if callable(task_context_getter) else None
+        source_text = self.editor.text_edit.toPlainText()
+        if isinstance(task_context, dict) and task_context.get("origin") == "reports":
+            source_text = str(task_context.get("source_text") or "")
+            report["chapter_title"] = str(task_context.get("chapter_title") or "")
+        elif token is not None and self.project_session.project is not None:
+            try:
+                report["chapter_title"] = self.project_session.project.load_chapter(
+                    token.chapter_id
+                ).title
+            except (OSError, UnicodeError, ValueError):
+                pass
+        report = enrich_report_anchors(report, source_text)
+        rendered = ai_protocol.format_consistency_report(report)
         completion_message = str(report.get("completion_message") or "一致性检查任务已完成")
         self._notify_complete(completion_message)
         self._emit_output(f"一致性检查结果\n{rendered}")
         self.inspector.show_text("一致性检查", rendered)
-        self.reports_page.show_result(rendered)
+        self.reports_page.show_result(
+            report,
+            rendered,
+            project=self.project_session.project,
+        )
+
+    def _on_repair_done(self, token, result) -> None:
+        task_context_getter = getattr(self.ai_controller, "result_context", None)
+        task_context = task_context_getter(token) if callable(task_context_getter) else None
+        issue = task_context.get("issue") if isinstance(task_context, dict) else None
+        if not isinstance(issue, dict):
+            self._emit_status("修复结果缺少问题上下文，未写入正文")
+            return
+        if not self._task_context_matches(token):
+            message = "修复结果已过期：项目或当前章节在生成期间发生了变化，请重新生成。"
+            self._emit_output(message)
+            self._emit_status("修复结果已过期")
+            QMessageBox.warning(self.parent, "修复结果已过期", message)
+            return
+        quote = str(issue.get("chapter_quote") or "")
+        try:
+            parsed = self.ai_result_service.parse_consistency_repair(
+                result,
+                expected_chapter_id=token.chapter_id,
+                expected_issue_id=str(issue.get("issue_id") or ""),
+                expected_original=quote,
+            )
+        except ai_protocol.AIProtocolError as exc:
+            self._emit_output(f"AI 修复结果无效\n{exc}\n原始返回：\n{result}")
+            self._emit_status("AI 修复结果无效，未修改正文")
+            QMessageBox.warning(self.parent, "AI 修复结果无效", str(exc))
+            return
+        if parsed.status != "ready":
+            labels = {
+                "choice_required": "需要人工选择",
+                "not_applicable": "无需修改正文",
+                "insufficient_context": "证据不足",
+            }
+            message = f"AI 未生成可直接写回的方案：{labels.get(parsed.status, parsed.status)}。\n{parsed.explanation}"
+            self._emit_output(message)
+            self._emit_status("AI 修复需要人工判断，未修改正文")
+            QMessageBox.information(self.parent, "AI 修复建议", message)
+            return
+        resolution = resolve_text_anchor(
+            self.editor.text_edit.toPlainText(), issue.get("chapter_anchor") or quote
+        )
+        if resolution.start is None or resolution.end is None or resolution.status == "ambiguous":
+            self._emit_status("正文原句已变化，修复未写入")
+            QMessageBox.warning(self.parent, "无法安全修复", "正文原句不再唯一匹配，请重新运行检查。")
+            return
+        self._emit_output(f"✅ {parsed.completion_message}，等待预览确认")
+        self._emit_status("AI 修复方案已生成，等待确认")
+        outcome = self.ai_result_coordinator.confirm_repair(
+            expected_original=parsed.expected_original,
+            replacement=parsed.replacement,
+            explanation=parsed.explanation,
+            preserved_facts=parsed.preserved_facts,
+            context_matches=lambda: self._task_context_matches(token),
+            apply_replacement=lambda: self.editor.replace_range_if_matches(
+                resolution.start,
+                resolution.end,
+                parsed.expected_original,
+                parsed.replacement,
+            ),
+        )
+        if outcome.status == "cancelled":
+            self._emit_output("AI 修复方案已放弃，未修改正文。")
+            self._emit_status("AI 修复已放弃")
+            return
+        if outcome.status == "stale":
+            self._emit_output("AI 修复未写入：章节内容或当前章节已发生变化。")
+            self._emit_status("章节已变化，修复结果未写入")
+            return
+        if outcome.status != "committed":
+            self._emit_output(f"AI 修复未写入：{outcome.error or '替换失败'}")
+            self._emit_status("AI 修复未写入")
+            return
+        self._emit_output("已应用一处最小正文修复，尚未自动保存。")
+        self._emit_status("AI 修复已应用，请审阅后保存")
 
     def _on_memory_done(self, token, result: tuple[str, dict, str]) -> None:
         summary, new_state, completion_message = result
@@ -488,6 +766,22 @@ class AIWorkflowController(QObject):
         )
 
     def _task_context_matches(self, token) -> bool:
+        task_context_getter = getattr(self.ai_controller, "result_context", None)
+        task_context = task_context_getter(token) if callable(task_context_getter) else None
+        if isinstance(task_context, dict) and task_context.get("origin") == "reports":
+            # The report-page workflow is intentionally independent of the
+            # document visible in the writing editor.  Its source snapshot is
+            # the selected chapter loaded from disk; a new unsaved edit is
+            # conservatively treated as stale.
+            if self.editor.is_dirty():
+                return False
+            source_text = str(task_context.get("source_text") or "")
+            return self.ai_controller.context_matches(
+                self.project_session.project,
+                token.chapter_id,
+                source_text,
+                token,
+            )
         return self.ai_controller.context_matches(
             self.project_session.project,
             self.editor.current_chapter_id() or "",

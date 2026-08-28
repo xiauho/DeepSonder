@@ -298,6 +298,21 @@ class LeftPanel(QWidget):
                     self._on_item_clicked(child, 0)
                     return
 
+    def reveal_path(self, path: Path | str) -> bool:
+        """Select and scroll to a file without emitting a new open request."""
+        target = str(Path(path))
+        self._selected_path = target
+        root = self.tree.invisibleRootItem()
+        for index in range(root.childCount()):
+            group = root.child(index)
+            for child_index in range(group.childCount()):
+                child = group.child(child_index)
+                if child.data(0, self.PATH_ROLE) == target:
+                    self.tree.setCurrentItem(child)
+                    self.tree.scrollToItem(child)
+                    return True
+        return False
+
     def _restore_selection(self) -> None:
         if not self._selected_path:
             return

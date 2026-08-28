@@ -18,6 +18,139 @@ class AIProtocolError(ValueError):
     """Raised when a DSh response does not match the requested task."""
 
 
+# These values are part of the machine-readable contract.  Keep them stable
+# and translate them only when rendering the report for Chinese-speaking
+# authors.
+CONSISTENCY_SEVERITIES = frozenset({"high", "medium", "low"})
+CONSISTENCY_CATEGORIES = frozenset(
+    {
+        "relationship",
+        "character",
+        "state",
+        "location",
+        "power",
+        "item",
+        "timeline",
+        "world",
+        "outline",
+        "foreshadowing",
+        "place",
+        "event",
+    }
+)
+CONSISTENCY_KINDS = frozenset(
+    {
+        "hard_conflict",
+        "continuity_risk",
+        "sync_gap",
+        "outline_deviation",
+        "missing_information",
+        "suggestion",
+    }
+)
+CONSISTENCY_REPAIR_TARGETS = frozenset(
+    {"chapter", "character_card", "story_state", "outline", "canon", "manual"}
+)
+CONSISTENCY_REPAIRABILITIES = frozenset({"automatic", "choice_required", "manual"})
+CONSISTENCY_REPAIR_STATUSES = frozenset(
+    {"ready", "choice_required", "not_applicable", "insufficient_context"}
+)
+
+CONSISTENCY_SEVERITY_LABELS = {
+    "high": "严重",
+    "medium": "警告",
+    "low": "提示",
+}
+CONSISTENCY_CATEGORY_LABELS = {
+    "relationship": "人物关系",
+    "character": "人物设定",
+    "state": "人物状态",
+    "location": "人物位置",
+    "power": "能力与战力",
+    "item": "道具与持有物",
+    "timeline": "时间线",
+    "world": "世界观规则",
+    "outline": "大纲与正文",
+    "foreshadowing": "伏笔",
+    "place": "地点设定",
+    "event": "事件衔接",
+}
+CONSISTENCY_KIND_LABELS = {
+    "hard_conflict": "硬冲突",
+    "continuity_risk": "连续性风险",
+    "sync_gap": "资料未同步",
+    "outline_deviation": "大纲偏差",
+    "missing_information": "信息不足",
+    "suggestion": "优化建议",
+}
+
+_CONSISTENCY_SEVERITY_ALIASES = {
+    "critical": "high",
+    "severe": "high",
+    "warning": "medium",
+    "info": "low",
+    "notice": "low",
+    "提示": "low",
+    "警告": "medium",
+    "严重": "high",
+}
+_CONSISTENCY_CATEGORY_ALIASES = {
+    "relationships": "relationship",
+    "relation": "relationship",
+    "character_relationship": "relationship",
+    "人物关系": "relationship",
+    "人物设定": "character",
+    "人物状态": "state",
+    "人物位置": "location",
+    "能力": "power",
+    "能力与战力": "power",
+    "道具": "item",
+    "道具与持有物": "item",
+    "时间线": "timeline",
+    "世界观": "world",
+    "世界观规则": "world",
+    "大纲": "outline",
+    "大纲与正文": "outline",
+    "伏笔": "foreshadowing",
+    "地点": "place",
+    "事件": "event",
+}
+_CONSISTENCY_KIND_ALIASES = {
+    "conflict": "hard_conflict",
+    "hard-conflict": "hard_conflict",
+    "continuity": "continuity_risk",
+    "sync": "sync_gap",
+    "sync-gap": "sync_gap",
+    "outline": "outline_deviation",
+    "deviation": "outline_deviation",
+    "missing": "missing_information",
+    "info": "missing_information",
+    "硬冲突": "hard_conflict",
+    "连续性风险": "continuity_risk",
+    "资料未同步": "sync_gap",
+    "大纲偏差": "outline_deviation",
+    "信息不足": "missing_information",
+    "优化建议": "suggestion",
+}
+_CONSISTENCY_TARGET_ALIASES = {
+    "正文": "chapter",
+    "章节正文": "chapter",
+    "角色卡": "character_card",
+    "人物设定": "character_card",
+    "故事状态": "story_state",
+    "大纲": "outline",
+    "设定": "canon",
+    "人工": "manual",
+}
+_CONSISTENCY_REPAIRABILITY_ALIASES = {
+    "auto": "automatic",
+    "自动": "automatic",
+    "需确认": "choice_required",
+    "选择": "choice_required",
+    "人工": "manual",
+}
+
+
 @dataclass(frozen=True)
 class ContinuationResult:
     text: str
@@ -57,6 +190,19 @@ class SummaryResult:
 class StoryStateResult:
     state: dict[str, Any]
     completion_message: str
+
+
+@dataclass(frozen=True)
+class ConsistencyRepairResult:
+    chapter_id: str
+    issue_id: str
+    status: str
+    target: str
+    expected_original: str
+    replacement: str
+    explanation: str
+    preserved_facts: tuple[str, ...] = ()
+    completion_message: str = "一致性修复方案已生成"
 
 
 def parse_continuation(
@@ -176,23 +322,173 @@ def _parse_novel_text(
     )
 
 
-def parse_consistency_report(raw: str | dict[str, Any]) -> dict[str, Any]:
-    value = _as_object(raw, "一致性检查")
+def parse_consistency_report(
+    raw: str | dict[str, Any],
+    *,
+    expected_chapter_id: str | None = None,
+) -> dict[str, Any]:
+    value = dict(_as_object(raw, "一致性检查"))
     if value.get("type") != "consistency_report":
         raise AIProtocolError("DSh 返回内容不是一致性检查报告。")
+    if expected_chapter_id is not None:
+        received_chapter_id = str(value.get("chapter_id") or "").strip()
+        if received_chapter_id and received_chapter_id != str(expected_chapter_id):
+            raise AIProtocolError(
+                "一致性检查报告的章节与当前章节不一致。"
+            )
+        value["chapter_id"] = str(expected_chapter_id)
+    elif value.get("chapter_id") is not None:
+        value["chapter_id"] = str(value.get("chapter_id") or "").strip()
     value["completion_message"] = str(
         value.get("completion_message") or "一致性检查任务已完成"
     ).strip()
+    status = str(value.get("status") or "").strip().casefold()
+    if not status:
+        status = "warning" if value.get("issues") else "ok"
+    if status not in {"ok", "warning", "error"}:
+        raise AIProtocolError(f"一致性检查报告包含无效 status：{status}")
+    value["status"] = status
     issues = value.get("issues")
     if not isinstance(issues, list):
         raise AIProtocolError("一致性检查报告缺少 issues 数组。")
-    for issue in issues:
+    normalized_issues = []
+    seen_issue_ids: set[str] = set()
+    for issue_index, issue in enumerate(issues, 1):
         if not isinstance(issue, dict):
             raise AIProtocolError("一致性检查报告包含无效问题项。")
-        for key in ("severity", "category", "description", "evidence"):
-            if not str(issue.get(key) or "").strip():
+        normalized = dict(issue)
+        normalized["issue_id"] = str(
+            normalized.get("issue_id") or f"issue_{issue_index}"
+        ).strip()
+        if not normalized["issue_id"]:
+            raise AIProtocolError("一致性检查问题缺少 issue_id。")
+        if normalized["issue_id"] in seen_issue_ids:
+            raise AIProtocolError("一致性检查报告包含重复 issue_id。")
+        seen_issue_ids.add(normalized["issue_id"])
+        for key in ("description", "evidence"):
+            if not str(normalized.get(key) or "").strip():
                 raise AIProtocolError(f"一致性检查问题缺少字段：{key}")
+            normalized[key] = str(normalized[key]).strip()
+        normalized["severity"] = _normalize_consistency_enum(
+            normalized.get("severity"),
+            _CONSISTENCY_SEVERITY_ALIASES,
+            CONSISTENCY_SEVERITIES,
+            "severity",
+        )
+        normalized["category"] = _normalize_consistency_enum(
+            normalized.get("category"),
+            _CONSISTENCY_CATEGORY_ALIASES,
+            CONSISTENCY_CATEGORIES,
+            "category",
+        )
+        # ``kind`` was added after the first protocol version.  Keep old
+        # reports readable while ensuring all new reports have the field.
+        normalized["kind"] = _normalize_consistency_enum(
+            normalized.get("kind") or "continuity_risk",
+            _CONSISTENCY_KIND_ALIASES,
+            CONSISTENCY_KINDS,
+            "kind",
+        )
+        for key in ("location_hint", "suggestion", "source_hint"):
+            if key in normalized and normalized[key] is not None:
+                normalized[key] = str(normalized[key]).strip()
+        if "chapter_quote" in normalized and normalized["chapter_quote"] is not None:
+            normalized["chapter_quote"] = str(normalized["chapter_quote"]).strip()
+        default_target = (
+            "chapter"
+            if normalized["kind"] in {"hard_conflict", "continuity_risk"}
+            else "manual"
+        )
+        normalized["recommended_target"] = _normalize_consistency_enum(
+            normalized.get("recommended_target") or default_target,
+            _CONSISTENCY_TARGET_ALIASES,
+            CONSISTENCY_REPAIR_TARGETS,
+            "recommended_target",
+        )
+        default_repairability = (
+            "automatic"
+            if normalized["kind"] in {"hard_conflict", "continuity_risk"}
+            else "manual"
+        )
+        normalized["repairability"] = _normalize_consistency_enum(
+            normalized.get("repairability") or default_repairability,
+            _CONSISTENCY_REPAIRABILITY_ALIASES,
+            CONSISTENCY_REPAIRABILITIES,
+            "repairability",
+        )
+        normalized_issues.append(normalized)
+    value["issues"] = normalized_issues
+    # ``ok`` means no detected issue.  Normalize older model responses that
+    # left the status at its example value while still returning issues.
+    if value["status"] == "ok" and normalized_issues:
+        value["status"] = "warning"
     return value
+
+
+def parse_consistency_repair(
+    raw: str | dict[str, Any],
+    *,
+    expected_chapter_id: str | None = None,
+    expected_issue_id: str | None = None,
+    expected_original: str | None = None,
+) -> ConsistencyRepairResult:
+    """Validate a minimal, one-range consistency repair proposal."""
+    value = _as_object(raw, "一致性修复")
+    if value.get("type") != "consistency_repair":
+        raise AIProtocolError("DSh 返回内容不是一致性修复方案。")
+    chapter_id = str(value.get("chapter_id") or "").strip()
+    issue_id = str(value.get("issue_id") or "").strip()
+    if not chapter_id or not issue_id:
+        raise AIProtocolError("一致性修复方案缺少 chapter_id 或 issue_id。")
+    if expected_chapter_id is not None and chapter_id != str(expected_chapter_id):
+        raise AIProtocolError("一致性修复方案的章节与当前章节不一致。")
+    if expected_issue_id is not None and issue_id != str(expected_issue_id):
+        raise AIProtocolError("一致性修复方案对应的问题已变化。")
+    status = str(value.get("status") or "").strip().casefold()
+    if status not in CONSISTENCY_REPAIR_STATUSES:
+        raise AIProtocolError(f"一致性修复方案包含无效 status：{status}")
+    target = _normalize_consistency_enum(
+        value.get("target") or "chapter",
+        _CONSISTENCY_TARGET_ALIASES,
+        CONSISTENCY_REPAIR_TARGETS,
+        "target",
+    )
+    original = str(value.get("expected_original") or "")
+    replacement = str(value.get("replacement") or "")
+    explanation = str(value.get("explanation") or "").strip()
+    if not explanation:
+        raise AIProtocolError("一致性修复方案缺少 explanation。")
+    if expected_original is not None and original != str(expected_original):
+        raise AIProtocolError("一致性修复方案的原文锚点已变化。")
+    if status == "ready":
+        if target != "chapter":
+            raise AIProtocolError("当前版本只允许对章节正文生成自动修复。")
+        if not original.strip() or not replacement.strip():
+            raise AIProtocolError("可执行修复必须同时提供 expected_original 和 replacement。")
+        if original == replacement:
+            raise AIProtocolError("修复前后文本不能完全相同。")
+        if _contains_protocol_artifact(replacement):
+            raise AIProtocolError("replacement 包含协议标记，已拒绝写回。")
+        if len(replacement) > max(10_000, len(original) * 20):
+            raise AIProtocolError("replacement 范围异常扩大，已拒绝写回。")
+    else:
+        replacement = ""
+    preserved = value.get("preserved_facts") or []
+    if not isinstance(preserved, list) or any(not str(item).strip() for item in preserved):
+        raise AIProtocolError("一致性修复方案的 preserved_facts 必须是字符串数组。")
+    return ConsistencyRepairResult(
+        chapter_id=chapter_id,
+        issue_id=issue_id,
+        status=status,
+        target=target,
+        expected_original=original,
+        replacement=replacement,
+        explanation=explanation,
+        preserved_facts=tuple(str(item).strip() for item in preserved),
+        completion_message=str(
+            value.get("completion_message") or "一致性修复方案已生成"
+        ).strip(),
+    )
 
 
 def parse_summary_result(raw: str | dict[str, Any]) -> SummaryResult:
@@ -243,15 +539,51 @@ def format_consistency_report(report: dict[str, Any]) -> str:
 
     lines = ["⚠️ 发现以下问题："]
     for index, issue in enumerate(issues, 1):
+        severity = CONSISTENCY_SEVERITY_LABELS.get(
+            str(issue.get("severity") or "").casefold(), "未分级"
+        )
+        category = CONSISTENCY_CATEGORY_LABELS.get(
+            str(issue.get("category") or "").casefold(), "其他问题"
+        )
+        kind = CONSISTENCY_KIND_LABELS.get(
+            str(issue.get("kind") or "").casefold(), "连续性风险"
+        )
         lines.append(
-            f"{index}. [{issue['severity']}] {issue['category']}：{issue['description']}"
+            f"{index}. [{severity}] {category}（{kind}）：{issue['description']}"
         )
         lines.append(f"   证据：{issue['evidence']}")
         if issue.get("location_hint"):
             lines.append(f"   位置：{issue['location_hint']}")
+        if issue.get("chapter_quote"):
+            lines.append(f"   正文原句：{issue['chapter_quote']}")
+        if issue.get("source_hint"):
+            lines.append(f"   来源：{issue['source_hint']}")
         if issue.get("suggestion"):
             lines.append(f"   建议：{issue['suggestion']}")
     return "\n".join(lines)
+
+
+def consistency_issue_counts(report: dict[str, Any]) -> dict[str, int]:
+    """Count validated issues from structured data for UI summaries."""
+    counts = {severity: 0 for severity in CONSISTENCY_SEVERITIES}
+    for issue in report.get("issues", []):
+        severity = str(issue.get("severity") or "").casefold()
+        if severity in counts:
+            counts[severity] += 1
+    return counts
+
+
+def _normalize_consistency_enum(
+    value: object,
+    aliases: dict[str, str],
+    allowed: frozenset[str],
+    field: str,
+) -> str:
+    raw = str(value or "").strip().casefold()
+    normalized = aliases.get(raw, raw)
+    if normalized not in allowed:
+        raise AIProtocolError(f"一致性检查问题包含无效 {field}：{value}")
+    return normalized
 
 
 def _as_object(raw: str | dict[str, Any], label: str) -> dict[str, Any]:

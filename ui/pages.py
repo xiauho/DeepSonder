@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import shlex
+from typing import Any
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -24,8 +25,9 @@ from PySide6.QtWidgets import (
 )
 
 from core.config import DEFAULT_CONFIG
+from core.ai_protocol import consistency_issue_counts, format_consistency_report
 from core.export import render_manuscript
-from core.project import NovelProject
+from core.project import NovelProject, chapter_number_from_id
 from core.project_data import ProjectDataStore
 from ui.export_controller import ExportController
 from ui.icons import IconTextButton
@@ -43,6 +45,11 @@ class DashboardPage(QWidget):
     open_project_requested = Signal()
     import_requested = Signal()
     continue_requested = Signal()
+    recent_chapter_requested = Signal(str)
+    new_chapter_requested = Signal()
+    outline_requested = Signal()
+    memory_requested = Signal()
+    canon_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -54,7 +61,20 @@ class DashboardPage(QWidget):
         self._chapter_value = QLabel("0")
         self._word_value = QLabel("0")
         self._character_value = QLabel("0")
-        self._status_value = QLabel("等待开始")
+        self._foreshadowing_value = QLabel("0")
+        self._recent_chapter_id: str | None = None
+        self._recent_title = QLabel("尚未选择章节")
+        self._recent_title.setObjectName("dashboardChapterTitle")
+        self._recent_meta = QLabel("打开项目后，可从最近编辑的章节继续。")
+        self._recent_meta.setObjectName("mutedLabel")
+        self._recent_preview = QLabel("暂无章节正文。")
+        self._recent_preview.setObjectName("dashboardPreview")
+        self._recent_preview.setWordWrap(True)
+        self._main_arc_status = QLabel("待建立")
+        self._memory_status = QLabel("尚未同步")
+        self._foreshadowing_status = QLabel("0 条")
+        self._canon_status = QLabel("0 项")
+        self._next_step_action = "new_chapter"
 
         root = QVBoxLayout(self)
         root.setContentsMargins(30, 26, 34, 30)
@@ -96,11 +116,29 @@ class DashboardPage(QWidget):
         project_text.addWidget(self._project_title)
         project_text.addWidget(self._project_meta)
         project_layout.addLayout(project_text, 1)
-        self.continue_button = QPushButton("进入写作台")
-        self.continue_button.setObjectName("secondaryButton")
-        self.continue_button.clicked.connect(self.continue_requested)
-        project_layout.addWidget(self.continue_button, 0, Qt.AlignmentFlag.AlignCenter)
+        self.open_project_button = QPushButton("切换项目")
+        self.open_project_button.setObjectName("secondaryButton")
+        self.open_project_button.clicked.connect(self.open_project_requested)
+        project_layout.addWidget(
+            self.open_project_button, 0, Qt.AlignmentFlag.AlignCenter
+        )
         root.addWidget(project_card)
+
+        local_info = QFrame()
+        local_info.setObjectName("localInfoBar")
+        local_layout = QHBoxLayout(local_info)
+        local_layout.setContentsMargins(11, 7, 11, 7)
+        local_layout.setSpacing(7)
+        local_icon = QLabel("✓")
+        local_icon.setObjectName("localInfoIcon")
+        local_text = QLabel(
+            "本地保存 · 仅在主动运行 AI 任务时发送必要的章节与设定上下文"
+        )
+        local_text.setObjectName("mutedLabel")
+        local_text.setWordWrap(True)
+        local_layout.addWidget(local_icon)
+        local_layout.addWidget(local_text, 1)
+        root.addWidget(local_info)
 
         metrics = QGridLayout()
         metrics.setHorizontalSpacing(12)
@@ -110,7 +148,7 @@ class DashboardPage(QWidget):
                 (self._chapter_value, "章节"),
                 (self._word_value, "总字数"),
                 (self._character_value, "角色卡"),
-                (self._status_value, "工作状态"),
+                (self._foreshadowing_value, "未回收伏笔"),
             )
         ):
             card = QFrame()
@@ -127,34 +165,91 @@ class DashboardPage(QWidget):
 
         lower = QHBoxLayout()
         lower.setSpacing(14)
-        quick = self._build_section("快速入口")
-        quick_layout = quick.layout()
-        assert isinstance(quick_layout, QVBoxLayout)
-        for text, slot in (
-            ("打开本地项目", self.open_project_requested),
-            ("导入 Markdown 章节", self.import_requested),
-            ("从写作台继续", self.continue_requested),
-        ):
-            button = QPushButton(text)
-            button.setObjectName("linkButton")
-            button.clicked.connect(slot)
-            quick_layout.addWidget(button)
-        quick_layout.addStretch(1)
-        lower.addWidget(quick, 1)
 
-        privacy = self._build_section("本地优先")
-        privacy_layout = privacy.layout()
-        assert isinstance(privacy_layout, QVBoxLayout)
-        privacy_text = QLabel(
-            "作品与故事记忆保存在你选择的项目目录中。只有主动发起 AI 任务时，"
-            "当前任务所需的章节和设定才会交给本机 dsh 处理。"
-        )
-        privacy_text.setObjectName("mutedLabel")
-        privacy_text.setWordWrap(True)
-        privacy_layout.addWidget(privacy_text)
-        privacy_layout.addStretch(1)
-        lower.addWidget(privacy, 1)
-        root.addLayout(lower, 1)
+        continue_section = self._build_section("继续创作")
+        continue_layout = continue_section.layout()
+        assert isinstance(continue_layout, QVBoxLayout)
+        recent_label = QLabel("最近编辑章节")
+        recent_label.setObjectName("eyebrow")
+        continue_layout.addWidget(recent_label)
+        continue_layout.addWidget(self._recent_title)
+        continue_layout.addWidget(self._recent_meta)
+        continue_layout.addSpacing(6)
+        continue_layout.addWidget(self._recent_preview)
+        continue_layout.addSpacing(6)
+        continue_actions = QHBoxLayout()
+        continue_actions.setSpacing(9)
+        self.continue_button = IconTextButton("edit", "继续写作")
+        self.continue_button.setObjectName("accentButton")
+        self.continue_button.clicked.connect(self._continue_recent_chapter)
+        self.new_chapter_button = IconTextButton("note_add", "新建章节")
+        self.new_chapter_button.setObjectName("secondaryButton")
+        self.new_chapter_button.clicked.connect(self.new_chapter_requested)
+        self.import_button = IconTextButton("file_open", "导入章节")
+        self.import_button.setObjectName("secondaryButton")
+        self.import_button.clicked.connect(self.import_requested)
+        continue_actions.addWidget(self.continue_button)
+        continue_actions.addWidget(self.new_chapter_button)
+        continue_actions.addWidget(self.import_button)
+        continue_actions.addStretch(1)
+        continue_layout.addLayout(continue_actions)
+        lower.addWidget(continue_section, 7)
+
+        readiness = self._build_section("项目准备情况")
+        readiness_layout = readiness.layout()
+        assert isinstance(readiness_layout, QVBoxLayout)
+        readiness_intro = QLabel("从项目状态直接进入需要补充的内容。")
+        readiness_intro.setObjectName("mutedLabel")
+        readiness_layout.addWidget(readiness_intro)
+        self._readiness_buttons: list[QPushButton] = []
+        for caption, value, slot in (
+            ("主线大纲", self._main_arc_status, self.outline_requested),
+            ("故事记忆", self._memory_status, self.memory_requested),
+            ("未回收伏笔", self._foreshadowing_status, self.memory_requested),
+            ("世界观与体系", self._canon_status, self.canon_requested),
+        ):
+            row_frame = QFrame()
+            row_frame.setObjectName("dashboardReadinessRow")
+            row = QHBoxLayout(row_frame)
+            row.setContentsMargins(11, 7, 11, 7)
+            row.setSpacing(12)
+            label = QLabel(caption)
+            value.setObjectName("dashboardReadinessValue")
+            value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            open_button = QPushButton("查看")
+            open_button.setObjectName("readinessLinkButton")
+            open_button.clicked.connect(slot)
+            self._readiness_buttons.append(open_button)
+            row.addWidget(label)
+            row.addStretch(1)
+            row.addWidget(value)
+            row.addWidget(open_button)
+            readiness_layout.addWidget(row_frame)
+
+        readiness_layout.addSpacing(4)
+        next_step = QFrame()
+        next_step.setObjectName("dashboardNextStep")
+        next_step_layout = QVBoxLayout(next_step)
+        next_step_layout.setContentsMargins(12, 10, 12, 10)
+        next_step_layout.setSpacing(5)
+        next_step_label = QLabel("建议下一步")
+        next_step_label.setObjectName("eyebrow")
+        self._next_step_text = QLabel("打开或创建项目后，这里会给出建议。")
+        self._next_step_text.setObjectName("dashboardNextStepText")
+        self._next_step_text.setWordWrap(True)
+        self._next_step_button = QPushButton("开始")
+        self._next_step_button.setObjectName("smallAccentButton")
+        self._next_step_button.clicked.connect(self._run_next_step)
+        next_step_action = QHBoxLayout()
+        next_step_action.addWidget(self._next_step_text, 1)
+        next_step_action.addWidget(self._next_step_button, 0, Qt.AlignmentFlag.AlignVCenter)
+        next_step_layout.addWidget(next_step_label)
+        next_step_layout.addLayout(next_step_action)
+        readiness_layout.addWidget(next_step)
+        readiness_layout.addStretch(1)
+        lower.addWidget(readiness, 5)
+        root.addLayout(lower)
+        root.addStretch(1)
 
         self.refresh(None)
 
@@ -178,23 +273,188 @@ class DashboardPage(QWidget):
             self._chapter_value.setText("0")
             self._word_value.setText("0")
             self._character_value.setText("0")
-            self._status_value.setText("等待开始")
+            self._foreshadowing_value.setText("0")
+            self._recent_chapter_id = None
+            self._recent_title.setText("尚未选择章节")
+            self._recent_meta.setText("打开项目后，可从最近编辑的章节继续。")
+            self._recent_preview.setText("暂无章节正文。")
+            self._main_arc_status.setText("待建立")
+            self._memory_status.setText("尚未同步")
+            self._foreshadowing_status.setText("0 条")
+            self._canon_status.setText("0 项")
             self.continue_button.setEnabled(False)
+            self.new_chapter_button.setEnabled(False)
+            self.import_button.setEnabled(False)
+            for button in self._readiness_buttons:
+                button.setEnabled(False)
+            self._next_step_action = "new_chapter"
+            self._next_step_text.setText("打开或创建项目后，这里会给出建议。")
+            self._next_step_button.setText("开始")
+            self._next_step_button.setEnabled(False)
             return
         store = ProjectDataStore(project)
         chapters = store.list_chapters()
         total_words = store.total_word_count(_words)
+        try:
+            open_foreshadowing = store.load_foreshadowing(status="open")
+        except (OSError, ValueError):
+            open_foreshadowing = []
         self._project_title.setText(project.name)
-        self._project_meta.setText(f"{project.root} · 最近打开的本地项目")
+        self._project_meta.setText(str(project.root))
         self._chapter_value.setText(f"{len(chapters)}")
         self._word_value.setText(f"{total_words:,}")
         self._character_value.setText(f"{len(project.list_characters())}")
-        self._status_value.setText("可以继续写作")
+        self._foreshadowing_value.setText(str(len(open_foreshadowing)))
         self.continue_button.setEnabled(bool(chapters))
+        self.new_chapter_button.setEnabled(True)
+        self.import_button.setEnabled(True)
+        for button in self._readiness_buttons:
+            button.setEnabled(True)
+        self._next_step_button.setEnabled(True)
+
+        self._refresh_recent_chapter(project, chapters)
+        self._refresh_readiness(store, len(open_foreshadowing), chapters)
+
+    def _continue_recent_chapter(self) -> None:
+        if self._recent_chapter_id:
+            self.recent_chapter_requested.emit(self._recent_chapter_id)
+        else:
+            self.continue_requested.emit()
+
+    def _run_next_step(self) -> None:
+        actions = {
+            "outline": self.outline_requested,
+            "memory": self.memory_requested,
+            "canon": self.canon_requested,
+            "new_chapter": self.new_chapter_requested,
+        }
+        if self._next_step_action == "continue":
+            self._continue_recent_chapter()
+            return
+        signal = actions.get(self._next_step_action)
+        if signal is not None:
+            signal.emit()
+
+    def _refresh_recent_chapter(
+        self,
+        project: NovelProject,
+        chapters: list,
+    ) -> None:
+        if not chapters:
+            self._recent_chapter_id = None
+            self._recent_title.setText("尚未创建章节")
+            self._recent_meta.setText("新建章节后即可开始写作。")
+            self._recent_preview.setText("当前项目暂无章节正文。")
+            return
+
+        def modified_at(path) -> int:
+            try:
+                return path.stat().st_mtime_ns
+            except OSError:
+                return 0
+
+        path = max(chapters, key=modified_at)
+        try:
+            chapter = project.load_chapter(path.stem)
+        except (OSError, UnicodeError, ValueError):
+            self._recent_chapter_id = path.stem
+            self._recent_title.setText(path.stem)
+            self._recent_meta.setText("最近编辑章节")
+            self._recent_preview.setText("章节内容暂时无法预览。")
+            return
+        self._recent_chapter_id = chapter.id
+        self._recent_title.setText(chapter.title or chapter.id)
+        chapter_words = _words(chapter.content)
+        self._recent_meta.setText(f"{chapter_words:,} 字 · {chapter.id}")
+        self._recent_preview.setText(self._chapter_preview(chapter.content))
+
+    def _refresh_readiness(
+        self,
+        store: ProjectDataStore,
+        open_foreshadowing_count: int,
+        chapters: list,
+    ) -> None:
+        try:
+            main_arc = store.load_main_arc()
+        except (OSError, UnicodeError):
+            main_arc = ""
+        has_main_arc = self._has_meaningful_markdown(main_arc)
+        self._main_arc_status.setText("已建立" if has_main_arc else "待完善")
+        try:
+            state = store.load_story_state()
+        except (OSError, ValueError):
+            state = {}
+        current_chapter = state.get("current_chapter") if isinstance(state, dict) else None
+        if isinstance(current_chapter, int) and current_chapter > 0:
+            self._memory_status.setText(f"已同步至第 {current_chapter} 章")
+        else:
+            self._memory_status.setText("尚未同步")
+        self._foreshadowing_status.setText(f"{open_foreshadowing_count} 条")
+        canon_count = len(store.list_world()) + len(store.list_power())
+        self._canon_status.setText(f"{canon_count} 项")
+
+        chapter_numbers = [
+            number
+            for path in chapters
+            if (number := chapter_number_from_id(path.stem)) is not None
+        ]
+        latest_chapter = max(chapter_numbers, default=len(chapters))
+        memory_is_behind = bool(chapters) and (
+            not isinstance(current_chapter, int) or current_chapter < latest_chapter
+        )
+        if not has_main_arc:
+            self._set_next_step(
+                "outline", "先完善主线大纲，让后续章节和一致性检查有明确基准。", "完善主线"
+            )
+        elif memory_is_behind:
+            self._set_next_step(
+                "memory", "故事记忆尚未覆盖最新章节，建议先同步关键状态。", "同步记忆"
+            )
+        elif open_foreshadowing_count:
+            self._set_next_step(
+                "memory", "当前仍有未回收伏笔，可进入故事记忆查看和规划。", "查看伏笔"
+            )
+        elif canon_count == 0:
+            self._set_next_step(
+                "canon", "补充世界观或力量体系，可提升后续创作的一致性。", "补充设定"
+            )
+        elif chapters:
+            self._set_next_step(
+                "continue", "项目准备情况良好，可以继续最近编辑的章节。", "继续写作"
+            )
+        else:
+            self._set_next_step(
+                "new_chapter", "基础资料已经就绪，可以创建第一章。", "新建章节"
+            )
+
+    def _set_next_step(self, action: str, text: str, button_text: str) -> None:
+        self._next_step_action = action
+        self._next_step_text.setText(text)
+        self._next_step_button.setText(button_text)
+
+    @staticmethod
+    def _chapter_preview(content: str, limit: int = 120) -> str:
+        normalized = re.sub(r"\s+", " ", str(content or "")).strip()
+        if not normalized:
+            return "正文尚未开始，打开章节继续创作。"
+        return f"“{normalized[:limit].rstrip()}…”" if len(normalized) > limit else f"“{normalized}”"
+
+    @staticmethod
+    def _has_meaningful_markdown(text: str) -> bool:
+        for line in str(text or "").splitlines():
+            value = line.strip()
+            if not value or value.startswith("#"):
+                continue
+            value = value.lstrip("-* ").strip()
+            if value and not value.endswith("："):
+                return True
+        return False
 
 
 class ReportsPage(QWidget):
     run_requested = Signal()
+    jump_requested = Signal(object)
+    repair_requested = Signal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -204,7 +464,17 @@ class ReportsPage(QWidget):
         self.browser.setObjectName("pageBrowser")
         self.browser.setOpenExternalLinks(False)
         self._result = ""
+        self._report: dict[str, Any] | None = None
+        self._report_project_root = ""
         self._values = [QLabel("0"), QLabel("0"), QLabel("0")]
+        self._run_button = QPushButton("运行检查")
+        self._issues_scroll = QScrollArea()
+        self._issues_scroll.setWidgetResizable(True)
+        self._issues_content = QWidget()
+        self._issues_layout = QVBoxLayout(self._issues_content)
+        self._issues_layout.setContentsMargins(2, 2, 2, 2)
+        self._issues_layout.setSpacing(10)
+        self._issues_scroll.setWidget(self._issues_content)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(30, 26, 34, 30)
@@ -225,7 +495,7 @@ class ReportsPage(QWidget):
         title_box.addWidget(title)
         title_box.addWidget(subtitle)
         header_layout.addLayout(title_box, 1)
-        run = QPushButton("运行检查")
+        run = self._run_button
         run.setObjectName("accentButton")
         run.clicked.connect(self.run_requested)
         header_layout.addWidget(run, 0, Qt.AlignmentFlag.AlignTop)
@@ -233,7 +503,7 @@ class ReportsPage(QWidget):
 
         summary = QGridLayout()
         summary.setHorizontalSpacing(12)
-        for index, caption in enumerate(("严重问题", "警告", "最近检查")):
+        for index, caption in enumerate(("严重问题", "警告", "提示")):
             card = QFrame()
             card.setObjectName("reportSummaryCard")
             card_layout = QVBoxLayout(card)
@@ -246,30 +516,87 @@ class ReportsPage(QWidget):
             summary.addWidget(card, 0, index)
         root.addLayout(summary)
         root.addWidget(self.browser, 1)
+        root.addWidget(self._issues_scroll, 1)
+        self._issues_scroll.hide()
         self.show_project(None)
 
+    def set_check_running(self, running: bool) -> None:
+        """Disable the report-page entry while any AI task is active."""
+        running = bool(running)
+        self._run_button.setEnabled(not running)
+        self._run_button.setText("检查中…" if running else "运行检查")
+
+    def last_report_chapter_id(self) -> str | None:
+        """Return the chapter represented by the currently displayed report."""
+        if not isinstance(self._report, dict):
+            return None
+        chapter_id = str(self._report.get("chapter_id") or "").strip()
+        return chapter_id or None
+
     def show_project(self, project: NovelProject | None) -> None:
+        previous_root = self._report_project_root
         self._project = project
         if project is None:
+            self._clear_result()
             self.browser.setHtml("<h2>尚无检查报告</h2><p>打开项目并选择章节后，可以运行一致性检查。</p>")
-            for value in self._values:
-                value.setText("0")
             return
-        if self._result:
-            self.show_result(self._result)
+        project_root = str(project.root.resolve()).casefold()
+        if previous_root and previous_root != project_root:
+            self._clear_result()
+        if self._report is not None:
+            self._render_report()
+        elif self._result:
+            self._render_report()
         else:
             self.browser.setHtml(
                 "<h2>尚未检查当前章节</h2>"
                 "<p>检查结果会显示角色状态、世界观、体系设定和时间线的潜在冲突。</p>"
             )
 
-    def show_result(self, result: str) -> None:
-        self._result = result or ""
-        severe = len(re.findall(r"严重|critical|severe", self._result, re.IGNORECASE))
-        warning = len(re.findall(r"警告|warning|冲突|inconsisten", self._result, re.IGNORECASE))
-        self._values[0].setText(str(severe))
-        self._values[1].setText(str(warning))
-        self._values[2].setText("刚刚")
+    def show_result(
+        self,
+        report: dict[str, Any] | str,
+        rendered: str | None = None,
+        *,
+        project: NovelProject | None = None,
+    ) -> None:
+        """Display a structured report and derive summary counts from it.
+
+        A plain-string fallback remains for older callers, but all current
+        consistency results pass the validated report object.
+        """
+        if isinstance(report, dict):
+            self._report = dict(report)
+            self._result = rendered or format_consistency_report(self._report)
+            bound_project = project or self._project
+            self._report_project_root = (
+                str(bound_project.root.resolve()).casefold()
+                if bound_project is not None
+                else ""
+            )
+            counts = consistency_issue_counts(self._report)
+            self._values[0].setText(str(counts["high"]))
+            self._values[1].setText(str(counts["medium"]))
+            self._values[2].setText(str(counts["low"]))
+        else:
+            self._report = None
+            self._result = str(report or "")
+            self._report_project_root = ""
+            # Compatibility for legacy string-only callers. New callers use
+            # structured counts above and do not rely on text heuristics.
+            severe = len(re.findall(r"严重|critical|severe", self._result, re.IGNORECASE))
+            warning = len(re.findall(r"警告|warning", self._result, re.IGNORECASE))
+            self._values[0].setText(str(severe))
+            self._values[1].setText(str(warning))
+            self._values[2].setText("0")
+        self._render_report()
+
+    def _render_report(self) -> None:
+        if self._report is not None:
+            self._render_issue_cards()
+            self.browser.hide()
+            self._issues_scroll.show()
+            return
         escaped = (
             self._result.replace("&", "&amp;")
             .replace("<", "&lt;")
@@ -277,6 +604,119 @@ class ReportsPage(QWidget):
             .replace("\n", "<br>")
         )
         self.browser.setHtml(f"<h2>最新检查结果</h2><div>{escaped}</div>")
+        self.browser.show()
+        self._issues_scroll.hide()
+
+    def _render_issue_cards(self) -> None:
+        while self._issues_layout.count():
+            item = self._issues_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        report = self._report or {}
+        issues = report.get("issues", [])
+        chapter_label = str(
+            report.get("chapter_title") or report.get("chapter_id") or "当前章节"
+        )
+        heading = QLabel(
+            f"{chapter_label} · {len(issues)} 条问题"
+            if issues
+            else f"{chapter_label} · 未发现明显风险"
+        )
+        heading.setObjectName("sectionTitle")
+        self._issues_layout.addWidget(heading)
+        if not issues:
+            empty = QLabel("当前章节没有需要处理的一致性问题。")
+            empty.setObjectName("mutedLabel")
+            self._issues_layout.addWidget(empty)
+        chapter_id = str(report.get("chapter_id") or "")
+        for issue in issues:
+            if not isinstance(issue, dict):
+                continue
+            payload = dict(issue)
+            payload["chapter_id"] = chapter_id
+            card = QFrame()
+            card.setObjectName("reportIssueCard")
+            card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(14, 12, 14, 12)
+            severity = str(issue.get("severity") or "").casefold()
+            category = str(issue.get("category") or "").casefold()
+            kind = str(issue.get("kind") or "").casefold()
+            from core.ai_protocol import (
+                CONSISTENCY_CATEGORY_LABELS,
+                CONSISTENCY_KIND_LABELS,
+                CONSISTENCY_SEVERITY_LABELS,
+            )
+            title = QLabel(
+                f"[{CONSISTENCY_SEVERITY_LABELS.get(severity, severity)}] "
+                f"{CONSISTENCY_CATEGORY_LABELS.get(category, category)} · "
+                f"{CONSISTENCY_KIND_LABELS.get(kind, kind)}"
+            )
+            title.setObjectName("sectionTitle")
+            card_layout.addWidget(title)
+            description = QLabel(str(issue.get("description") or ""))
+            description.setWordWrap(True)
+            card_layout.addWidget(description)
+            evidence = QLabel(f"证据：{issue.get('evidence') or '未提供'}")
+            evidence.setWordWrap(True)
+            evidence.setObjectName("mutedLabel")
+            card_layout.addWidget(evidence)
+            if issue.get("location_hint"):
+                location = QLabel(f"位置：{issue['location_hint']}")
+                location.setWordWrap(True)
+                location.setObjectName("mutedLabel")
+                card_layout.addWidget(location)
+            if issue.get("source_hint"):
+                source = QLabel(f"来源：{issue['source_hint']}")
+                source.setWordWrap(True)
+                source.setObjectName("mutedLabel")
+                card_layout.addWidget(source)
+            if issue.get("suggestion"):
+                suggestion = QLabel(f"建议：{issue['suggestion']}")
+                suggestion.setWordWrap(True)
+                suggestion.setObjectName("mutedLabel")
+                card_layout.addWidget(suggestion)
+
+            actions = QHBoxLayout()
+            anchor = issue.get("chapter_anchor") or {}
+            quote = str(issue.get("chapter_quote") or "").strip()
+            can_jump = bool(quote) and anchor.get("status", "") not in {"missing", "unresolved", "ambiguous"}
+            jump = QPushButton("跳转正文")
+            jump.setAutoDefault(False)
+            jump.setEnabled(can_jump)
+            if not can_jump:
+                jump.setToolTip("本问题没有唯一可定位的正文原句，请重新运行检查。")
+            else:
+                jump.clicked.connect(lambda _checked=False, item=payload: self.jump_requested.emit(item))
+            actions.addWidget(jump)
+            repairable = (
+                can_jump
+                and kind in {"hard_conflict", "continuity_risk"}
+                and issue.get("recommended_target") == "chapter"
+                and issue.get("repairability") == "automatic"
+            )
+            repair = QPushButton("AI 修复")
+            repair.setObjectName("accentButton")
+            repair.setAutoDefault(False)
+            repair.setEnabled(repairable)
+            if not repairable:
+                repair.setToolTip("该问题需要人工判断，或缺少可安全替换的正文锚点。")
+            else:
+                repair.clicked.connect(lambda _checked=False, item=payload: self.repair_requested.emit(item))
+            actions.addWidget(repair)
+            actions.addStretch(1)
+            card_layout.addLayout(actions)
+            self._issues_layout.addWidget(card)
+        self._issues_layout.addStretch(1)
+
+    def _clear_result(self) -> None:
+        self._result = ""
+        self._report = None
+        self._report_project_root = ""
+        for value in self._values:
+            value.setText("0")
+        self.browser.show()
+        self._issues_scroll.hide()
 
 
 class ExportPage(QWidget):

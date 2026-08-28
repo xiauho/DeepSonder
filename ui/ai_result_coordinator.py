@@ -175,6 +175,63 @@ class ExpansionPreviewDialog(QDialog):
         return group
 
 
+class RepairPreviewDialog(QDialog):
+    """Preview one contiguous replacement before it touches the editor."""
+
+    def __init__(
+        self,
+        expected_original: str,
+        replacement: str,
+        explanation: str,
+        preserved_facts: tuple[str, ...] = (),
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.confirmed = False
+        self.setWindowTitle("AI 修复预览")
+        self.resize(760, 620)
+        layout = QVBoxLayout(self)
+        hint = QLabel(
+            "仅会替换下面这一处连续正文。确认前不会修改编辑器，也不会自动保存。"
+        )
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+        for title, text in (("原文", expected_original), ("修复后", replacement)):
+            label = QLabel(title)
+            label.setObjectName("sectionTitle")
+            layout.addWidget(label)
+            editor = QPlainTextEdit()
+            editor.setReadOnly(True)
+            editor.setPlainText(text)
+            editor.setMaximumHeight(180)
+            layout.addWidget(editor)
+        detail = QLabel("修复说明：" + explanation)
+        detail.setWordWrap(True)
+        detail.setObjectName("mutedLabel")
+        layout.addWidget(detail)
+        if preserved_facts:
+            facts = QLabel("保留事实：" + "；".join(preserved_facts))
+            facts.setWordWrap(True)
+            facts.setObjectName("mutedLabel")
+            layout.addWidget(facts)
+        buttons = QHBoxLayout()
+        confirm = QPushButton("确认应用")
+        confirm.setObjectName("accentButton")
+        confirm.setAutoDefault(False)
+        cancel = QPushButton("放弃")
+        cancel.setAutoDefault(False)
+        confirm.clicked.connect(self._confirm)
+        cancel.clicked.connect(self.reject)
+        buttons.addWidget(confirm)
+        buttons.addStretch(1)
+        buttons.addWidget(cancel)
+        layout.addLayout(buttons)
+
+    def _confirm(self) -> None:
+        self.confirmed = True
+        self.accept()
+
+
 @dataclass(frozen=True)
 class CommitOutcome:
     status: str
@@ -261,3 +318,38 @@ class AIResultCoordinator:
         except Exception as exc:  # noqa: BLE001 - returned to the UI layer
             return CommitOutcome(status="failed", error=str(exc))
         return CommitOutcome(status="committed", value=value)
+
+    def confirm_repair(
+        self,
+        *,
+        expected_original: str,
+        replacement: str,
+        explanation: str,
+        preserved_facts: tuple[str, ...],
+        context_matches: Callable[[], bool],
+        apply_replacement: Callable[[], bool],
+    ) -> CommitOutcome:
+        dialog = RepairPreviewDialog(
+            expected_original,
+            replacement,
+            explanation,
+            preserved_facts,
+            self.parent,
+        )
+        dialog.exec()
+        if not dialog.confirmed:
+            return CommitOutcome(status="cancelled")
+        if not context_matches():
+            QMessageBox.warning(
+                self.parent,
+                "章节已发生变化",
+                "生成期间当前章节内容发生了变化，修复未自动写入。",
+            )
+            return CommitOutcome(status="stale")
+        try:
+            applied = bool(apply_replacement())
+        except Exception as exc:  # noqa: BLE001 - returned to the UI layer
+            return CommitOutcome(status="failed", error=str(exc))
+        if not applied:
+            return CommitOutcome(status="failed", error="正文原句已变化，无法安全替换。")
+        return CommitOutcome(status="committed", action="替换")

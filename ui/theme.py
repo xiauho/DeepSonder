@@ -117,13 +117,46 @@ QWidget#pageSurface, QWidget#dashboardPage, QWidget#reportsPage,
 QWidget#exportPage, QWidget#settingsPage { background: __BG__; }
 QScrollArea#pageScroll, QWidget#pageContent { background: transparent; border: none; }
 QFrame#pageHeader, QFrame#sectionCard, QFrame#statCard, QFrame#emptyState,
-QFrame#settingsSection, QFrame#reportSummaryCard {
+QFrame#settingsSection, QFrame#reportSummaryCard, QFrame#reportIssueCard {
     background: __PANEL__;
     border: 1px solid __BORDER__;
     border-radius: 10px;
 }
 QFrame#pageHeader { border: none; background: transparent; }
 QLabel#sectionTitle { font-size: 16px; font-weight: 750; }
+QFrame#localInfoBar {
+    background: transparent;
+    border: none;
+}
+QLabel#localInfoIcon { color: __GOOD__; font-weight: 800; }
+QLabel#dashboardChapterTitle { font-size: 18px; font-weight: 750; }
+QLabel#dashboardPreview {
+    color: __MUTED__;
+    background: __FIELD__;
+    border-left: 3px solid __ACCENT__;
+    border-radius: 5px;
+    padding: 11px 13px;
+}
+QLabel#dashboardReadinessValue { color: __ACCENT__; font-weight: 650; }
+QFrame#dashboardReadinessRow {
+    background: __FIELD__;
+    border: 1px solid __BORDER__;
+    border-radius: 7px;
+}
+QPushButton#readinessLinkButton {
+    background: transparent;
+    border: none;
+    color: __ACCENT__;
+    min-height: 20px;
+    padding: 2px 3px;
+}
+QPushButton#readinessLinkButton:hover { background: __SELECTION__; }
+QFrame#dashboardNextStep {
+    background: __SELECTION__;
+    border: 1px solid __BORDER__;
+    border-radius: 8px;
+}
+QLabel#dashboardNextStepText { color: __TEXT__; }
 QLabel#statValue {
     color: __ACCENT__;
     font-family: "JetBrains Mono", "Microsoft YaHei UI", monospace;
