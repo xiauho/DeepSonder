@@ -55,7 +55,7 @@ from ui.settings_controller import SettingsController
 from ui.story_navigation_controller import StoryNavigationController
 from ui.trash_dialog import TrashDialog
 from ui.update_controller import UpdateController
-from ui.update_dialog import UpdateDialog
+from ui.update_dialog import UpdateDialog, no_update_notice
 from ui.view_refresh_controller import ViewRefreshController
 from ui.window_state_controller import WindowStateController
 
@@ -1409,11 +1409,11 @@ class MainWindow(QMainWindow):
             self.status_message.setText(f"发现新版本 {result.latest.tag_name}")
             return
         if manual:
-            latest = result.latest.tag_name if result.latest is not None else "暂无发布版本"
+            notice_title, notice_message = no_update_notice(result)
             QMessageBox.information(
                 self,
-                "已是最新版",
-                f"当前版本：v{result.current_version}\n最新可用版本：{latest}",
+                notice_title,
+                notice_message,
             )
             self.status_message.setText("更新检查完成")
 

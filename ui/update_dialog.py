@@ -14,6 +14,20 @@ from PySide6.QtWidgets import (
 from core.update_service import UpdateCheckResult
 
 
+def no_update_notice(result: UpdateCheckResult) -> tuple[str, str]:
+    """Return an accurate title and message for a completed manual check."""
+    current = f"当前版本：v{result.current_version}"
+    if result.latest is None:
+        return (
+            "未找到发布版本",
+            f"{current}\n当前更新通道中没有可用的 GitHub Release。",
+        )
+    return (
+        "已是最新版",
+        f"{current}\n最新可用版本：{result.latest.tag_name}",
+    )
+
+
 class UpdateDialog(QDialog):
     OPEN_RELEASE = 1
     SKIP_VERSION = 2
