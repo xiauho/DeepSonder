@@ -8,6 +8,7 @@ from typing import Any
 
 from copy import deepcopy
 
+from .app_paths import app_config_dir, legacy_application_root, update_cache_dir
 from .theme_tokens import DARK_COLORS, LIGHT_COLORS
 from .storage import atomic_write_text
 
@@ -37,16 +38,38 @@ DEFAULT_CONFIG = {
 
 def get_config_path() -> Path:
     """Return the user-editable config.json path."""
-    return Path(__file__).resolve().parent.parent / "config.json"
+    return app_config_dir() / "config.json"
+
+
+def get_legacy_config_path() -> Path:
+    """Return the pre-migration config path beside the application source."""
+    return legacy_application_root() / "config.json"
+
+
+def get_update_cache_path() -> Path:
+    """Return the directory reserved for future update downloads."""
+    return update_cache_dir()
 
 
 def load_config() -> dict:
-    """Load config.json and merge it over the defaults."""
+    """Load user settings, migrating a legacy root config when necessary."""
     config = deepcopy(DEFAULT_CONFIG)
     config_path = get_config_path()
     if config_path.exists():
         _merge_config(config, config_path)
+        _normalize_config(config)
+        return config
+
+    legacy_path = get_legacy_config_path()
+    migrated = legacy_path != config_path and _merge_config(config, legacy_path)
     _normalize_config(config)
+    if migrated:
+        try:
+            _write_config(config_path, config)
+        except OSError:
+            # A read-only or unavailable user-data directory must not prevent
+            # the application from starting with the successfully loaded data.
+            pass
     return config
 
 
@@ -57,15 +80,19 @@ def normalize_config(config: dict) -> dict:
     return normalized
 
 
-def _merge_config(config: dict, path: Path) -> None:
+def _merge_config(config: dict, path: Path) -> bool:
+    if not path.is_file():
+        return False
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(data, dict):
             config.update(data)
             if "expand_target_chars" not in data and "continue_target_chars" in data:
                 config["expand_target_chars"] = data["continue_target_chars"]
+            return True
     except (json.JSONDecodeError, OSError):
         pass
+    return False
 
 
 def _normalize_config(config: dict[str, Any]) -> None:
@@ -153,8 +180,11 @@ def _is_hex_color(value: str) -> bool:
 
 
 def save_config(config: dict) -> None:
-    """Write config.json to the project root."""
-    path = get_config_path()
+    """Write config.json to the per-user application-data directory."""
+    _write_config(get_config_path(), config)
+
+
+def _write_config(path: Path, config: dict) -> None:
     atomic_write_text(
         path,
         json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8"

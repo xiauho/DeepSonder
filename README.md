@@ -71,7 +71,11 @@ python main.py
 
 ## 配置 DeepSeek Harness
 
-首次运行会由 `config.example.json` 生成本机的 `config.json`。后者已被 Git 忽略，不应提交到公开仓库。
+Novalist 将本机设置保存在当前用户的应用数据目录中：Windows 为 `%APPDATA%\Novalist\config.json`，macOS 为 `~/Library/Application Support/Novalist/config.json`，Linux 为 `$XDG_CONFIG_HOME/Novalist/config.json`（未设置时使用 `~/.config/Novalist/config.json`）。
+
+从旧版本升级时，如果新位置尚无配置，Novalist 会读取程序目录中的旧 `config.json`，将规范化后的设置复制到新位置，并保留旧文件作为备份。`config.example.json` 仅作为配置格式参考，不应写入 API 密钥或提交个人配置。
+
+未来的更新下载缓存预留在本机缓存目录中；Windows 对应 `%LOCALAPPDATA%\Novalist\updates`。缓存不包含小说项目，删除后可重新下载。
 
 Novalist 的 AI 配置只针对 DeepSeek Harness 的 `dsh --profile headless` 入口，不提供其他模型供应商、API Key 或模型列表配置。凭据和模型连接由 Harness 自己管理。
 

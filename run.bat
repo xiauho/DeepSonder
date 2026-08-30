@@ -2,10 +2,6 @@
 chcp 65001 >nul
 cd /d "%~dp0"
 
-if not exist "config.json" if exist "config.example.json" (
-  copy /Y "config.example.json" "config.json" >nul
-)
-
 if exist ".venv\Scripts\python.exe" goto :environment_ready
 
 python --version >nul 2>&1
