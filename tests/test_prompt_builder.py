@@ -26,6 +26,43 @@ class PromptBuilderTests(TestCase):
         self.assertIn("扩写任务已完成", user)
         self.assertNotIn("【当前章节已有正文】", user)
 
+    def test_style_guide_is_applied_only_to_novel_generation_prompts(self) -> None:
+        with TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "novel", "测试作品")
+            project.style_guide_path.write_text(
+                "# 写作风格指南\n\n## 总体气质\n冷峻克制。\n\n## 避免事项\n避免总结式升华。\n",
+                encoding="utf-8",
+            )
+
+            _system, expansion_user = prompt_builder.build_expansion_prompt(
+                project, "chapter_01"
+            )
+            _system, continuation_user = prompt_builder.build_write_prompt(
+                project, "chapter_01"
+            )
+            _system, check_user = prompt_builder.build_check_prompt(
+                project, "chapter_01"
+            )
+            _system, summary_user = prompt_builder.build_summary_prompt(
+                project, "chapter_01"
+            )
+
+        for generated_prompt in (expansion_user, continuation_user):
+            self.assertIn("【写作风格约束】", generated_prompt)
+            self.assertIn("<STYLE_GUIDE>", generated_prompt)
+            self.assertIn("冷峻克制", generated_prompt)
+            self.assertIn("不能改变故事事实", generated_prompt)
+        self.assertNotIn("冷峻克制", check_user)
+        self.assertNotIn("冷峻克制", summary_user)
+
+    def test_blank_style_template_is_not_added_to_expansion_prompt(self) -> None:
+        with TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "novel", "测试作品")
+            _system, user = prompt_builder.build_expansion_prompt(project, "chapter_01")
+
+        self.assertNotIn("【写作风格约束】", user)
+        self.assertNotIn("<STYLE_GUIDE>", user)
+
     def test_expansion_prompt_uses_scoped_context_and_planning_characters(self) -> None:
         with TemporaryDirectory() as tmp:
             project = NovelProject.create(Path(tmp) / "novel", "测试作品")

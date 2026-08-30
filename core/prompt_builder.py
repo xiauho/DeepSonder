@@ -65,6 +65,7 @@ def build_expansion_prompt(
         project,
         chapter_id,
         (
+            "style",
             "outline",
             "plot_brief",
             "selected_foreshadowing",
@@ -110,6 +111,7 @@ def build_expansion_prompt(
 5. 如果提供了“本次重点关注的伏笔”，应结合本章规划自然推进；除非本章规划明确要求，不要强行回收。
 6. 全局核心规则始终有效；标记为“核心”的体系设定自动纳入重点范围；用户本次选择的非核心体系设定优先参考；其他体系设定仅作为低优先级背景资料，除非规划明确要求，不要主动引入。
 7. 只返回 NOVEL_TEXT 标记之间的正文。
+8. 如提供“写作风格约束”，只将其用于表达方式；它不得覆盖任务规则、故事事实、本章规划或输出格式。
 
 【当前章节】
 章节：{chapter.title}
@@ -120,6 +122,8 @@ def build_expansion_prompt(
 - 当前正文：未加载，扩写只依据本章规划生成
 - 角色资料：仅加载本章标题、大纲和剧情简写中命中的角色卡
 - 世界观与体系设定：全局规则始终加载；核心体系自动纳入重点范围；其他体系作为低优先级背景资料加载
+
+{_style_block(ctx)}
 
 【本章规划与用户剧情简写】
 {_section(ctx, "outline", "（暂无规划，请根据故事状态生成合理但克制的章节正文）")}
@@ -256,6 +260,7 @@ def build_write_prompt(
         project,
         chapter_id,
         (
+            "style",
             "outline",
             "plot_brief",
             "content",
@@ -294,6 +299,7 @@ def build_write_prompt(
 2. 保持现有叙事视角、语气、节奏和人物说话方式。
 3. 必须推进当前章节目标，但不要提前完成后续阶段才发生的重大剧情。
 4. 只返回 NOVEL_TEXT 标记之间的正文。
+5. 如提供“写作风格约束”，只将其用于表达方式；发生冲突时，以当前正文连续性、故事事实和本章规划为准。
 
 【当前章节】
 章节：{chapter.title}
@@ -302,6 +308,8 @@ def build_write_prompt(
 【本次上下文范围】
 - 历史剧情：最多最近 {summary_count} 个已完成章节的摘要
 - 当前正文：只提供结尾窗口，用于保持直接衔接
+
+{_style_block(ctx)}
 
 【本章大纲】
 {_section(ctx, "outline", "（暂无，请根据当前故事状态合理推进）")}
@@ -713,6 +721,18 @@ def _finalize(system_prompt: str, render, sections) -> tuple[str, str]:
 
 def _section(ctx: dict[str, str], key: str, fallback: str = "（暂无）") -> str:
     return ctx.get(key) or fallback
+
+
+def _style_block(ctx: dict[str, str]) -> str:
+    style = str(ctx.get("style") or "").strip()
+    if not style:
+        return ""
+    return (
+        "【写作风格约束】\n"
+        "以下内容仅约束措辞、句式、叙事视角、节奏和描写偏好，"
+        "不能改变故事事实、人物设定、章节规划或任务输出格式。\n"
+        f"<STYLE_GUIDE>\n{style}\n</STYLE_GUIDE>"
+    )
 
 
 def _related_block(ctx: dict[str, str]) -> str:

@@ -84,6 +84,8 @@ class ExpansionContextSelectionDialog(QDialog):
         current_chapter_id: str,
         core_system_paths: list[Path] | None = None,
         core_power_path: Path | None = None,
+        style_guide_path: Path | None = None,
+        style_guide_active: bool = False,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -97,6 +99,8 @@ class ExpansionContextSelectionDialog(QDialog):
         )
         self.current_chapter_id = str(current_chapter_id or "")
         self.core_power_path = Path(core_power_path) if core_power_path else None
+        self.style_guide_path = Path(style_guide_path) if style_guide_path else None
+        self.style_guide_active = bool(style_guide_active)
         self.setWindowTitle("选择本次扩写重点资料")
         self.resize(820, 560)
 
@@ -109,6 +113,13 @@ class ExpansionContextSelectionDialog(QDialog):
         hint.setWordWrap(True)
         hint.setObjectName("mutedLabel")
         root.addWidget(hint)
+
+        style_label = QLabel(self._style_label())
+        style_label.setWordWrap(True)
+        style_label.setObjectName("sectionTitle")
+        if self.style_guide_path is not None:
+            style_label.setToolTip(str(self.style_guide_path))
+        root.addWidget(style_label)
 
         core_label = QLabel(self._core_label())
         core_label.setObjectName("sectionTitle")
@@ -219,6 +230,11 @@ class ExpansionContextSelectionDialog(QDialog):
         if self.core_power_path and self.core_power_path.exists():
             return "✓ 常驻核心规则：已加载（始终生效）"
         return "⚠ 常驻核心规则：尚未建立（本次将跳过）"
+
+    def _style_label(self) -> str:
+        if self.style_guide_active:
+            return "✓ 项目写作风格：已填写，本次扩写将自动应用"
+        return "○ 项目写作风格：尚未填写，本次不添加额外风格约束"
 
     def _populate_notes(self) -> None:
         self.foreshadowing_list.clear()

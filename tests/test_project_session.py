@@ -43,3 +43,12 @@ class ProjectSessionTests(unittest.TestCase):
             session = ProjectSession()
             with self.assertRaises(ValueError):
                 session.load(Path(tmp) / "missing")
+
+    def test_load_adds_style_guide_to_legacy_project(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            project.style_guide_path.unlink()
+
+            loaded = ProjectSession().load(project.root)
+
+            self.assertTrue(loaded.style_guide_path.is_file())

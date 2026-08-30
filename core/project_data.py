@@ -14,6 +14,7 @@ from uuid import uuid4
 from .foreshadowing import ForeshadowingStore
 from .project import (
     DEFAULT_CORE_POWER_RULES,
+    DEFAULT_STYLE_GUIDE,
     DEFAULT_TIMELINE,
     SYSTEM_REGISTRY_FILENAME,
     NovelProject,
@@ -289,6 +290,10 @@ class ProjectDataStore:
         return self.project.root
 
     @property
+    def style_guide_path(self) -> Path:
+        return self.project.style_guide_path
+
+    @property
     def trash_dir(self) -> Path:
         return self.root / ".novalist" / "trash"
 
@@ -434,6 +439,28 @@ class ProjectDataStore:
         if not path.exists():
             self.write_new_file(path, DEFAULT_CORE_POWER_RULES)
         return path
+
+    def ensure_style_guide(self) -> Path:
+        """Create the single project-level style guide for legacy projects."""
+        path = self.style_guide_path
+        if not path.exists():
+            self.write_new_file(path, DEFAULT_STYLE_GUIDE)
+        return path
+
+    def load_style_guide(self) -> str:
+        """Return author-written style rules without template-only comments.
+
+        A newly seeded guide contains headings and HTML comments that help the
+        author fill it in. Those hints must not become accidental AI rules.
+        """
+        raw = self.read_text(self.style_guide_path)
+        cleaned = re.sub(r"<!--.*?-->", "", raw, flags=re.DOTALL).strip()
+        substantive = [
+            line.strip()
+            for line in cleaned.splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+        return cleaned if substantive else ""
 
     def load_chapter(self, chapter_id: str):
         return self.project.load_chapter(chapter_id)

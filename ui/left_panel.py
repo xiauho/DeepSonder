@@ -57,6 +57,7 @@ class LeftPanel(QWidget):
     }
     GROUP_ICONS = {
         "总大纲": "account_tree",
+        "写作风格": "stylus",
         "章节": "auto_stories",
         "角色": "group",
         "世界观": "public",
@@ -223,14 +224,15 @@ class LeftPanel(QWidget):
                     project.outline_dir / "future_plan.md",
                 ],
             ),
-            ("章节", "02", store.list_chapters()),
-            ("角色", "03", store.list_characters()),
-            ("世界观", "04", store.list_world()),
-            ("体系设定", "05", store.list_power()),
-            ("时间线", "06", [project.canon_dir / "timeline.md"]),
+            ("写作风格", "02", [store.style_guide_path]),
+            ("章节", "03", store.list_chapters()),
+            ("角色", "04", store.list_characters()),
+            ("世界观", "05", store.list_world()),
+            ("体系设定", "06", store.list_power()),
+            ("时间线", "07", [project.canon_dir / "timeline.md"]),
         ]
         if self._scope == "canon":
-            groups = [groups[index] for index in (0, 2, 3, 4, 5)]
+            groups = [groups[index] for index in (0, 1, 3, 4, 5, 6)]
         category_map = {"体系设定": "体系设定"}
         for label, number, paths in groups:
             existing = [path for path in paths if path.exists()]
@@ -467,7 +469,7 @@ class LeftPanel(QWidget):
             group.child(index).data(0, self.IMPORTANCE_ROLE) == "core"
             for index in range(group.childCount())
         )
-        number = group.data(0, self.GROUP_NUMBER_ROLE) or "05"
+        number = group.data(0, self.GROUP_NUMBER_ROLE) or "06"
         group.setText(
             0,
             f"{number}   体系设定   {group.childCount()} · 核心 {core_count}",
