@@ -72,6 +72,29 @@ class SettingsControllerTests(unittest.TestCase):
         self.assertEqual(changes[-1][0]["theme"], "dark")
         self.assertEqual(changes[-1][1], "主题已切换")
 
+    def test_synchronize_adopts_update_metadata_without_saving(self) -> None:
+        document_controller = FakeDocumentController()
+        controller = SettingsController({"theme": "light"}, document_controller)
+
+        with patch("ui.settings_controller.save_config") as save_config:
+            controller.synchronize(
+                {
+                    "theme": "light",
+                    "last_update_check_at": "2026-08-30T12:00:00Z",
+                    "skipped_update_version": "v2.0.6-beta",
+                }
+            )
+
+        self.assertEqual(
+            controller.config["last_update_check_at"],
+            "2026-08-30T12:00:00Z",
+        )
+        self.assertEqual(
+            controller.config["skipped_update_version"],
+            "v2.0.6-beta",
+        )
+        save_config.assert_not_called()
+
     def test_dsh_test_task_is_exposed_through_controller_signals(self) -> None:
         document_controller = FakeDocumentController()
         controller = SettingsController({}, document_controller)

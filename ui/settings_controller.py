@@ -41,6 +41,10 @@ class SettingsController(QObject):
     def config(self) -> dict:
         return dict(self._config)
 
+    def synchronize(self, config: dict) -> None:
+        """Adopt metadata persisted by another application controller."""
+        self._config = normalize_config(config)
+
     def apply(self, config: dict, message: str = "设置已保存") -> dict:
         self._config = normalize_config(config)
         save_config(self._config)
