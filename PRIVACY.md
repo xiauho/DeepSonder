@@ -29,3 +29,14 @@ and must be reviewed before use or publication.
 Novalist does not request or store a DeepSeek API key. Credentials are managed
 outside Novalist by the user's Harness installation. Never commit `.env`, API
 keys, tokens, personal `config.json` files, or private writing projects.
+
+## Update checks
+
+Manual update checks, and automatic checks when explicitly enabled, request the
+public GitHub Releases list for `xiauho/novalist`. These requests do not include
+story projects, prompts, AI credentials, or the contents of `config.json`.
+GitHub receives ordinary network metadata such as the user's IP address and a
+Novalist version User-Agent. Automatic checks run at most once every 24 hours.
+
+The current updater only displays release information and can open the official
+Novalist GitHub release page. It does not download or execute update files.

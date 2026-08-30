@@ -31,6 +31,11 @@ DEFAULT_CONFIG = {
     "ai_context_history_chapters": 5,
     "show_line_numbers": False,
     "ai_notice_acknowledged": False,
+    # Update preferences and non-sensitive check metadata
+    "update_channel": "beta",
+    "auto_check_updates": False,
+    "last_update_check_at": "",
+    "skipped_update_version": "",
     "recent_projects": [],
     "last_project": "",
 }
@@ -162,6 +167,17 @@ def _normalize_config(config: dict[str, Any]) -> None:
     config.pop("continue_target_chars", None)
     config["auto_save"] = bool(config.get("auto_save", True))
     config["ai_notice_acknowledged"] = bool(config.get("ai_notice_acknowledged", False))
+    update_channel = str(config.get("update_channel") or "beta").strip().lower()
+    config["update_channel"] = (
+        update_channel if update_channel in {"stable", "beta"} else "beta"
+    )
+    config["auto_check_updates"] = bool(config.get("auto_check_updates", False))
+    config["last_update_check_at"] = str(
+        config.get("last_update_check_at") or ""
+    ).strip()
+    config["skipped_update_version"] = str(
+        config.get("skipped_update_version") or ""
+    ).strip()
     config["recent_projects"] = _string_list(config.get("recent_projects"))
     config["last_project"] = str(config.get("last_project") or "")
 

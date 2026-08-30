@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from PySide6.QtCore import QSize, QTimer, Qt
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import QAbstractButton, QLabel, QPushButton, QHBoxLayout, QSizePolicy
 
+from core.resources import resource_root
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = resource_root()
 FONT_ROOT = PROJECT_ROOT / "assets" / "fonts"
 
 # Only the normal weights used by the application are loaded. The source

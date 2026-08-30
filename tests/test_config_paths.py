@@ -6,7 +6,7 @@ from unittest import TestCase
 from unittest.mock import patch
 
 from core.app_paths import app_cache_dir, app_config_dir, update_cache_dir
-from core.config import get_update_cache_path, load_config, save_config
+from core.config import get_update_cache_path, load_config, normalize_config, save_config
 
 
 class ApplicationPathTests(TestCase):
@@ -134,3 +134,17 @@ class ConfigMigrationTests(TestCase):
                 json.loads(target.read_text(encoding="utf-8")),
                 {"theme": "dark"},
             )
+
+    def test_update_preferences_are_normalized(self) -> None:
+        config = normalize_config(
+            {
+                "update_channel": "unsupported",
+                "auto_check_updates": 1,
+                "last_update_check_at": None,
+                "skipped_update_version": None,
+            }
+        )
+        self.assertEqual(config["update_channel"], "beta")
+        self.assertTrue(config["auto_check_updates"])
+        self.assertEqual(config["last_update_check_at"], "")
+        self.assertEqual(config["skipped_update_version"], "")

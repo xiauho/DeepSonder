@@ -1000,6 +1000,31 @@ class SettingsPage(QWidget):
         appearance_layout.addLayout(appearance_form)
         content_layout.addWidget(appearance)
 
+        updates = QFrame()
+        updates.setObjectName("settingsSection")
+        updates_layout = QVBoxLayout(updates)
+        updates_layout.setContentsMargins(17, 15, 17, 17)
+        updates_layout.setSpacing(9)
+        updates_title = QLabel("软件更新")
+        updates_title.setObjectName("sectionTitle")
+        updates_hint = QLabel(
+            "自动检查最多每 24 小时连接一次 GitHub，只读取 Novalist 发布信息，"
+            "不会发送小说内容、AI 凭据或个人配置。"
+        )
+        updates_hint.setObjectName("mutedLabel")
+        updates_hint.setWordWrap(True)
+        updates_layout.addWidget(updates_title)
+        updates_layout.addWidget(updates_hint)
+        updates_form = QFormLayout()
+        self.auto_check_updates = QCheckBox("启动后自动检查更新")
+        self.update_channel = QComboBox()
+        self.update_channel.addItem("测试版 · Beta", "beta")
+        self.update_channel.addItem("稳定版 · Stable", "stable")
+        updates_form.addRow("自动检查", self.auto_check_updates)
+        updates_form.addRow("更新通道", self.update_channel)
+        updates_layout.addLayout(updates_form)
+        content_layout.addWidget(updates)
+
         privacy = QFrame()
         privacy.setObjectName("settingsSection")
         privacy_layout = QVBoxLayout(privacy)
@@ -1044,7 +1069,19 @@ class SettingsPage(QWidget):
         self.timeout.setValue(int(config.get("dsh_timeout", 600)))
         self.theme.setCurrentIndex(0 if config.get("theme", "light") == "light" else 1)
         self.ui_font_size.setValue(int(config.get("ui_font_size", 14)))
+        self.auto_check_updates.setChecked(
+            bool(config.get("auto_check_updates", False))
+        )
+        channel_index = self.update_channel.findData(
+            str(config.get("update_channel") or "beta")
+        )
+        self.update_channel.setCurrentIndex(max(0, channel_index))
         self.auto_save_interval.setEnabled(self.auto_save.isChecked())
+
+    def synchronize_update_metadata(self, config: dict) -> None:
+        """Keep background-check metadata without resetting edited controls."""
+        for key in ("last_update_check_at", "skipped_update_version"):
+            self._config[key] = str(config.get(key) or "")
 
     def config(self) -> dict:
         try:
@@ -1067,6 +1104,8 @@ class SettingsPage(QWidget):
                 "dsh_timeout": self.timeout.value(),
                 "theme": self.theme.currentData(),
                 "ui_font_size": self.ui_font_size.value(),
+                "auto_check_updates": self.auto_check_updates.isChecked(),
+                "update_channel": self.update_channel.currentData(),
             }
         )
         palette = LIGHT_COLORS if result["theme"] == "light" else DARK_COLORS

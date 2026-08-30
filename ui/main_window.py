@@ -3,8 +3,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QAction, QCloseEvent, QKeySequence, QShortcut
+from PySide6.QtCore import Qt, QTimer, QUrl
+from PySide6.QtGui import (
+    QAction,
+    QCloseEvent,
+    QDesktopServices,
+    QKeySequence,
+    QShortcut,
+)
 from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
@@ -26,6 +32,8 @@ from PySide6.QtWidgets import (
 from core.config import load_config
 from core.project import NovelProject
 from core.project_data import ChapterIdConflictError, ProjectDataStore
+from core.update_service import UpdateCheckResult
+from core.version import load_current_version
 from ui.ai_controller import AIController
 from ui.ai_engine_controller import AIEngineController
 from ui.ai_task_view_controller import AITaskViewController
@@ -46,6 +54,8 @@ from ui.project_setup_dialog import ProjectSetupDialog
 from ui.settings_controller import SettingsController
 from ui.story_navigation_controller import StoryNavigationController
 from ui.trash_dialog import TrashDialog
+from ui.update_controller import UpdateController
+from ui.update_dialog import UpdateDialog, no_update_notice
 from ui.view_refresh_controller import ViewRefreshController
 from ui.window_state_controller import WindowStateController
 
@@ -86,6 +96,7 @@ class MainWindow(QMainWindow):
         self.config = dict(config) if config is not None else load_config()
         self._action_icon_buttons: dict[str, IconTextButton] = {}
         self.project_setup_dialog: ProjectSetupDialog | None = None
+        self.update_dialog: UpdateDialog | None = None
         self.ai_engine_controller = AIEngineController(
             self.config,
             self.ai_controller.is_running,
@@ -114,6 +125,7 @@ class MainWindow(QMainWindow):
             self.ai_engine_controller,
             self,
         )
+        self.update_controller = UpdateController(self.config, self)
         self.export_controller = ExportController(self.project_session, self)
         self.export_page.set_export_controller(self.export_controller)
         self.view_refresh_controller = ViewRefreshController(
@@ -220,6 +232,7 @@ class MainWindow(QMainWindow):
 
         self._refresh_auto_save_timer()
         QTimer.singleShot(80, self._restore_last_project)
+        QTimer.singleShot(1500, self.update_controller.check_automatically)
 
     @property
     def project(self) -> NovelProject | None:
@@ -269,6 +282,8 @@ class MainWindow(QMainWindow):
         action("continue", "AI 扩写", self.expand_chapter, "Ctrl+Enter")
         action("check", "一致性检查", self.check_consistency, "Ctrl+Shift+C")
         action("memory", "更新故事记忆", self.update_memory, "Ctrl+Shift+M")
+        action("check_updates", "检查更新…", self.check_for_updates)
+        action("about", "关于 Novalist", self.show_about)
 
     def _build_ui(self) -> None:
         central = QWidget(self)
@@ -484,6 +499,11 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.actions["inspector"])
         view_menu.addAction(self.actions["output"])
 
+        help_menu = self.menuBar().addMenu("帮助")
+        help_menu.addAction(self.actions["check_updates"])
+        help_menu.addSeparator()
+        help_menu.addAction(self.actions["about"])
+
     def _build_statusbar(self) -> None:
         self.status_message = QLabel("打开或创建一个项目，开始今天的写作")
         self.status_message.setObjectName("mutedLabel")
@@ -543,6 +563,11 @@ class MainWindow(QMainWindow):
         self.settings_controller.connection_succeeded.connect(self._on_dsh_test_succeeded)
         self.settings_controller.connection_failed.connect(self._on_dsh_test_failed)
         self.settings_controller.connection_finished.connect(self._on_dsh_test_finished)
+        self.update_controller.started.connect(self._on_update_check_started)
+        self.update_controller.result_ready.connect(self._on_update_check_result)
+        self.update_controller.failed.connect(self._on_update_check_failed)
+        self.update_controller.finished.connect(self._on_update_check_finished)
+        self.update_controller.config_changed.connect(self._on_update_config_changed)
         self.editor.dirty_changed.connect(self._on_dirty_changed)
         self.ai_controller.started.connect(self._on_ai_started)
         self.ai_controller.finished.connect(self._on_ai_finished)
@@ -1304,6 +1329,7 @@ class MainWindow(QMainWindow):
 
     def _on_settings_changed(self, config: dict, message: str) -> None:
         self.config = dict(config)
+        self.update_controller.set_config(self.config)
         self.project_lifecycle_controller.set_config(self.config)
         self.ai_workflow_controller.set_config(self.config)
         self.appearance_controller.apply(self.config)
@@ -1327,6 +1353,99 @@ class MainWindow(QMainWindow):
 
     def _on_dsh_test_finished(self) -> None:
         self.settings_page.test_button.setEnabled(True)
+
+    def check_for_updates(self) -> None:
+        if (
+            not self.update_controller.check(manual=True)
+            and self.update_controller.is_running()
+        ):
+            self.status_message.setText("更新检查已在进行中")
+
+    def show_about(self) -> None:
+        try:
+            version = load_current_version()
+            version_text = f"v{version}"
+        except ValueError:
+            version_text = "版本未知"
+        QMessageBox.information(
+            self,
+            "关于 Novalist",
+            f"Novalist {version_text}\n\n"
+            "本地优先的长篇小说创作工具。\n"
+            "项目主页：https://github.com/xiauho/novalist",
+        )
+
+    def _on_update_check_started(self, manual: bool) -> None:
+        self.actions["check_updates"].setEnabled(False)
+        if manual:
+            self.status_message.setText("正在检查 Novalist 更新…")
+
+    def _on_update_check_result(
+        self,
+        result: UpdateCheckResult,
+        manual: bool,
+    ) -> None:
+        if self.update_controller.should_present(result, manual=manual):
+            if self.update_dialog is not None:
+                self.update_dialog.show()
+                self.update_dialog.raise_()
+                self.update_dialog.activateWindow()
+                return
+            if result.latest is None:
+                return
+            dialog = UpdateDialog(result, self)
+            self.update_dialog = dialog
+            dialog.finished.connect(
+                lambda choice, release=result.latest: self._handle_update_choice(
+                    choice,
+                    release.release_url,
+                    release.tag_name,
+                )
+            )
+            dialog.finished.connect(
+                lambda _choice, target=dialog: self._clear_update_dialog(target)
+            )
+            dialog.open()
+            self.status_message.setText(f"发现新版本 {result.latest.tag_name}")
+            return
+        if manual:
+            notice_title, notice_message = no_update_notice(result)
+            QMessageBox.information(
+                self,
+                notice_title,
+                notice_message,
+            )
+            self.status_message.setText("更新检查完成")
+
+    def _handle_update_choice(
+        self,
+        choice: int,
+        release_url: str,
+        tag_name: str,
+    ) -> None:
+        if choice == UpdateDialog.OPEN_RELEASE:
+            QDesktopServices.openUrl(QUrl(release_url))
+        elif choice == UpdateDialog.SKIP_VERSION:
+            self.update_controller.skip_version(tag_name)
+            self.status_message.setText(f"已忽略 {tag_name}")
+
+    def _clear_update_dialog(self, dialog: UpdateDialog) -> None:
+        if self.update_dialog is dialog:
+            self.update_dialog = None
+        dialog.deleteLater()
+
+    def _on_update_check_failed(self, message: str, manual: bool) -> None:
+        if manual:
+            QMessageBox.warning(self, "检查更新失败", str(message))
+            self.status_message.setText("更新检查失败")
+
+    def _on_update_check_finished(self, _manual: bool) -> None:
+        self.actions["check_updates"].setEnabled(True)
+
+    def _on_update_config_changed(self, config: dict) -> None:
+        self.config = dict(config)
+        self.settings_controller.synchronize(self.config)
+        self.settings_page.synchronize_update_metadata(self.config)
 
     # ------------------------------------------------------------------
     # Auto-save and AI tasks
@@ -1445,6 +1564,10 @@ class MainWindow(QMainWindow):
                 return
         if self.ai_controller.is_running():
             QMessageBox.information(self, "AI 任务仍在进行", "请等待当前 AI 任务完成后再退出，以免丢失生成结果。")
+            event.ignore()
+            return
+        if self.update_controller.is_running():
+            self.status_message.setText("更新检查仍在进行，请稍候再退出")
             event.ignore()
             return
         self.ai_engine_controller.cleanup()
