@@ -19,6 +19,34 @@ from core.foreshadowing import ForeshadowingStore
 
 
 class ProjectDataStoreTests(TestCase):
+    def test_project_style_guide_is_seeded_but_inactive_until_authored(self) -> None:
+        with TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            store = ProjectDataStore(project)
+
+            self.assertTrue(store.style_guide_path.is_file())
+            self.assertEqual(store.load_style_guide(), "")
+
+            store.style_guide_path.write_text(
+                "# 写作风格指南\n\n<!-- 填写提示 -->\n\n## 总体气质\n冷峻克制，避免总结式升华。\n",
+                encoding="utf-8",
+            )
+            loaded = store.load_style_guide()
+            self.assertIn("冷峻克制", loaded)
+            self.assertNotIn("填写提示", loaded)
+
+    def test_ensure_style_guide_migrates_legacy_project_without_overwrite(self) -> None:
+        with TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            store = ProjectDataStore(project)
+            store.style_guide_path.unlink()
+
+            created = store.ensure_style_guide()
+            self.assertTrue(created.is_file())
+            created.write_text("# 写作风格指南\n\n保留我的规则。\n", encoding="utf-8")
+            store.ensure_style_guide()
+            self.assertIn("保留我的规则", created.read_text(encoding="utf-8"))
+
     def test_next_chapter_id_uses_maximum_number_and_skips_conflicts(self) -> None:
         with TemporaryDirectory() as tmp:
             project = NovelProject.create(Path(tmp) / "proj", "测试")

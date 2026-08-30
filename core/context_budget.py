@@ -39,6 +39,7 @@ TAIL_MARK = "（前文过长，已截断）\n"
 SECTION_RULES: dict[str, tuple[int, str, int]] = {
     "outline": (3000, "head", 0),
     "plot_brief": (2500, "head", 0),
+    "style": (1800, "head", 0),
     "content": (12000, "tail", 1),
     "selected_foreshadowing": (3500, "head", 1),
     "core_power": (1800, "head", 1),
@@ -76,6 +77,7 @@ class AIContext:
     chapter_summaries: dict
     main_arc: str
     future_plan: str
+    style_guide: str
 
     def fingerprint(self, editor_text: str | None = None) -> str:
         payload = {
@@ -101,6 +103,7 @@ class AIContext:
             "chapter_summaries": self.chapter_summaries,
             "main_arc": self.main_arc,
             "future_plan": self.future_plan,
+            "style_guide": self.style_guide,
             "editor_text": editor_text,
         }
         canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
@@ -171,6 +174,7 @@ def build_task_context(
         chapter_summaries=store.load_chapter_summaries(),
         main_arc=store.load_main_arc(),
         future_plan=store.load_future_plan(),
+        style_guide=store.load_style_guide(),
     )
 
 
@@ -226,6 +230,7 @@ def gather_sections(
         "outline": chapter.outline,
         "plot_brief": chapter.plot_brief,
         "content": chapter.content,
+        "style": context.style_guide,
         "selected_foreshadowing": render_selected_foreshadowing(selected_foreshadowing),
         "core_power": related.core_power,
         "core_systems": related.core_systems,

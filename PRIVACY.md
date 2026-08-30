@@ -12,7 +12,7 @@ Novalist invokes the external `dsh` command only when the user starts an AI
 action. Depending on that action, the submitted prompt may contain:
 
 - the current chapter;
-- outlines, character profiles and world-building notes;
+- outlines, the project writing-style guide, character profiles and world-building notes;
 - chapter summaries and story state;
 - the instruction needed to continue, review or summarize the story.
 

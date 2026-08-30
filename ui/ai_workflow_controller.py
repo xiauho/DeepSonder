@@ -347,7 +347,7 @@ class AIWorkflowController(QObject):
         notice.setWindowTitle("使用 AI 功能前请确认")
         notice.setText("AI 功能会将创作内容发送给本机配置的 dsh / DeepSeek Harness 处理。")
         notice.setInformativeText(
-            "发送内容可能包括当前章节、故事大纲、角色与世界观设定、章节摘要和故事状态。\n\n"
+            "发送内容可能包括当前章节、故事大纲、写作风格指南、角色与世界观设定、章节摘要和故事状态。\n\n"
             "请勿提交无权处理的作品或敏感个人信息。AI 输出可能存在错误，使用或公开前请自行审阅。"
         )
         notice.setStandardButtons(QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel)
@@ -376,6 +376,8 @@ class AIWorkflowController(QObject):
             chapter_id,
             core_system_paths=core_system_paths,
             core_power_path=store.core_power_path,
+            style_guide_path=store.style_guide_path,
+            style_guide_active=bool(store.load_style_guide()),
             parent=self.parent,
         )
         if dialog.exec() != QDialog.DialogCode.Accepted:
@@ -383,10 +385,11 @@ class AIWorkflowController(QObject):
             return None
         selected_notes = dialog.selected_notes()
         selected_power = dialog.selected_power_paths()
+        style_status = "已自动应用项目写作风格" if store.load_style_guide() else "项目写作风格尚未填写"
         self._emit_output(
             f"本次扩写已选择 {len(selected_notes)} 条伏笔、自动纳入 {len(core_system_paths)} 项核心体系、"
             f"手动选择 {max(0, len(selected_power) - len(core_system_paths))} 项非核心体系；"
-            "其余体系将作为低优先级背景资料。"
+            f"其余体系将作为低优先级背景资料；{style_status}。"
         )
         return selected_notes, selected_power
 

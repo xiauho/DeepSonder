@@ -34,6 +34,7 @@ def context_paths(
         project.memory_dir / "foreshadowing.json",
     ]
     if task_kind == "expand":
+        paths.append(project.style_guide_path)
         chapter = project.load_chapter(chapter_id)
         query = "\n".join(
             part for part in (chapter.title, chapter.outline, chapter.plot_brief) if part

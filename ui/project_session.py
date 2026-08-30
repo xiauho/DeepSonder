@@ -61,6 +61,7 @@ class ProjectSession(QObject):
         store = ProjectDataStore(project)
         store.ensure_core_power_entry()
         store.ensure_system_registry()
+        store.ensure_style_guide()
         self.set_project(project)
         return project
 
