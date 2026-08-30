@@ -29,3 +29,14 @@ class PackagedResourceTests(TestCase):
         validate_runtime_resources()
         for item in REQUIRED_RUNTIME_RESOURCES:
             self.assertTrue(resource_path(item).is_file(), item)
+
+    def test_third_party_license_texts_are_not_placeholders(self) -> None:
+        license_files = [
+            item
+            for item in REQUIRED_RUNTIME_RESOURCES
+            if item.startswith("licenses/third-party/")
+        ]
+        self.assertEqual(len(license_files), 6)
+        for item in license_files:
+            with self.subTest(item=item):
+                self.assertGreater(resource_path(item).stat().st_size, 4_000)

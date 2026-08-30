@@ -13,6 +13,7 @@ runtime_data = [
     (str(project_root / "assets" / "chevron-up-dark.svg"), "assets"),
     (str(project_root / "assets" / "chevron-up-light.svg"), "assets"),
     (str(project_root / "VERSION"), "."),
+    (str(project_root / "licenses"), "licenses"),
     (str(project_root / "LICENSE"), "."),
     (str(project_root / "PRIVACY.md"), "."),
     (str(project_root / "README.md"), "."),

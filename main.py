@@ -35,6 +35,13 @@ REQUIRED_RUNTIME_RESOURCES = (
     "assets/chevron-up-dark.svg",
     "assets/chevron-up-light.svg",
     "assets/fonts/font-58.woff2",
+    "licenses/README.md",
+    "licenses/third-party/APACHE-2.0.txt",
+    "licenses/third-party/GNU-GPL-3.0.txt",
+    "licenses/third-party/GNU-LGPL-3.0.txt",
+    "licenses/third-party/PYINSTALLER-COPYING.txt",
+    "licenses/third-party/PYTHON-3.12-LICENSE.txt",
+    "licenses/third-party/SIL-OFL-1.1.txt",
 )
 
 

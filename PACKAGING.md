@@ -1,6 +1,7 @@
 # Novalist Windows packaging
 
-`v2.0.6-beta` is the first planned packaged release. The baseline build is a
+`v2.0.6-beta` is the first planned packaged release. The baseline build uses
+Python 3.12 and is a
 PyInstaller one-folder Windows x64 application compressed as a portable ZIP.
 It includes its Python and PySide6 runtime, so the target computer does not need
 Python installed.
@@ -18,6 +19,11 @@ runs `Novalist.exe --self-test`, and writes these files to `dist/release/`:
 - `Novalist-v<version>-windows-x64.zip`
 - `release-manifest.json`
 - `SHA256SUMS.txt`
+
+The ZIP root also contains the project notices and a `licenses/` directory with
+the complete third-party license texts required by the redistributed Python,
+Qt/PySide6, PyInstaller and font components. The build fails if any required
+license file is missing.
 
 The package contains application code, Qt/Python runtime files, public assets,
 the version file, and license/privacy documentation. It intentionally excludes

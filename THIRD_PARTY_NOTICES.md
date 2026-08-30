@@ -19,6 +19,9 @@ the LGPL, including lawful reverse engineering for debugging modifications to
 the LGPL-covered libraries. Release packaging must retain the applicable
 license texts and notices alongside the application.
 
+The packaged license texts are available under `licenses/third-party/`:
+`GNU-LGPL-3.0.txt` and `GNU-GPL-3.0.txt`.
+
 ## DeepSeek Harness (optional external tool)
 
 - Copyright © 2026 DeepSeek.
@@ -38,6 +41,9 @@ Outlined. Their upstream license terms remain applicable; the first four are
 distributed under the SIL Open Font License 1.1 and Material Symbols under the
 Apache License 2.0.
 
+The packaged texts are `licenses/third-party/SIL-OFL-1.1.txt` and
+`licenses/third-party/APACHE-2.0.txt`.
+
 - Google Fonts: <https://fonts.google.com/> and <https://developers.google.com/fonts/faq>
 - Material Symbols: <https://github.com/google/material-design-icons>
 
@@ -49,3 +55,16 @@ Apache License 2.0.
 
 This notice is informational and does not replace the license texts shipped by
 the corresponding upstream projects.
+
+The packaged CPython 3.12 license is
+`licenses/third-party/PYTHON-3.12-LICENSE.txt`.
+
+## PyInstaller bootloader
+
+- Copyright © 2005-2023 the PyInstaller development team and contributors.
+- License: GNU GPL version 2 or later, with the PyInstaller bootloader
+  exception permitting distribution as part of a combined executable.
+- Official project: <https://pyinstaller.org/>
+
+The complete terms and bootloader exception are packaged as
+`licenses/third-party/PYINSTALLER-COPYING.txt`.

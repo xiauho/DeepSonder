@@ -24,6 +24,10 @@ $Version = (Get-Content -LiteralPath (Join-Path $ProjectRoot "VERSION") -Raw).Tr
 if ($Version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
     throw "VERSION 格式无效：$Version"
 }
+$PythonVersion = (& $PythonExecutable -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')").Trim()
+if ($LASTEXITCODE -ne 0 -or $PythonVersion -ne "3.12") {
+    throw "Windows 基线包必须使用 Python 3.12，当前为：$PythonVersion"
+}
 
 $BuildRoot = Join-Path $ProjectRoot "build\pyinstaller"
 $DistRoot = Join-Path $ProjectRoot "dist"
@@ -54,6 +58,29 @@ try {
     if (-not (Test-Path -LiteralPath $BundleExecutable -PathType Leaf)) {
         throw "构建完成但未找到 Novalist.exe。"
     }
+
+    foreach ($Document in @("LICENSE", "PRIVACY.md", "THIRD_PARTY_NOTICES.md")) {
+        Copy-Item -LiteralPath (Join-Path $ProjectRoot $Document) `
+            -Destination (Join-Path $BundleRoot $Document) -Force
+    }
+    $BundleLicenses = Join-Path $BundleRoot "licenses"
+    Copy-Item -LiteralPath (Join-Path $ProjectRoot "licenses") `
+        -Destination $BundleLicenses -Recurse -Force
+    $RequiredLicenses = @(
+        "README.md",
+        "third-party\APACHE-2.0.txt",
+        "third-party\GNU-GPL-3.0.txt",
+        "third-party\GNU-LGPL-3.0.txt",
+        "third-party\PYINSTALLER-COPYING.txt",
+        "third-party\PYTHON-3.12-LICENSE.txt",
+        "third-party\SIL-OFL-1.1.txt"
+    )
+    foreach ($License in $RequiredLicenses) {
+        if (-not (Test-Path -LiteralPath (Join-Path $BundleLicenses $License) -PathType Leaf)) {
+            throw "打包产物缺少第三方许可证：$License"
+        }
+    }
+
     $Smoke = Start-Process -FilePath $BundleExecutable `
         -ArgumentList "--self-test" -WindowStyle Hidden -Wait -PassThru
     if ($Smoke.ExitCode -ne 0) {
@@ -90,6 +117,7 @@ try {
 
     Write-Output "Novalist v$Version Windows x64 打包完成。"
     Write-Output "发布目录：$ReleaseRoot"
+    Write-Output "第三方许可证：已复制到压缩包 licenses 目录"
     Write-Output "SHA-256：$Hash"
 }
 finally {
