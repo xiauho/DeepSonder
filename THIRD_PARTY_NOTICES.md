@@ -12,10 +12,12 @@ by using the LGPL option offered by Qt for Python.
 - Source and license information: <https://code.qt.io/cgit/pyside/pyside-setup.git/>
 - Official licensing documentation: <https://doc.qt.io/qtforpython-6/>
 
-The source application loads PySide6 and Qt as shared libraries installed by the
-user through the dependency setup. Nothing in this project
-restricts rights granted by the LGPL, including lawful reverse engineering for
-debugging modifications to the LGPL-covered libraries.
+Source executions load PySide6 and Qt from the user's Python environment.
+Packaged Windows distributions include the corresponding Python, PySide6, Qt,
+and Shiboken runtime files. Nothing in this project restricts rights granted by
+the LGPL, including lawful reverse engineering for debugging modifications to
+the LGPL-covered libraries. Release packaging must retain the applicable
+license texts and notices alongside the application.
 
 ## DeepSeek Harness (optional external tool)
 

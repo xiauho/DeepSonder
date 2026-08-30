@@ -1,0 +1,42 @@
+name: Package Windows
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-build.txt
+      - name: Verify tag matches VERSION
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          if ("v$version" -ne "${{ github.ref_name }}") {
+            throw "Tag ${{ github.ref_name }} does not match VERSION v$version"
+          }
+      - name: Install runtime and build dependencies
+        run: python -m pip install -r requirements.txt -r requirements-build.txt
+      - name: Build and smoke-test Windows package
+        shell: pwsh
+        run: ./scripts/build_windows.ps1 -PythonExecutable python
+      - name: Upload package baseline
+        uses: actions/upload-artifact@v4
+        with:
+          name: novalist-windows-x64
+          path: dist/release/*
+          if-no-files-found: error

@@ -70,6 +70,10 @@ python -m pip install -r requirements.txt
 python main.py
 ```
 
+## Windows 打包
+
+从 `v2.0.6-beta` 开始，项目提供无需预装 Python 的 Windows x64 目录包基线。开发者安装 `requirements-build.txt` 后可运行 `scripts/build_windows.ps1`；脚本会执行全量测试、构建 PyInstaller 包、运行无界面自检，并在 `dist/release` 中生成 ZIP、发布清单和 SHA-256 文件。详细边界见 `PACKAGING.md`。
+
 ## 配置 DeepSeek Harness
 
 Novalist 将本机设置保存在当前用户的应用数据目录中：Windows 为 `%APPDATA%\Novalist\config.json`，macOS 为 `~/Library/Application Support/Novalist/config.json`，Linux 为 `$XDG_CONFIG_HOME/Novalist/config.json`（未设置时使用 `~/.config/Novalist/config.json`）。

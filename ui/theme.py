@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
 from PySide6.QtGui import QColor, QPalette
 
+from core.resources import resource_path
 from core.theme_tokens import DARK_COLORS, LIGHT_COLORS
 
 QSS_TEMPLATE = r"""
@@ -597,6 +597,7 @@ def build_qss(config: dict | None = None) -> str:
     except (TypeError, ValueError):
         editor_size = 16
     accent_text = "#FFFFFF" if light else "#08111E"
+    asset_root = resource_path("assets")
     replacements = {
         "__FONT_SIZE__": str(font_size),
         "__SMALL_FONT_SIZE__": str(max(10, font_size - 2)),
@@ -618,20 +619,17 @@ def build_qss(config: dict | None = None) -> str:
         "__DANGER__": "#C13D49" if light else "#FF8D98",
         "__CHECK_BORDER__": colors["text_color"],
         "__CHECK_BG__": colors["panel_color"] if light else colors["field_color"],
-        "__CHECKMARK__": str(Path(__file__).resolve().parents[1] / "assets" / "checkmark.svg").replace("\\", "/"),
+        "__CHECKMARK__": str(asset_root / "checkmark.svg").replace("\\", "/"),
         "__COMBO_ARROW__": str(
-            Path(__file__).resolve().parents[1]
-            / "assets"
+            asset_root
             / ("chevron-down-light.svg" if light else "chevron-down-dark.svg")
         ).replace("\\", "/"),
         "__SPIN_UP_ARROW__": str(
-            Path(__file__).resolve().parents[1]
-            / "assets"
+            asset_root
             / ("chevron-up-light.svg" if light else "chevron-up-dark.svg")
         ).replace("\\", "/"),
         "__SPIN_DOWN_ARROW__": str(
-            Path(__file__).resolve().parents[1]
-            / "assets"
+            asset_root
             / ("chevron-down-light.svg" if light else "chevron-down-dark.svg")
         ).replace("\\", "/"),
     }
