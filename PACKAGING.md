@@ -1,6 +1,6 @@
 # Novalist Windows packaging
 
-`v2.0.6-beta` is the first planned packaged release. The baseline build uses
+`v2.0.6-beta` is the first packaged release. The baseline build uses
 Python 3.12 and is a
 PyInstaller one-folder Windows x64 application compressed as a portable ZIP.
 It includes its Python and PySide6 runtime, so the target computer does not need

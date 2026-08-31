@@ -82,7 +82,7 @@ Novalist 将本机设置保存在当前用户的应用数据目录中：Windows 
 
 未来的更新下载缓存预留在本机缓存目录中；Windows 对应 `%LOCALAPPDATA%\Novalist\updates`。缓存不包含小说项目，删除后可重新下载。
 
-“帮助 → 检查更新”会读取 `xiauho/novalist` 的公开 GitHub Release。设置中可自愿开启启动检查；开启后最多每 24 小时检查一次。当前版本只展示发布信息并打开受限的 GitHub 项目发布页，不下载或执行更新文件。
+“帮助 → 检查更新”会读取 `xiauho/novalist` 的公开 GitHub Release。设置中可自愿开启启动检查；开启后最多每 24 小时检查一次。从 `v2.0.7-beta` 开始，发现新版本后可将唯一匹配的 Windows x64 软件包下载到 `%LOCALAPPDATA%\Novalist\updates`，并核对 GitHub 摘要、发布清单、文件大小、SHA-256、包内路径、版本和全部 ZIP 文件 CRC。当前阶段不会自动安装或运行下载内容，完成验证后仍需用户关闭 Novalist 并手动解压替换。
 
 Novalist 的 AI 配置只针对 DeepSeek Harness 的 `dsh --profile headless` 入口，不提供其他模型供应商、API Key 或模型列表配置。凭据和模型连接由 Harness 自己管理。
 
