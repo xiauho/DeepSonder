@@ -13,6 +13,16 @@ Python installed.
 .\scripts\build_windows.ps1
 ```
 
+The secure-download baseline defaults `minimum_updater_version` to
+`2.0.6-beta`, allowing the synced development workspace to exercise the first
+`v2.0.7-beta` download. Later releases must pass the oldest updater version that
+actually supports their package and manifest contract. For example, when
+building a later target version such as `v2.0.8-beta`:
+
+```powershell
+.\scripts\build_windows.ps1 -MinimumUpdaterVersion 2.0.7-beta
+```
+
 The build script runs the full unit-test suite, creates the frozen application,
 runs `Novalist.exe --self-test`, and writes these files to `dist/release/`:
 

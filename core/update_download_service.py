@@ -338,6 +338,11 @@ def inspect_update_archive(
             if len(version_bytes) > 128:
                 raise UpdateDownloadError("更新包内的版本信息过大。")
             bundled_version = version_bytes.decode("utf-8-sig").strip()
+            # Metadata and package hashes cannot prove that every compressed
+            # member can be decoded.  Read all members once so zipfile also
+            # verifies their CRC values before the archive is marked trusted.
+            if archive.testzip() is not None:
+                raise UpdateDownloadError("更新包包含无法完整解压的损坏文件。")
     except (zipfile.BadZipFile, UnicodeDecodeError, KeyError, OSError) as exc:
         raise UpdateDownloadError("更新包不是有效的 Novalist ZIP 文件。") from exc
     try:

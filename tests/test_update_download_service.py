@@ -1,12 +1,14 @@
 import hashlib
 import json
 import stat
+import warnings
 import zipfile
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Event
 from unittest import TestCase
+from unittest.mock import patch
 
 from core.update_download_service import (
     UpdateDownloadCancelled,
@@ -58,9 +60,10 @@ def make_archive(
     version: str = "2.0.7-beta",
     unsafe_name: str | None = None,
     symlink: bool = False,
+    compression: int = zipfile.ZIP_DEFLATED,
 ) -> bytes:
     stream = BytesIO()
-    with zipfile.ZipFile(stream, "w", zipfile.ZIP_DEFLATED) as archive:
+    with zipfile.ZipFile(stream, "w", compression) as archive:
         archive.writestr("Novalist.exe", b"test executable")
         archive.writestr("_internal/VERSION", version.encode())
         archive.writestr("licenses/README.md", b"licenses")
@@ -71,6 +74,40 @@ def make_archive(
             link.create_system = 3
             link.external_attr = (stat.S_IFLNK | 0o777) << 16
             archive.writestr(link, "target")
+    return stream.getvalue()
+
+
+def corrupt_executable_member() -> bytes:
+    archive = make_archive(compression=zipfile.ZIP_STORED)
+    original = b"test executable"
+    replacement = b"FAIL executable"
+    if len(original) != len(replacement) or archive.count(original) != 1:
+        raise AssertionError("test archive layout changed")
+    return archive.replace(original, replacement, 1)
+
+
+def mark_first_member_encrypted(archive: bytes) -> bytes:
+    payload = bytearray(archive)
+    for signature, flag_offset in ((b"PK\x03\x04", 6), (b"PK\x01\x02", 8)):
+        position = payload.find(signature)
+        if position < 0:
+            raise AssertionError("ZIP header not found")
+        offset = position + flag_offset
+        flags = int.from_bytes(payload[offset : offset + 2], "little") | 0x1
+        payload[offset : offset + 2] = flags.to_bytes(2, "little")
+    return bytes(payload)
+
+
+def make_duplicate_path_archive() -> bytes:
+    stream = BytesIO()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)
+        with zipfile.ZipFile(stream, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("Novalist.exe", b"test executable")
+            archive.writestr("_internal/VERSION", b"2.0.7-beta")
+            archive.writestr("licenses/README.md", b"licenses")
+            archive.writestr("_internal/data.bin", b"first")
+            archive.writestr("_internal/data.bin", b"second")
     return stream.getvalue()
 
 
@@ -253,6 +290,31 @@ class ArchiveInspectionTests(TestCase):
     def test_symlink_is_rejected(self) -> None:
         with self.assertRaisesRegex(UpdateDownloadError, "符号链接"):
             self.inspect_bytes(make_archive(symlink=True))
+
+    def test_corrupt_non_version_member_is_rejected(self) -> None:
+        with self.assertRaisesRegex(UpdateDownloadError, "损坏文件"):
+            self.inspect_bytes(corrupt_executable_member())
+
+    def test_duplicate_archive_path_is_rejected(self) -> None:
+        with self.assertRaisesRegex(UpdateDownloadError, "重复路径"):
+            self.inspect_bytes(make_duplicate_path_archive())
+
+    def test_encrypted_member_is_rejected(self) -> None:
+        with self.assertRaisesRegex(UpdateDownloadError, "加密文件"):
+            self.inspect_bytes(mark_first_member_encrypted(make_archive()))
+
+    def test_missing_required_file_is_rejected(self) -> None:
+        stream = BytesIO()
+        with zipfile.ZipFile(stream, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("_internal/VERSION", b"2.0.7-beta")
+            archive.writestr("licenses/README.md", b"licenses")
+        with self.assertRaisesRegex(UpdateDownloadError, "缺少必需"):
+            self.inspect_bytes(stream.getvalue())
+
+    def test_expanded_size_limit_is_enforced(self) -> None:
+        with patch("core.update_download_service.MAX_EXPANDED_BYTES", 1):
+            with self.assertRaisesRegex(UpdateDownloadError, "解压后超过"):
+                self.inspect_bytes(make_archive())
 
     def test_bundled_version_must_match_manifest(self) -> None:
         with self.assertRaisesRegex(UpdateDownloadError, "版本与更新清单不一致"):

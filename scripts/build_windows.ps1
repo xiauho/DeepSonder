@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$PythonExecutable = "",
+    [string]$MinimumUpdaterVersion = "2.0.6-beta",
     [switch]$SkipTests
 )
 
@@ -23,6 +24,21 @@ else {
 $Version = (Get-Content -LiteralPath (Join-Path $ProjectRoot "VERSION") -Raw).Trim()
 if ($Version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
     throw "VERSION 格式无效：$Version"
+}
+if ($MinimumUpdaterVersion -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
+    throw "最低更新器版本格式无效：$MinimumUpdaterVersion"
+}
+$VersionOrderCheck = @"
+import sys
+sys.path.insert(0, sys.argv[1])
+from core.version import AppVersion
+minimum = AppVersion.parse(sys.argv[2])
+target = AppVersion.parse(sys.argv[3])
+raise SystemExit(0 if minimum <= target else 2)
+"@
+& $PythonExecutable -c $VersionOrderCheck $ProjectRoot $MinimumUpdaterVersion $Version
+if ($LASTEXITCODE -ne 0) {
+    throw "最低更新器版本不能高于目标版本：$MinimumUpdaterVersion > $Version"
 }
 $PythonVersion = (& $PythonExecutable -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')").Trim()
 if ($LASTEXITCODE -ne 0 -or $PythonVersion -ne "3.12") {
@@ -113,9 +129,7 @@ try {
             size = $Asset.Length
             sha256 = $Hash
         }
-        # The published v2.0.6 package cannot invoke this downloader, while the
-        # synced development workspace can use this baseline to test v2.0.7.
-        minimum_updater_version = "2.0.6-beta"
+        minimum_updater_version = $MinimumUpdaterVersion
         published_at = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
     }
     $Manifest | ConvertTo-Json | Set-Content `
