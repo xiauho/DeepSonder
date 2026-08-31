@@ -12,6 +12,7 @@ from PySide6.QtGui import (
     QShortcut,
 )
 from PySide6.QtWidgets import (
+    QApplication,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -34,6 +35,11 @@ from core.config import load_config
 from core.project import NovelProject
 from core.project_data import ChapterIdConflictError, ProjectDataStore
 from core.update_download_service import VerifiedUpdate
+from core.update_install_service import (
+    UpdateInstallLaunchError,
+    automatic_install_unavailable_reason,
+    launch_verified_update_install,
+)
 from core.update_service import UpdateCheckResult, UpdateInfo
 from core.version import AppVersion, load_current_version
 from ui.ai_controller import AIController
@@ -101,6 +107,7 @@ class MainWindow(QMainWindow):
         self.project_setup_dialog: ProjectSetupDialog | None = None
         self.update_dialog: UpdateDialog | None = None
         self.update_download_progress: QProgressDialog | None = None
+        self._pending_update_install: VerifiedUpdate | None = None
         self.ai_engine_controller = AIEngineController(
             self.config,
             self.ai_controller.is_running,
@@ -1477,14 +1484,46 @@ class MainWindow(QMainWindow):
 
     def _on_update_download_succeeded(self, result: VerifiedUpdate) -> None:
         self._close_update_download_progress()
-        QMessageBox.information(
-            self,
-            "更新包已安全下载",
-            f"{result.release.tag_name} 已通过大小、SHA-256 和 ZIP 安全检查。\n\n"
-            f"缓存位置：\n{result.archive_path}\n\n"
-            "当前版本不会自动安装，请关闭 Novalist 后手动解压替换。",
+        unavailable = automatic_install_unavailable_reason()
+        message = QMessageBox(self)
+        message.setIcon(QMessageBox.Icon.Information)
+        message.setWindowTitle("更新包已安全下载")
+        message.setText(
+            f"{result.release.tag_name} 已通过大小、SHA-256 和 ZIP 安全检查。"
         )
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(result.archive_path.parent)))
+        details = f"缓存位置：\n{result.archive_path}"
+        if unavailable:
+            details += f"\n\n{unavailable}"
+        else:
+            details += (
+                "\n\n可立即退出 Novalist，由独立更新器备份并替换受管程序文件；"
+                "新版启动自检失败时会自动恢复当前版本。"
+            )
+        message.setInformativeText(details)
+        message.addButton("稍后", QMessageBox.ButtonRole.RejectRole)
+        open_folder = message.addButton(
+            "打开缓存目录",
+            QMessageBox.ButtonRole.ActionRole,
+        )
+        install_now = None
+        if not unavailable:
+            install_now = message.addButton(
+                "立即重启并安装",
+                QMessageBox.ButtonRole.AcceptRole,
+            )
+            message.setDefaultButton(install_now)
+        message.exec()
+        clicked = message.clickedButton()
+        if clicked is open_folder:
+            QDesktopServices.openUrl(
+                QUrl.fromLocalFile(str(result.archive_path.parent))
+            )
+        elif install_now is not None and clicked is install_now:
+            self._pending_update_install = result
+            self.status_message.setText(
+                f"{result.release.tag_name} 已验证，正在准备自动安装…"
+            )
+            return
         self.status_message.setText(f"{result.release.tag_name} 已下载并验证")
 
     def _on_update_download_failed(self, message: str) -> None:
@@ -1498,6 +1537,45 @@ class MainWindow(QMainWindow):
 
     def _on_update_download_finished(self) -> None:
         self.actions["check_updates"].setEnabled(True)
+        if self._pending_update_install is not None:
+            QTimer.singleShot(0, self._launch_pending_update_install)
+
+    def _launch_pending_update_install(self) -> None:
+        result = self._pending_update_install
+        self._pending_update_install = None
+        if result is None:
+            return
+        if self.ai_controller.is_running():
+            QMessageBox.warning(
+                self,
+                "暂时无法安装更新",
+                "AI 任务仍在进行，请等待任务完成后重新检查更新并安装。",
+            )
+            return
+        if self.editor.is_dirty() and not self.save_current_file(notify=False):
+            QMessageBox.warning(
+                self,
+                "暂时无法安装更新",
+                "当前文档未能安全保存，已取消自动安装。更新包仍保留在缓存中。",
+            )
+            return
+        try:
+            launch = launch_verified_update_install(
+                result,
+                load_current_version(),
+            )
+        except (UpdateInstallLaunchError, OSError, ValueError) as exc:
+            QMessageBox.warning(self, "无法启动自动安装", str(exc))
+            QDesktopServices.openUrl(
+                QUrl.fromLocalFile(str(result.archive_path.parent))
+            )
+            self.status_message.setText("自动安装未启动，可改用手动安装")
+            return
+        self.status_message.setText(f"正在退出并安装 v{launch.target_version}…")
+        self.ai_engine_controller.cleanup()
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()
 
     def _close_update_download_progress(self) -> None:
         dialog = self.update_download_progress

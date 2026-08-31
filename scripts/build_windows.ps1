@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$PythonExecutable = "",
-    [string]$MinimumUpdaterVersion = "2.0.6-beta",
+    [string]$MinimumUpdaterVersion = "2.0.7-beta",
     [switch]$SkipTests
 )
 
@@ -46,10 +46,12 @@ if ($LASTEXITCODE -ne 0 -or $PythonVersion -ne "3.12") {
 }
 
 $BuildRoot = Join-Path $ProjectRoot "build\pyinstaller"
+$UpdaterBuildRoot = Join-Path $ProjectRoot "build\pyinstaller-updater"
 $DistRoot = Join-Path $ProjectRoot "dist"
+$UpdaterDistRoot = Join-Path $DistRoot "updater"
 $BundleRoot = Join-Path $DistRoot "Novalist"
 $ReleaseRoot = Join-Path $DistRoot "release"
-foreach ($Target in @($BuildRoot, $DistRoot, $ReleaseRoot)) {
+foreach ($Target in @($BuildRoot, $UpdaterBuildRoot, $DistRoot, $UpdaterDistRoot, $ReleaseRoot)) {
     if (-not $Target.StartsWith($ProjectRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
         throw "拒绝使用项目目录外的构建路径：$Target"
     }
@@ -70,10 +72,22 @@ try {
         throw "PyInstaller 构建失败。"
     }
 
+    & $PythonExecutable -m PyInstaller --clean --noconfirm `
+        --workpath $UpdaterBuildRoot --distpath $UpdaterDistRoot novalist_updater.spec
+    if ($LASTEXITCODE -ne 0) {
+        throw "独立更新器构建失败。"
+    }
+
     $BundleExecutable = Join-Path $BundleRoot "Novalist.exe"
     if (-not (Test-Path -LiteralPath $BundleExecutable -PathType Leaf)) {
         throw "构建完成但未找到 Novalist.exe。"
     }
+    $BuiltUpdater = Join-Path $UpdaterDistRoot "NovalistUpdater.exe"
+    if (-not (Test-Path -LiteralPath $BuiltUpdater -PathType Leaf)) {
+        throw "构建完成但未找到 NovalistUpdater.exe。"
+    }
+    $BundleUpdater = Join-Path $BundleRoot "NovalistUpdater.exe"
+    Copy-Item -LiteralPath $BuiltUpdater -Destination $BundleUpdater -Force
 
     foreach ($Document in @("LICENSE", "PRIVACY.md", "THIRD_PARTY_NOTICES.md")) {
         Copy-Item -LiteralPath (Join-Path $ProjectRoot $Document) `
@@ -97,10 +111,37 @@ try {
         }
     }
 
+    $PackageManifestPath = Join-Path $BundleRoot "package-files.json"
+    $ManagedFiles = @(
+        Get-ChildItem -LiteralPath $BundleRoot -Recurse -File |
+            Where-Object { $_.FullName -ne $PackageManifestPath } |
+            ForEach-Object {
+                $Relative = [System.IO.Path]::GetRelativePath($BundleRoot, $_.FullName).Replace("\", "/")
+                [ordered]@{
+                    path = $Relative
+                    size = $_.Length
+                    sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+                }
+            } |
+            Sort-Object { $_.path }
+    )
+    $PackageManifest = [ordered]@{
+        schema_version = 1
+        version = $Version
+        files = $ManagedFiles
+    }
+    $PackageManifest | ConvertTo-Json -Depth 5 | Set-Content `
+        -LiteralPath $PackageManifestPath -Encoding utf8
+
     $Smoke = Start-Process -FilePath $BundleExecutable `
         -ArgumentList "--self-test" -WindowStyle Hidden -Wait -PassThru
     if ($Smoke.ExitCode -ne 0) {
         throw "打包程序自检失败，退出码：$($Smoke.ExitCode)"
+    }
+    $UpdaterSmoke = Start-Process -FilePath $BundleUpdater `
+        -ArgumentList "--self-test" -WindowStyle Hidden -Wait -PassThru
+    if ($UpdaterSmoke.ExitCode -ne 0) {
+        throw "独立更新器自检失败，退出码：$($UpdaterSmoke.ExitCode)"
     }
 
     if (Test-Path -LiteralPath $ReleaseRoot) {

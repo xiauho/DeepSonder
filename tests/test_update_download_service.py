@@ -65,6 +65,8 @@ def make_archive(
     stream = BytesIO()
     with zipfile.ZipFile(stream, "w", compression) as archive:
         archive.writestr("Novalist.exe", b"test executable")
+        archive.writestr("NovalistUpdater.exe", b"test updater")
+        archive.writestr("package-files.json", b"{}")
         archive.writestr("_internal/VERSION", version.encode())
         archive.writestr("licenses/README.md", b"licenses")
         if unsafe_name:
@@ -222,7 +224,7 @@ class SecureDownloadTests(TestCase):
             )
             self.assertTrue(result.archive_path.is_file())
             self.assertTrue(result.archive_path.name.endswith(".verified.zip"))
-            self.assertEqual(result.inspection.file_count, 3)
+            self.assertEqual(result.inspection.file_count, 5)
             state = json.loads(
                 (result.archive_path.parent / "verified-update.json").read_text(
                     encoding="utf-8"
@@ -306,6 +308,8 @@ class ArchiveInspectionTests(TestCase):
     def test_missing_required_file_is_rejected(self) -> None:
         stream = BytesIO()
         with zipfile.ZipFile(stream, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("NovalistUpdater.exe", b"test updater")
+            archive.writestr("package-files.json", b"{}")
             archive.writestr("_internal/VERSION", b"2.0.7-beta")
             archive.writestr("licenses/README.md", b"licenses")
         with self.assertRaisesRegex(UpdateDownloadError, "缺少必需"):

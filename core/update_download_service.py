@@ -329,7 +329,13 @@ def inspect_update_archive(
             expansion_limit = manifest.asset.size * 20 + MINIMUM_DISK_RESERVE_BYTES
             if expanded_size > expansion_limit:
                 raise UpdateDownloadError("更新包的压缩率异常，已停止处理。")
-            required = {"novalist.exe", "_internal/version", "licenses/readme.md"}
+            required = {
+                "novalist.exe",
+                "novalistupdater.exe",
+                "package-files.json",
+                "_internal/version",
+                "licenses/readme.md",
+            }
             if not required.issubset(names):
                 raise UpdateDownloadError("更新包缺少必需的程序或版本文件。")
             version_entry = entries_by_name["_internal/version"]

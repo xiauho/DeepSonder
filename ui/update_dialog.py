@@ -1,4 +1,4 @@
-"""User-facing release summary for the check-only updater."""
+"""User-facing release summary for the built-in updater."""
 
 from __future__ import annotations
 
@@ -59,7 +59,7 @@ class UpdateDialog(QDialog):
 
         hint = QLabel(
             "可将更新包安全下载到本机缓存并完成完整性检查；"
-            "本阶段不会自动替换或运行程序文件。"
+            "支持自动安装的便携版可在校验完成后由独立更新器安全替换并重启。"
         )
         hint.setWordWrap(True)
         hint.setObjectName("mutedLabel")
