@@ -103,14 +103,20 @@ try {
         -LiteralPath (Join-Path $ReleaseRoot "SHA256SUMS.txt") -Encoding utf8
 
     $Manifest = [ordered]@{
-        schema_version = 1
+        schema_version = 2
         version = $Version
         channel = if ($Version -match '-(?:beta|b|rc)') { "beta" } else { "stable" }
         platform = "windows"
         architecture = "x64"
-        asset = $AssetName
-        size = $Asset.Length
-        sha256 = $Hash
+        asset = [ordered]@{
+            name = $AssetName
+            size = $Asset.Length
+            sha256 = $Hash
+        }
+        # The published v2.0.6 package cannot invoke this downloader, while the
+        # synced development workspace can use this baseline to test v2.0.7.
+        minimum_updater_version = "2.0.6-beta"
+        published_at = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
     }
     $Manifest | ConvertTo-Json | Set-Content `
         -LiteralPath (Join-Path $ReleaseRoot "release-manifest.json") -Encoding utf8

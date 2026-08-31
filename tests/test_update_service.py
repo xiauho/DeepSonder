@@ -8,6 +8,7 @@ from core.update_service import (
     UpdateCheckError,
     check_for_updates,
     fetch_releases,
+    is_allowed_asset_url,
     is_allowed_release_url,
     select_latest_release,
 )
@@ -20,6 +21,7 @@ def release(
     prerelease: bool = False,
     draft: bool = False,
     url: str | None = None,
+    assets: list[dict] | None = None,
 ) -> dict:
     return {
         "tag_name": tag,
@@ -29,6 +31,7 @@ def release(
         "html_url": url or f"https://github.com/xiauho/novalist/releases/tag/{tag}",
         "prerelease": prerelease,
         "draft": draft,
+        "assets": assets or [],
     }
 
 
@@ -113,6 +116,54 @@ class UpdateSelectionTests(TestCase):
         )
         self.assertFalse(is_allowed_release_url("http://github.com/xiauho/novalist"))
         self.assertFalse(is_allowed_release_url("https://github.com/other/project"))
+
+    def test_release_assets_are_parsed_from_trusted_project_urls(self) -> None:
+        latest = select_latest_release(
+            [
+                release(
+                    "v2.0.7-beta",
+                    prerelease=True,
+                    assets=[
+                        {
+                            "name": "Novalist-v2.0.7-beta-windows-x64.zip",
+                            "size": 123,
+                            "digest": "sha256:" + "a" * 64,
+                            "browser_download_url": (
+                                "https://github.com/xiauho/novalist/releases/download/"
+                                "v2.0.7-beta/Novalist-v2.0.7-beta-windows-x64.zip"
+                            ),
+                            "content_type": "application/zip",
+                        },
+                        {
+                            "name": "evil.zip",
+                            "size": 123,
+                            "browser_download_url": "https://example.com/evil.zip",
+                        },
+                    ],
+                )
+            ],
+            "beta",
+        )
+        self.assertIsNotNone(latest)
+        self.assertEqual(len(latest.assets), 1)
+        self.assertEqual(latest.assets[0].size, 123)
+
+    def test_asset_url_is_restricted_to_repository_release_downloads(self) -> None:
+        self.assertTrue(
+            is_allowed_asset_url(
+                "https://github.com/xiauho/novalist/releases/download/v2.0.7-beta/a.zip"
+            )
+        )
+        self.assertFalse(
+            is_allowed_asset_url(
+                "https://github.com/other/project/releases/download/v1/a.zip"
+            )
+        )
+        self.assertFalse(
+            is_allowed_asset_url(
+                "https://user@github.com/xiauho/novalist/releases/download/v1/a.zip"
+            )
+        )
 
 
 class UpdateNetworkTests(TestCase):

@@ -31,6 +31,7 @@ def no_update_notice(result: UpdateCheckResult) -> tuple[str, str]:
 class UpdateDialog(QDialog):
     OPEN_RELEASE = 1
     SKIP_VERSION = 2
+    DOWNLOAD_UPDATE = 3
 
     def __init__(self, result: UpdateCheckResult, parent=None) -> None:
         super().__init__(parent)
@@ -56,7 +57,10 @@ class UpdateDialog(QDialog):
         current.setObjectName("mutedLabel")
         root.addWidget(current)
 
-        hint = QLabel("更新将在浏览器中打开 GitHub 发布页，本版本不会自动下载或运行文件。")
+        hint = QLabel(
+            "可将更新包安全下载到本机缓存并完成完整性检查；"
+            "本阶段不会自动替换或运行程序文件。"
+        )
         hint.setWordWrap(True)
         hint.setObjectName("mutedLabel")
         root.addWidget(hint)
@@ -74,14 +78,18 @@ class UpdateDialog(QDialog):
         close = QPushButton("稍后")
         close.setObjectName("secondaryButton")
         close.clicked.connect(self.reject)
-        open_release = QPushButton("打开下载页面")
-        open_release.setObjectName("accentButton")
-        open_release.setDefault(True)
+        open_release = QPushButton("打开发布页")
+        open_release.setObjectName("secondaryButton")
         open_release.clicked.connect(lambda: self.done(self.OPEN_RELEASE))
+        download = QPushButton("安全下载更新")
+        download.setObjectName("accentButton")
+        download.setDefault(True)
+        download.clicked.connect(lambda: self.done(self.DOWNLOAD_UPDATE))
         actions.addWidget(skip)
         actions.addStretch(1)
         actions.addWidget(close)
         actions.addWidget(open_release)
+        actions.addWidget(download)
         root.addLayout(actions)
 
 

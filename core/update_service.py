@@ -1,4 +1,4 @@
-"""GitHub Release lookup for the check-only updater MVP."""
+"""GitHub Release lookup and trusted asset discovery."""
 
 from __future__ import annotations
 
@@ -23,6 +23,17 @@ class UpdateCheckError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class ReleaseAsset:
+    """Download metadata supplied by the GitHub Releases API."""
+
+    name: str
+    size: int
+    digest: str
+    download_url: str
+    content_type: str
+
+
+@dataclass(frozen=True)
 class UpdateInfo:
     version: AppVersion
     tag_name: str
@@ -31,6 +42,7 @@ class UpdateInfo:
     published_at: str
     release_url: str
     prerelease: bool
+    assets: tuple[ReleaseAsset, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -127,10 +139,34 @@ def select_latest_release(releases: list[dict], channel: str) -> UpdateInfo | No
 
 def is_allowed_release_url(value: str) -> bool:
     parsed = urlparse(str(value or "").strip())
+    try:
+        port = parsed.port
+    except ValueError:
+        return False
     return (
         parsed.scheme == "https"
         and parsed.hostname == ALLOWED_RELEASE_HOST
+        and port in {None, 443}
+        and not parsed.username
+        and not parsed.password
         and parsed.path.startswith("/xiauho/novalist/")
+    )
+
+
+def is_allowed_asset_url(value: str) -> bool:
+    """Accept only browser downloads belonging to this repository."""
+    parsed = urlparse(str(value or "").strip())
+    try:
+        port = parsed.port
+    except ValueError:
+        return False
+    return (
+        parsed.scheme == "https"
+        and parsed.hostname == ALLOWED_RELEASE_HOST
+        and port in {None, 443}
+        and not parsed.username
+        and not parsed.password
+        and parsed.path.startswith("/xiauho/novalist/releases/download/")
     )
 
 
@@ -151,7 +187,36 @@ def _parse_release(release: dict) -> UpdateInfo | None:
         published_at=str(release.get("published_at") or "").strip(),
         release_url=release_url,
         prerelease=bool(release.get("prerelease")) or version.is_prerelease,
+        assets=_parse_assets(release.get("assets")),
     )
+
+
+def _parse_assets(value: object) -> tuple[ReleaseAsset, ...]:
+    if not isinstance(value, list):
+        return ()
+    assets: list[ReleaseAsset] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        download_url = str(item.get("browser_download_url") or "").strip()
+        digest = str(item.get("digest") or "").strip()
+        try:
+            size = int(item.get("size"))
+        except (TypeError, ValueError):
+            continue
+        if not name or size <= 0 or not is_allowed_asset_url(download_url):
+            continue
+        assets.append(
+            ReleaseAsset(
+                name=name,
+                size=size,
+                digest=digest,
+                download_url=download_url,
+                content_type=str(item.get("content_type") or "").strip(),
+            )
+        )
+    return tuple(assets)
 
 
 def _channel_allows(info: UpdateInfo, channel: str) -> bool:

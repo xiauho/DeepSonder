@@ -30,10 +30,15 @@ the version file, and license/privacy documentation. It intentionally excludes
 personal `config.json` files, writing projects, virtual environments, and update
 caches.
 
+The release manifest uses schema v2 and records the exact target platform,
+archive name, byte size and SHA-256 digest. The download client cross-checks
+those values with the GitHub Release asset metadata before accepting a file.
+
 ## Release boundary
 
 This baseline is not yet an unattended updater. Before publishing an automatic
 installation path, add signed manifests, Windows code signing, a separate
-updater helper, transactional replacement, and rollback tests. The first
-automatic update should therefore be exercised from an installed
-`v2.0.6-beta` package to a later test version.
+updater helper, transactional replacement, and rollback tests. Because the
+published `v2.0.6-beta` only checks for releases, `v2.0.7-beta` is the secure
+download baseline and the first complete automatic-update exercise should be
+`v2.0.7-beta` to `v2.0.8-beta`.

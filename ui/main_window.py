@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QProgressBar,
+    QProgressDialog,
     QPushButton,
     QSplitter,
     QStackedWidget,
@@ -32,8 +33,9 @@ from PySide6.QtWidgets import (
 from core.config import load_config
 from core.project import NovelProject
 from core.project_data import ChapterIdConflictError, ProjectDataStore
-from core.update_service import UpdateCheckResult
-from core.version import load_current_version
+from core.update_download_service import VerifiedUpdate
+from core.update_service import UpdateCheckResult, UpdateInfo
+from core.version import AppVersion, load_current_version
 from ui.ai_controller import AIController
 from ui.ai_engine_controller import AIEngineController
 from ui.ai_task_view_controller import AITaskViewController
@@ -55,6 +57,7 @@ from ui.settings_controller import SettingsController
 from ui.story_navigation_controller import StoryNavigationController
 from ui.trash_dialog import TrashDialog
 from ui.update_controller import UpdateController
+from ui.update_download_controller import UpdateDownloadController
 from ui.update_dialog import UpdateDialog, no_update_notice
 from ui.view_refresh_controller import ViewRefreshController
 from ui.window_state_controller import WindowStateController
@@ -97,6 +100,7 @@ class MainWindow(QMainWindow):
         self._action_icon_buttons: dict[str, IconTextButton] = {}
         self.project_setup_dialog: ProjectSetupDialog | None = None
         self.update_dialog: UpdateDialog | None = None
+        self.update_download_progress: QProgressDialog | None = None
         self.ai_engine_controller = AIEngineController(
             self.config,
             self.ai_controller.is_running,
@@ -126,6 +130,7 @@ class MainWindow(QMainWindow):
             self,
         )
         self.update_controller = UpdateController(self.config, self)
+        self.update_download_controller = UpdateDownloadController(self)
         self.export_controller = ExportController(self.project_session, self)
         self.export_page.set_export_controller(self.export_controller)
         self.view_refresh_controller = ViewRefreshController(
@@ -568,6 +573,20 @@ class MainWindow(QMainWindow):
         self.update_controller.failed.connect(self._on_update_check_failed)
         self.update_controller.finished.connect(self._on_update_check_finished)
         self.update_controller.config_changed.connect(self._on_update_config_changed)
+        self.update_download_controller.started.connect(self._on_update_download_started)
+        self.update_download_controller.progress_changed.connect(
+            self._on_update_download_progress
+        )
+        self.update_download_controller.succeeded.connect(
+            self._on_update_download_succeeded
+        )
+        self.update_download_controller.failed.connect(self._on_update_download_failed)
+        self.update_download_controller.cancelled.connect(
+            self._on_update_download_cancelled
+        )
+        self.update_download_controller.finished.connect(
+            self._on_update_download_finished
+        )
         self.editor.dirty_changed.connect(self._on_dirty_changed)
         self.ai_controller.started.connect(self._on_ai_started)
         self.ai_controller.finished.connect(self._on_ai_finished)
@@ -1396,10 +1415,10 @@ class MainWindow(QMainWindow):
             dialog = UpdateDialog(result, self)
             self.update_dialog = dialog
             dialog.finished.connect(
-                lambda choice, release=result.latest: self._handle_update_choice(
-                    choice,
-                    release.release_url,
-                    release.tag_name,
+                lambda choice,
+                release=result.latest,
+                current=result.current_version: self._handle_update_choice(
+                    choice, release, current
                 )
             )
             dialog.finished.connect(
@@ -1420,14 +1439,72 @@ class MainWindow(QMainWindow):
     def _handle_update_choice(
         self,
         choice: int,
-        release_url: str,
-        tag_name: str,
+        release: UpdateInfo,
+        current_version: AppVersion,
     ) -> None:
         if choice == UpdateDialog.OPEN_RELEASE:
-            QDesktopServices.openUrl(QUrl(release_url))
+            QDesktopServices.openUrl(QUrl(release.release_url))
         elif choice == UpdateDialog.SKIP_VERSION:
-            self.update_controller.skip_version(tag_name)
-            self.status_message.setText(f"已忽略 {tag_name}")
+            self.update_controller.skip_version(release.tag_name)
+            self.status_message.setText(f"已忽略 {release.tag_name}")
+        elif choice == UpdateDialog.DOWNLOAD_UPDATE:
+            if not self.update_download_controller.download(release, current_version):
+                self.status_message.setText("更新下载已在进行中")
+
+    def _on_update_download_started(self, release: UpdateInfo) -> None:
+        dialog = QProgressDialog("正在准备安全下载…", "取消下载", 0, 1000, self)
+        dialog.setWindowTitle(f"下载 {release.tag_name}")
+        dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        dialog.setMinimumDuration(0)
+        dialog.setAutoClose(False)
+        dialog.setAutoReset(False)
+        dialog.canceled.connect(self.update_download_controller.cancel)
+        dialog.show()
+        self.update_download_progress = dialog
+        self.actions["check_updates"].setEnabled(False)
+        self.status_message.setText(f"正在安全下载 {release.tag_name}…")
+
+    def _on_update_download_progress(self, downloaded: int, total: int) -> None:
+        dialog = self.update_download_progress
+        if dialog is None:
+            return
+        ratio = min(1000, int(downloaded * 1000 / total)) if total > 0 else 0
+        dialog.setValue(ratio)
+        dialog.setLabelText(
+            f"正在下载并校验… {downloaded / 1048576:.1f} / "
+            f"{total / 1048576:.1f} MiB"
+        )
+
+    def _on_update_download_succeeded(self, result: VerifiedUpdate) -> None:
+        self._close_update_download_progress()
+        QMessageBox.information(
+            self,
+            "更新包已安全下载",
+            f"{result.release.tag_name} 已通过大小、SHA-256 和 ZIP 安全检查。\n\n"
+            f"缓存位置：\n{result.archive_path}\n\n"
+            "当前版本不会自动安装，请关闭 Novalist 后手动解压替换。",
+        )
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(result.archive_path.parent)))
+        self.status_message.setText(f"{result.release.tag_name} 已下载并验证")
+
+    def _on_update_download_failed(self, message: str) -> None:
+        self._close_update_download_progress()
+        QMessageBox.warning(self, "更新下载失败", str(message))
+        self.status_message.setText("更新下载或安全校验失败")
+
+    def _on_update_download_cancelled(self) -> None:
+        self._close_update_download_progress()
+        self.status_message.setText("更新下载已取消")
+
+    def _on_update_download_finished(self) -> None:
+        self.actions["check_updates"].setEnabled(True)
+
+    def _close_update_download_progress(self) -> None:
+        dialog = self.update_download_progress
+        self.update_download_progress = None
+        if dialog is not None:
+            dialog.close()
+            dialog.deleteLater()
 
     def _clear_update_dialog(self, dialog: UpdateDialog) -> None:
         if self.update_dialog is dialog:
@@ -1568,6 +1645,10 @@ class MainWindow(QMainWindow):
             return
         if self.update_controller.is_running():
             self.status_message.setText("更新检查仍在进行，请稍候再退出")
+            event.ignore()
+            return
+        if self.update_download_controller.is_running():
+            self.status_message.setText("更新下载仍在进行，请先取消或等待完成")
             event.ignore()
             return
         self.ai_engine_controller.cleanup()
