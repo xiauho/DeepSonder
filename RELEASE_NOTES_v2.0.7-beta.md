@@ -13,16 +13,15 @@
 
 ## 下载与校验
 
-1. 在旧版 Novalist 中打开“帮助 → 检查更新”。
-2. 发现 `v2.0.7-beta` 后选择“安全下载更新”，等待下载和安全校验完成。
-3. 校验成功后，Novalist 会打开缓存目录并显示 `.verified.zip` 的完整路径。
-4. 关闭 Novalist，将 ZIP 完整解压到新的可写目录，再运行其中的 `Novalist.exe`。
-
-也可以从 GitHub Release 手动下载以下三个文件：
+公开发布的 `v2.0.6-beta` 只支持检查更新和打开 GitHub 发布页，无法在程序内安全下载本版本。请从 GitHub Release 手动下载以下三个文件：
 
 - `Novalist-v2.0.7-beta-windows-x64.zip`
 - `SHA256SUMS.txt`
 - `release-manifest.json`
+
+使用 `SHA256SUMS.txt` 核对 ZIP 的 SHA-256；校验通过后，关闭 Novalist，将 ZIP 完整解压到新的可写目录，再运行其中的 `Novalist.exe`。
+
+用于开发验证的已同步工作区虽然仍显示 `v2.0.6-beta`，但已经包含安全下载代码，可用于验证本次升级流程。正式发布的 `v2.0.7-beta` 将从下一次更新开始提供程序内“安全下载更新”。
 
 用户配置、小说项目、虚拟环境和更新缓存不会写入发布包。
 
