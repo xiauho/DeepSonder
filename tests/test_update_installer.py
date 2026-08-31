@@ -207,7 +207,10 @@ class TransactionalInstallTests(TestCase):
                 new_files["Novalist.exe"],
             )
             self.assertTrue((install_root / "_internal" / "new-only.bin").is_file())
-            self.assertEqual(launched, [install_root / "Novalist.exe"])
+            self.assertEqual(
+                launched,
+                [(install_root / "Novalist.exe").resolve()],
+            )
             installed_manifest = parse_package_manifest(
                 (install_root / PACKAGE_MANIFEST_NAME).read_bytes()
             )
@@ -239,7 +242,10 @@ class TransactionalInstallTests(TestCase):
                     content,
                 )
             self.assertFalse((install_root / "_internal" / "new-only.bin").exists())
-            self.assertEqual(launched, [install_root / "Novalist.exe"])
+            self.assertEqual(
+                launched,
+                [(install_root / "Novalist.exe").resolve()],
+            )
 
     def test_new_managed_file_cannot_overwrite_unmanaged_content(self) -> None:
         with TemporaryDirectory() as tmp:
