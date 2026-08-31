@@ -16,7 +16,11 @@ from uuid import uuid4
 
 from .app_paths import update_cache_dir
 from .update_download_service import VerifiedUpdate, inspect_update_archive
-from .update_installer import PACKAGE_MANIFEST_NAME, parse_package_manifest
+from .update_installer import (
+    PACKAGE_MANIFEST_NAME,
+    parse_package_manifest,
+    validate_update_archive,
+)
 from .version import AppVersion
 
 
@@ -104,6 +108,7 @@ def launch_verified_update_install(
     # process. The helper independently repeats these checks after the app exits.
     try:
         inspect_update_archive(archive_path, verified.manifest)
+        validate_update_archive(archive_path, verified.manifest.version)
     except RuntimeError as exc:
         raise UpdateInstallLaunchError(
             "更新包在安装前复核失败，请重新下载。"
@@ -118,19 +123,34 @@ def launch_verified_update_install(
     if current_manifest.version != current_version:
         raise UpdateInstallLaunchError("当前安装版本与受管文件清单不一致。")
 
+    source_helper = root / UPDATER_EXECUTABLE_NAME
+    helper_entry = current_manifest.by_path.get(UPDATER_EXECUTABLE_NAME.casefold())
+    try:
+        helper_is_valid = (
+            helper_entry is not None
+            and source_helper.stat().st_size == helper_entry.size
+            and _hash_file(source_helper) == helper_entry.sha256
+        )
+    except OSError as exc:
+        raise UpdateInstallLaunchError("无法校验当前安装的独立更新器。") from exc
+    if not helper_is_valid:
+        raise UpdateInstallLaunchError("当前安装的独立更新器未通过受管文件校验。")
+
     transaction_id = uuid4().hex
     transaction_root = archive_path.parent / f"install-{transaction_id}"
     try:
         transaction_root.mkdir(parents=False, exist_ok=False)
     except OSError as exc:
         raise UpdateInstallLaunchError("无法创建自动安装事务目录。") from exc
-    source_helper = root / UPDATER_EXECUTABLE_NAME
     helper_copy = transaction_root / UPDATER_EXECUTABLE_NAME
     request_path = transaction_root / "install-request.json"
     try:
         shutil.copy2(source_helper, helper_copy)
-        if _hash_file(source_helper) != _hash_file(helper_copy):
-            raise UpdateInstallLaunchError("独立更新器复制后校验失败。")
+        if (
+            helper_copy.stat().st_size != helper_entry.size
+            or _hash_file(helper_copy) != helper_entry.sha256
+        ):
+            raise UpdateInstallLaunchError("独立更新器副本未通过受管文件校验。")
         payload = {
             "schema_version": 1,
             "transaction_id": transaction_id,

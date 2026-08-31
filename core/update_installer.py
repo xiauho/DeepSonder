@@ -251,9 +251,11 @@ def install_update(
     old_manifest: PackageManifest | None = None
     new_manifest: PackageManifest | None = None
     backup_complete = False
+    main_exited = False
 
     try:
         wait(request.current_pid, PROCESS_EXIT_TIMEOUT_SECONDS)
+        main_exited = True
         _validate_verified_state(request)
         new_manifest = validate_update_archive(
             request.archive_path,
@@ -327,7 +329,7 @@ def install_update(
         except OSError:
             pass
         current_app = request.install_dir / "Novalist.exe"
-        if current_app.is_file():
+        if main_exited and current_app.is_file():
             try:
                 launch(current_app)
             except OSError:
@@ -340,23 +342,7 @@ def wait_for_process_exit(process_id: int, timeout_seconds: int) -> None:
     if process_id == os.getpid():
         raise UpdateInstallError("更新器不能等待自身退出。")
     if sys.platform == "win32":
-        import ctypes
-
-        synchronize = 0x00100000
-        handle = ctypes.windll.kernel32.OpenProcess(synchronize, False, process_id)
-        if not handle:
-            return
-        try:
-            result = ctypes.windll.kernel32.WaitForSingleObject(
-                handle,
-                int(timeout_seconds * 1000),
-            )
-            if result == 0x00000102:
-                raise UpdateInstallError("等待 Novalist 退出超时。")
-            if result != 0:
-                raise UpdateInstallError("无法确认 Novalist 已安全退出。")
-        finally:
-            ctypes.windll.kernel32.CloseHandle(handle)
+        _wait_for_windows_process_exit(process_id, timeout_seconds)
         return
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
@@ -366,6 +352,50 @@ def wait_for_process_exit(process_id: int, timeout_seconds: int) -> None:
             return
         time.sleep(0.1)
     raise UpdateInstallError("等待 Novalist 退出超时。")
+
+
+def _wait_for_windows_process_exit(
+    process_id: int,
+    timeout_seconds: int,
+    *,
+    kernel32: object | None = None,
+    get_last_error: Callable[[], int] | None = None,
+) -> None:
+    """Wait for a Windows process, failing closed when its state is unknown."""
+    import ctypes
+    from ctypes import wintypes
+
+    if kernel32 is None:
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        kernel32.WaitForSingleObject.restype = wintypes.DWORD
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+    read_last_error = get_last_error or ctypes.get_last_error
+
+    synchronize = 0x00100000
+    error_invalid_parameter = 87
+    wait_timeout = 0x00000102
+    handle = kernel32.OpenProcess(synchronize, False, process_id)
+    if not handle:
+        error_code = int(read_last_error())
+        if error_code == error_invalid_parameter:
+            return
+        raise UpdateInstallError(
+            f"无法打开 Novalist 进程进行等待（Windows 错误 {error_code}）。"
+        )
+    try:
+        result = int(
+            kernel32.WaitForSingleObject(handle, int(timeout_seconds * 1000))
+        )
+        if result == wait_timeout:
+            raise UpdateInstallError("等待 Novalist 退出超时。")
+        if result != 0:
+            raise UpdateInstallError("无法确认 Novalist 已安全退出。")
+    finally:
+        kernel32.CloseHandle(handle)
 
 
 def run_health_check(application_path: Path) -> None:
@@ -503,6 +533,17 @@ def _extract_verified_archive(
     except Exception:
         shutil.rmtree(staging_root, ignore_errors=True)
         raise
+    try:
+        staged_manifest = parse_package_manifest(
+            (staging_root / PACKAGE_MANIFEST_NAME).read_bytes(),
+            expected_version=manifest.version,
+        )
+    except (OSError, RuntimeError) as exc:
+        shutil.rmtree(staging_root, ignore_errors=True)
+        raise UpdateInstallError("更新暂存清单无法验证。") from exc
+    if staged_manifest != manifest:
+        shutil.rmtree(staging_root, ignore_errors=True)
+        raise UpdateInstallError("更新暂存清单与已验证清单不一致。")
     for item in manifest.files:
         staged = staging_root / Path(*PurePosixPath(item.path).parts)
         if staged.stat().st_size != item.size or _hash_file(staged) != item.sha256:

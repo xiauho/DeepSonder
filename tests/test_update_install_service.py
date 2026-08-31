@@ -4,6 +4,7 @@ import zipfile
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
+from unittest.mock import patch
 
 from core.update_download_service import (
     ArchiveInspection,
@@ -23,16 +24,45 @@ CURRENT = AppVersion.parse("2.0.8-beta")
 TARGET = AppVersion.parse("2.0.9-beta")
 
 
-def build_verified_update(cache: Path) -> VerifiedUpdate:
+def package_manifest_payload(version: AppVersion, files: dict[str, bytes]) -> bytes:
+    manifest = {
+        "schema_version": 1,
+        "version": str(version),
+        "files": [
+            {
+                "path": path,
+                "size": len(payload),
+                "sha256": hashlib.sha256(payload).hexdigest(),
+            }
+            for path, payload in sorted(files.items())
+        ],
+    }
+    return (json.dumps(manifest, indent=2) + "\n").encode()
+
+
+def build_verified_update(
+    cache: Path,
+    *,
+    valid_package_manifest: bool = True,
+) -> VerifiedUpdate:
     version_root = cache / "v2.0.9-beta"
     version_root.mkdir(parents=True)
     archive_path = version_root / "Novalist-v2.0.9-beta-windows-x64.verified.zip"
+    files = {
+        "Novalist.exe": b"app",
+        "NovalistUpdater.exe": b"updater",
+        "_internal/VERSION": b"2.0.9-beta",
+        "licenses/README.md": b"licenses",
+    }
+    package_manifest = (
+        package_manifest_payload(TARGET, files)
+        if valid_package_manifest
+        else b"{}"
+    )
     with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr("Novalist.exe", b"app")
-        archive.writestr("NovalistUpdater.exe", b"updater")
-        archive.writestr("package-files.json", b"{}")
-        archive.writestr("_internal/VERSION", b"2.0.9-beta")
-        archive.writestr("licenses/README.md", b"licenses")
+        for relative, payload in files.items():
+            archive.writestr(relative, payload)
+        archive.writestr("package-files.json", package_manifest)
     digest = hashlib.sha256(archive_path.read_bytes()).hexdigest()
     manifest = UpdateManifest(
         schema_version=2,
@@ -71,7 +101,10 @@ def build_verified_update(cache: Path) -> VerifiedUpdate:
         release=release,
         manifest=manifest,
         archive_path=archive_path,
-        inspection=ArchiveInspection(file_count=5, expanded_size=20),
+        inspection=ArchiveInspection(
+            file_count=5,
+            expanded_size=sum(map(len, files.values())) + len(package_manifest),
+        ),
     )
 
 
@@ -148,3 +181,79 @@ class InstallLaunchTests(TestCase):
             self.assertEqual(Path(request["install_dir"]), install_root.resolve())
             self.assertEqual(calls[0][0][0], str(launch.helper_path))
 
+    def test_invalid_target_package_manifest_is_rejected_before_launch(self) -> None:
+        with TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            install_root = base / "portable"
+            install_root.mkdir()
+            write_current_manifest(install_root)
+            cache = base / "cache"
+            verified = build_verified_update(cache, valid_package_manifest=False)
+            calls = []
+
+            with self.assertRaisesRegex(RuntimeError, "安装前复核失败"):
+                launch_verified_update_install(
+                    verified,
+                    CURRENT,
+                    install_dir=install_root,
+                    cache_root=cache,
+                    platform="win32",
+                    frozen=True,
+                    process_factory=lambda *args, **kwargs: calls.append(args),
+                )
+
+            self.assertEqual(calls, [])
+
+    def test_modified_installed_helper_is_rejected_before_launch(self) -> None:
+        with TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            install_root = base / "portable"
+            install_root.mkdir()
+            write_current_manifest(install_root)
+            (install_root / "NovalistUpdater.exe").write_bytes(b"tampered updater")
+            cache = base / "cache"
+            verified = build_verified_update(cache)
+            calls = []
+
+            with self.assertRaisesRegex(RuntimeError, "未通过受管文件校验"):
+                launch_verified_update_install(
+                    verified,
+                    CURRENT,
+                    install_dir=install_root,
+                    cache_root=cache,
+                    platform="win32",
+                    frozen=True,
+                    process_factory=lambda *args, **kwargs: calls.append(args),
+                )
+
+            self.assertEqual(calls, [])
+
+    def test_helper_changed_during_copy_is_rejected_before_launch(self) -> None:
+        with TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            install_root = base / "portable"
+            install_root.mkdir()
+            write_current_manifest(install_root)
+            cache = base / "cache"
+            verified = build_verified_update(cache)
+            calls = []
+
+            def tampered_copy(_source: Path, destination: Path) -> None:
+                destination.write_bytes(b"replacement updater")
+
+            with patch(
+                "core.update_install_service.shutil.copy2",
+                side_effect=tampered_copy,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "副本未通过受管文件校验"):
+                    launch_verified_update_install(
+                        verified,
+                        CURRENT,
+                        install_dir=install_root,
+                        cache_root=cache,
+                        platform="win32",
+                        frozen=True,
+                        process_factory=lambda *args, **kwargs: calls.append(args),
+                    )
+
+            self.assertEqual(calls, [])

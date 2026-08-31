@@ -8,6 +8,8 @@ from unittest import TestCase
 from core.update_installer import (
     PACKAGE_MANIFEST_NAME,
     UpdateInstallError,
+    _extract_verified_archive,
+    _wait_for_windows_process_exit,
     install_update,
     parse_package_manifest,
     validate_package_path,
@@ -116,6 +118,66 @@ class PackageManifestTests(TestCase):
 
 
 class TransactionalInstallTests(TestCase):
+    def test_staged_manifest_must_match_the_previously_validated_manifest(self) -> None:
+        with TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            archive_path = base / "update.zip"
+            files = package_files(NEW_VERSION, b"new")
+            expected_payload = manifest_payload(NEW_VERSION, files)
+            reordered = json.loads(expected_payload)
+            reordered["files"].reverse()
+            with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as archive:
+                for relative, content in files.items():
+                    archive.writestr(relative, content)
+                archive.writestr(
+                    PACKAGE_MANIFEST_NAME,
+                    json.dumps(reordered).encode(),
+                )
+            expected = parse_package_manifest(expected_payload)
+            staging_root = base / "staging"
+
+            with self.assertRaisesRegex(UpdateInstallError, "暂存清单.*不一致"):
+                _extract_verified_archive(archive_path, staging_root, expected)
+
+            self.assertFalse(staging_root.exists())
+
+    def test_windows_process_open_failure_does_not_fail_open(self) -> None:
+        class Kernel32:
+            @staticmethod
+            def OpenProcess(_access, _inherit, _process_id):
+                return 0
+
+        with self.assertRaisesRegex(UpdateInstallError, "Windows 错误 5"):
+            _wait_for_windows_process_exit(
+                123,
+                1,
+                kernel32=Kernel32(),
+                get_last_error=lambda: 5,
+            )
+
+    def test_wait_failure_does_not_launch_a_second_application(self) -> None:
+        with TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            install_root = base / "portable"
+            install_root.mkdir()
+            write_install(install_root, OLD_VERSION, b"old")
+            request_path, _new_files = write_request(base / "cache", install_root)
+            launched = []
+
+            outcome = install_update(
+                request_path,
+                wait_for_process=lambda _pid, _timeout: (_ for _ in ()).throw(
+                    UpdateInstallError("simulated wait failure")
+                ),
+                health_check=lambda _app: None,
+                launch_application=launched.append,
+            )
+
+            self.assertFalse(outcome.success)
+            self.assertFalse(outcome.rolled_back)
+            self.assertIn("simulated wait failure", outcome.message)
+            self.assertEqual(launched, [])
+
     def test_success_replaces_only_managed_files_and_launches_new_app(self) -> None:
         with TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -200,4 +262,3 @@ class TransactionalInstallTests(TestCase):
             self.assertFalse(outcome.rolled_back)
             self.assertIn("非受管内容", outcome.message)
             self.assertEqual(collision.read_bytes(), b"user content")
-
