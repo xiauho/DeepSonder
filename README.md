@@ -24,7 +24,7 @@ Novalist 是一款面向长篇小说创作的本地桌面工具，使用 PySide6
 - **一致性报告**：按中文问题类型和严重级别展示证据、位置与建议，并可从报告页选择章节重新检查
 - **安全定位与修复**：对存在唯一正文锚点的问题支持跳转；仅对可安全替换的正文问题开放 AI 修复预览
 - **AI 辅助**：通过 `dsh --profile headless` 扩写章节、检查一致性、修复受支持的问题、生成摘要和更新记忆；扩写与续写可自动应用项目级写作风格
-- **更新检查**：从“帮助”菜单手动检查 GitHub Release，可选择稳定版或测试版通道；不会自动下载或运行文件
+- **内置更新**：从“帮助”菜单检查 GitHub Release，可安全下载并验证 Windows x64 更新包；支持自动安装的便携版可由独立更新器备份、替换、启动自检并在失败时回滚
 - **首次使用告知**：调用 AI 前明确提示可能发送的数据范围和 AI 输出风险
 - **整书导出**：导出为 Markdown 或纯文本
 
@@ -82,7 +82,9 @@ Novalist 将本机设置保存在当前用户的应用数据目录中：Windows 
 
 未来的更新下载缓存预留在本机缓存目录中；Windows 对应 `%LOCALAPPDATA%\Novalist\updates`。缓存不包含小说项目，删除后可重新下载。
 
-“帮助 → 检查更新”会读取 `xiauho/novalist` 的公开 GitHub Release。设置中可自愿开启启动检查；开启后最多每 24 小时检查一次。从 `v2.0.7-beta` 开始，发现新版本后可将唯一匹配的 Windows x64 软件包下载到 `%LOCALAPPDATA%\Novalist\updates`，并核对 GitHub 摘要、发布清单、文件大小、SHA-256、包内路径、版本和全部 ZIP 文件 CRC。当前阶段不会自动安装或运行下载内容，完成验证后仍需用户关闭 Novalist 并手动解压替换。
+“帮助 → 检查更新”会读取 `xiauho/novalist` 的公开 GitHub Release。设置中可自愿开启启动检查；开启后最多每 24 小时检查一次。从 `v2.0.7-beta` 开始，发现新版本后可将唯一匹配的 Windows x64 软件包下载到 `%LOCALAPPDATA%\Novalist\updates`，并核对 GitHub 摘要、发布清单、文件大小、SHA-256、包内路径、版本和全部 ZIP 文件 CRC。
+
+计划中的 `v2.0.8-beta` 便携包会增加独立的 `NovalistUpdater.exe` 和逐文件 `package-files.json`。用户确认安装后，主程序只把当前安装中受信任的更新器复制到缓存并退出；更新器再次验证缓存状态、ZIP 和逐文件哈希，只备份及替换清单内的程序文件，保留项目和其他非受管内容。新版必须通过 `Novalist.exe --self-test` 才会启动，否则恢复旧版本。自动安装仅支持可写的 Windows x64 便携目录，不申请管理员权限，无法满足条件时仍保留手动解压方案。由于 `v2.0.7-beta` 本身没有独立更新器，从该版本升级到 `v2.0.8-beta` 仍需手动安装；安装 `v2.0.8-beta` 后才能自动安装后续兼容版本。
 
 Novalist 的 AI 配置只针对 DeepSeek Harness 的 `dsh --profile headless` 入口，不提供其他模型供应商、API Key 或模型列表配置。凭据和模型连接由 Harness 自己管理。
 
