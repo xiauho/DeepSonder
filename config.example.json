@@ -4,6 +4,8 @@
   "dsh_profile": "headless",
   "dsh_timeout": 600,
   "dsh_extra_args": [],
+  "dsh_prompt_transport": "auto",
+  "dsh_file_prompt_budget": 48000,
   "expand_target_chars": 2000,
   "ai_context_history_chapters": 5,
   "theme": "dark",

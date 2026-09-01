@@ -96,9 +96,17 @@ Novalist 的 AI 配置只针对 DeepSeek Harness 的 `dsh --profile headless` �
   "dsh_launcher_args": [],
   "dsh_profile": "headless",
   "dsh_timeout": 600,
-  "dsh_extra_args": []
+  "dsh_extra_args": [],
+  "dsh_prompt_transport": "auto",
+  "dsh_file_prompt_budget": 48000
 }
 ```
+
+默认的 `auto` 模式会继续通过命令行传递较短任务；较长任务会先验证
+Harness 是否能够读取 Novalist 隔离目录中的临时 UTF-8 任务文件，验证成功后
+改用文件桥接，以避开 Windows 进程参数长度限制。任务文件在成功、失败、超时
+或取消后都会尽力删除；验证失败时自动保持原有的 24000 字符兼容预算。
+如需强制使用旧行为，可将 `dsh_prompt_transport` 设为 `argv`。
 
 也可以通过官方 npm 包运行。在 Windows 的“偏好设置”中将命令设为 `npx.cmd`，启动参数设为 `--yes @deepseek-ai/dsh`；对应 JSON 为：
 
@@ -106,7 +114,8 @@ Novalist 的 AI 配置只针对 DeepSeek Harness 的 `dsh --profile headless` �
 {
   "dsh_command": "npx.cmd",
   "dsh_launcher_args": ["--yes", "@deepseek-ai/dsh"],
-  "dsh_profile": "headless"
+  "dsh_profile": "headless",
+  "dsh_prompt_transport": "auto"
 }
 ```
 

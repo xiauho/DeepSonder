@@ -44,6 +44,7 @@ def build_expansion_prompt(
     selected_foreshadowing: list[dict] | tuple[dict, ...] | None = None,
     selected_power: list[str] | tuple[str, ...] | None = None,
     context: AIContext | None = None,
+    prompt_budget: int = DEFAULT_PROMPT_BUDGET,
 ) -> tuple[str, str]:
     """Build a compact outline-to-chapter expansion task.
 
@@ -155,7 +156,7 @@ def build_expansion_prompt(
 <NOVALIST_TASK_DONE>扩写任务已完成</NOVALIST_TASK_DONE>
 """.strip()
 
-    return _finalize(system_prompt, render, sections)
+    return _finalize(system_prompt, render, sections, prompt_budget)
 
 
 def build_expansion_retry_prompt(
@@ -167,6 +168,7 @@ def build_expansion_retry_prompt(
     selected_foreshadowing: list[dict] | tuple[dict, ...] | None = None,
     selected_power: list[str] | tuple[str, ...] | None = None,
     context: AIContext | None = None,
+    prompt_budget: int = DEFAULT_PROMPT_BUDGET,
 ) -> tuple[str, str]:
     """Build a correction prompt when headless returns a workspace preamble."""
     _system_prompt, user_prompt = build_expansion_prompt(
@@ -177,6 +179,7 @@ def build_expansion_retry_prompt(
         selected_foreshadowing=selected_foreshadowing,
         selected_power=selected_power,
         context=context,
+        prompt_budget=prompt_budget,
     )
     retry_system = f"""
 {COMMON_RULES}
@@ -252,6 +255,7 @@ def build_write_prompt(
     *,
     summary_count: int = CONTINUATION_SUMMARY_COUNT,
     context: AIContext | None = None,
+    prompt_budget: int = DEFAULT_PROMPT_BUDGET,
 ) -> tuple[str, str]:
     summary_count = max(0, int(summary_count))
     context = context or build_ai_context(project, chapter_id)
@@ -341,7 +345,7 @@ def build_write_prompt(
 <NOVALIST_TASK_DONE>续写任务已完成</NOVALIST_TASK_DONE>
 """.strip()
 
-    return _finalize(system_prompt, render, sections)
+    return _finalize(system_prompt, render, sections, prompt_budget)
 
 
 def build_write_retry_prompt(
@@ -351,6 +355,7 @@ def build_write_retry_prompt(
     *,
     summary_count: int = CONTINUATION_SUMMARY_COUNT,
     context: AIContext | None = None,
+    prompt_budget: int = DEFAULT_PROMPT_BUDGET,
 ) -> tuple[str, str]:
     """Build an explicit retry after an Agent-style response."""
     system_prompt, user_prompt = build_write_prompt(
@@ -359,6 +364,7 @@ def build_write_retry_prompt(
         target_chars,
         summary_count=summary_count,
         context=context,
+        prompt_budget=prompt_budget,
     )
     retry_system = f"""
 {COMMON_RULES}
@@ -384,6 +390,7 @@ def build_summary_prompt(
     chapter_id: str,
     *,
     context: AIContext | None = None,
+    prompt_budget: int = DEFAULT_PROMPT_BUDGET,
 ) -> tuple[str, str]:
     context = context or build_ai_context(project, chapter_id)
     chapter = context.chapter
@@ -436,7 +443,7 @@ def build_summary_prompt(
 }}
 """.strip()
 
-    return _finalize(system_prompt, render, sections)
+    return _finalize(system_prompt, render, sections, prompt_budget)
 
 
 def build_state_update_prompt(
@@ -444,6 +451,7 @@ def build_state_update_prompt(
     chapter_id: str,
     *,
     context: AIContext | None = None,
+    prompt_budget: int = DEFAULT_PROMPT_BUDGET,
 ) -> tuple[str, str]:
     context = context or build_ai_context(project, chapter_id)
     chapter = context.chapter
@@ -517,7 +525,7 @@ def build_state_update_prompt(
 }}
 """.strip()
 
-    return _finalize(system_prompt, render, sections)
+    return _finalize(system_prompt, render, sections, prompt_budget)
 
 
 def build_check_prompt(
@@ -525,6 +533,7 @@ def build_check_prompt(
     chapter_id: str,
     *,
     context: AIContext | None = None,
+    prompt_budget: int = DEFAULT_PROMPT_BUDGET,
 ) -> tuple[str, str]:
     context = context or build_ai_context(project, chapter_id)
     chapter = context.chapter
@@ -614,7 +623,7 @@ severity 只能使用：high、medium、low。
 }}
 """.strip()
 
-    return _finalize(system_prompt, render, sections)
+    return _finalize(system_prompt, render, sections, prompt_budget)
 
 
 def build_consistency_repair_prompt(
@@ -623,6 +632,7 @@ def build_consistency_repair_prompt(
     issue: dict,
     *,
     context: AIContext | None = None,
+    prompt_budget: int = DEFAULT_PROMPT_BUDGET,
 ) -> tuple[str, str]:
     """Build a constrained one-range repair proposal for one report issue."""
     context = context or build_ai_context(project, chapter_id)
@@ -709,13 +719,19 @@ def build_consistency_repair_prompt(
 }}
 """.strip()
 
-    return _finalize(system_prompt, render, sections)
+    return _finalize(system_prompt, render, sections, prompt_budget)
 
 
-def _finalize(system_prompt: str, render, sections) -> tuple[str, str]:
-    """Budget sections against the fixed instruction overhead, then render."""
+def _finalize(
+    system_prompt: str,
+    render,
+    sections,
+    prompt_budget: int = DEFAULT_PROMPT_BUDGET,
+) -> tuple[str, str]:
+    """Budget sections against instruction overhead, then render."""
     overhead = len(system_prompt) + len(render({}))
-    ctx = allocate(sections, max(1000, DEFAULT_PROMPT_BUDGET - overhead))
+    budget = max(1000, int(prompt_budget))
+    ctx = allocate(sections, max(1000, budget - overhead))
     return system_prompt, render(ctx)
 
 

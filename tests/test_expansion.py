@@ -13,6 +13,9 @@ class FakeDSH:
         self.json_outputs = list(json_outputs or [])
         self.json_calls: list[dict] = []
 
+    def resolve_prompt_budget(self, **_kwargs):
+        return 24_000
+
     def generate(self, system_prompt, user_prompt, session_id=None, *, timeout_override=None):
         self.calls.append(
             {

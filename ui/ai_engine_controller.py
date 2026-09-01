@@ -45,6 +45,8 @@ class AIEngineController(QObject):
             profile="headless",
             timeout=normalized["dsh_timeout"],
             extra_args=normalized["dsh_extra_args"],
+            prompt_transport=normalized["dsh_prompt_transport"],
+            file_prompt_budget=normalized["dsh_file_prompt_budget"],
         )
         client.use_isolated_workspace()
         self._client = client

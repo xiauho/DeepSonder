@@ -67,16 +67,23 @@ class AIWorkflowService:
         chapter_id: str,
         cancel_event: threading.Event | None = None,
     ) -> tuple[str, dict, str]:
+        prompt_budget = self.dsh.resolve_prompt_budget(cancel_event=cancel_event)
         context = build_ai_context(project, chapter_id)
         summary_system, summary_user = build_summary_prompt(
-            project, chapter_id, context=context
+            project,
+            chapter_id,
+            context=context,
+            prompt_budget=prompt_budget,
         )
         generate_options = {"cancel_event": cancel_event} if cancel_event is not None else {}
         summary_raw = self.dsh.generate(summary_system, summary_user, **generate_options)
         summary_result = ai_protocol.parse_summary_result(summary_raw)
 
         state_system, state_user = build_state_update_prompt(
-            project, chapter_id, context=context
+            project,
+            chapter_id,
+            context=context,
+            prompt_budget=prompt_budget,
         )
         state_raw = self.dsh.generate_json(state_system, state_user, **generate_options)
         state_result = ai_protocol.parse_story_state_result(state_raw)

@@ -37,6 +37,7 @@ def run_expansion(
     history_chapters = max(0, int(history_chapters))
     min_chars = round(target_chars * 0.85)
     max_chars = round(target_chars * 1.15)
+    prompt_budget = dsh.resolve_prompt_budget(cancel_event=cancel_event)
 
     context = build_ai_context(
         project,
@@ -55,6 +56,7 @@ def run_expansion(
         selected_foreshadowing=selected_foreshadowing,
         selected_power=selected_power,
         context=context,
+        prompt_budget=prompt_budget,
     )
     generate_options = {"cancel_event": cancel_event} if cancel_event is not None else {}
     raw = dsh.generate(system_prompt, user_prompt, **generate_options)
@@ -81,6 +83,7 @@ def run_expansion(
             selected_foreshadowing=selected_foreshadowing,
             selected_power=selected_power,
             context=context,
+            prompt_budget=prompt_budget,
         )
         # The retry regenerates the full chapter, so it keeps the same timeout
         # budget as the first attempt instead of a shortened one.

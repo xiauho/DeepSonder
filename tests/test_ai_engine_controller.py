@@ -37,6 +37,8 @@ class AIEngineControllerTests(unittest.TestCase):
             first = controller.client
             self.assertIsNotNone(first)
             self.assertTrue(first.isolated)
+            self.assertEqual(first.options["prompt_transport"], "auto")
+            self.assertEqual(first.options["file_prompt_budget"], 48_000)
 
             running[0] = True
             second = controller.configure({"dsh_command": "dsh-new"})

@@ -3,6 +3,7 @@ import tempfile
 from pathlib import Path
 from unittest import TestCase
 
+from core import prompt_builder
 from core.context_budget import (
     DROPPED_PLACEHOLDER,
     HEAD_MARK,
@@ -60,6 +61,26 @@ class AllocateTests(TestCase):
         self.assertEqual(len(result["a"]), 300)
         self.assertLessEqual(len(result["b"]), 100)
         self.assertLessEqual(len(result["a"]) + len(result["b"]), 400)
+
+    def test_prompt_finalizer_uses_the_selected_transport_budget(self) -> None:
+        sections = [
+            section("first", "甲" * 20_000, cap=20_000, priority=1),
+            section("second", "乙" * 19_000 + "扩展预算尾部标记", cap=20_000, priority=2),
+        ]
+
+        def render(values):
+            return values.get("first", "") + values.get("second", "")
+
+        _system, argv_prompt = prompt_builder._finalize(
+            "system", render, sections, 24_000
+        )
+        _system, file_prompt = prompt_builder._finalize(
+            "system", render, sections, 48_000
+        )
+
+        self.assertNotIn("扩展预算尾部标记", argv_prompt)
+        self.assertIn("扩展预算尾部标记", file_prompt)
+        self.assertGreater(len(file_prompt), len(argv_prompt))
 
 
 class CompactStoryStateTests(TestCase):

@@ -16,6 +16,9 @@ class FakeDSH:
         self.generate_calls: list[tuple[str, str]] = []
         self.json_calls: list[tuple[str, str]] = []
 
+    def resolve_prompt_budget(self, **_kwargs):
+        return 24_000
+
     def generate(self, system_prompt: str, user_prompt: str, *args, **kwargs) -> str:
         self.generate_calls.append((system_prompt, user_prompt))
         return self.summary

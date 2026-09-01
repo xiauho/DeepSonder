@@ -1,11 +1,11 @@
-"""Priority-based context budget for dsh prompts.
+"""Priority-based context budgets for dsh prompts.
 
-The headless CLI only accepts the task as a command-line argument, so the
-whole prompt must stay under Windows' ~30K CreateProcess limit.  Instead of
-failing when a novel outgrows that, context sections are ranked by
-importance: the least important ones are capped or dropped first, and every
-truncation is marked in place so the model can tell trimmed data apart from
-missing data.
+The headless CLI accepts its task as a positional argument.  Novalist keeps a
+24K compatibility budget for argv and can select a larger budget after its
+isolated task-file bridge has been verified.  In both modes, context sections
+are ranked by importance: the least important ones are capped or dropped
+first, and every truncation is marked in place so the model can tell trimmed
+data apart from missing data.
 """
 
 from __future__ import annotations
@@ -19,8 +19,11 @@ from .project import NovelProject, chapter_number_from_id
 from .project_data import ProjectDataStore
 
 # Sections share this pool; instruction text and section labels live outside
-# it.  The value leaves headroom below DSHClient's 30K hard limit.
-DEFAULT_PROMPT_BUDGET = 24000
+# it.  The argv value leaves headroom below DSHClient's 30K hard limit.  A
+# verified task-file transport can use the larger configurable budget without
+# placing the prompt itself on the Windows command line.
+ARGV_PROMPT_BUDGET = 24000
+DEFAULT_PROMPT_BUDGET = ARGV_PROMPT_BUDGET
 
 # Task-specific history windows.  The current chapter's own planning text is
 # more useful for expansion than increasingly old raw prose.

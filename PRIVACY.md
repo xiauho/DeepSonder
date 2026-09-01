@@ -20,6 +20,14 @@ The configured DeepSeek Harness installation and its selected model provider
 determine where that data is processed, logged and retained. Users should read
 the terms and privacy documentation of those services before using AI features.
 
+For prompts that are too large for a safe command-line invocation, Novalist may
+write the complete prompt to a randomly named UTF-8 task file in its private
+temporary Harness workspace. The configured local Harness process reads that
+file before contacting its model provider. Novalist attempts to delete each
+task file after success, failure, timeout, or cancellation, and removes the
+private workspace when the AI client is released. The file is never written
+inside the user's novel project.
+
 Do not submit personal data, confidential information, or copyrighted material
 that you are not authorized to process. AI output may be inaccurate or unsuitable
 and must be reviewed before use or publication.

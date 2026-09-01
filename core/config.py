@@ -13,6 +13,10 @@ from .theme_tokens import DARK_COLORS, LIGHT_COLORS
 from .storage import atomic_write_text
 
 AI_CONTEXT_HISTORY_CHAPTERS_MAX = 20
+DSH_PROMPT_TRANSPORTS = {"auto", "argv", "file"}
+DSH_FILE_PROMPT_BUDGET_MIN = 24_000
+DSH_FILE_PROMPT_BUDGET_MAX = 120_000
+DSH_FILE_PROMPT_BUDGET_DEFAULT = 48_000
 
 DEFAULT_CONFIG = {
     "dsh_command": "dsh",
@@ -20,6 +24,8 @@ DEFAULT_CONFIG = {
     "dsh_profile": "headless",
     "dsh_timeout": 600,
     "dsh_extra_args": [],
+    "dsh_prompt_transport": "auto",
+    "dsh_file_prompt_budget": DSH_FILE_PROMPT_BUDGET_DEFAULT,
     # UI settings
     "theme": "light",
     "ui_language": "zh-CN",
@@ -135,6 +141,25 @@ def _normalize_config(config: dict[str, Any]) -> None:
     config["dsh_profile"] = "headless"
     config["dsh_launcher_args"] = _string_list(config.get("dsh_launcher_args"))
     config["dsh_extra_args"] = _string_list(config.get("dsh_extra_args"))
+    transport = str(config.get("dsh_prompt_transport") or "auto").strip().lower()
+    config["dsh_prompt_transport"] = (
+        transport if transport in DSH_PROMPT_TRANSPORTS else "auto"
+    )
+    try:
+        config["dsh_file_prompt_budget"] = max(
+            DSH_FILE_PROMPT_BUDGET_MIN,
+            min(
+                DSH_FILE_PROMPT_BUDGET_MAX,
+                int(
+                    config.get(
+                        "dsh_file_prompt_budget",
+                        DSH_FILE_PROMPT_BUDGET_DEFAULT,
+                    )
+                ),
+            ),
+        )
+    except (TypeError, ValueError):
+        config["dsh_file_prompt_budget"] = DSH_FILE_PROMPT_BUDGET_DEFAULT
     try:
         config["dsh_timeout"] = max(30, min(1800, int(config.get("dsh_timeout", 600))))
     except (TypeError, ValueError):

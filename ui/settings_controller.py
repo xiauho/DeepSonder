@@ -35,6 +35,7 @@ class SettingsController(QObject):
         self._document_controller = document_controller
         self._engine_controller = engine_controller
         self._connection_task: DSHTask | None = None
+        self._connection_client: DSHClient | None = None
         self._apply_runtime_settings()
 
     @property
@@ -69,7 +70,11 @@ class SettingsController(QObject):
             profile="headless",
             timeout=min(15, int(test_config["dsh_timeout"])),
             extra_args=test_config["dsh_extra_args"],
+            prompt_transport=test_config["dsh_prompt_transport"],
+            file_prompt_budget=test_config["dsh_file_prompt_budget"],
         )
+        client.use_isolated_workspace()
+        self._connection_client = client
         self._connection_task = DSHTask(
             lambda _cancel_event: client.check_connection(),
             parent=self,
@@ -99,6 +104,10 @@ class SettingsController(QObject):
     def _on_connection_finished(self) -> None:
         task = self._connection_task
         self._connection_task = None
+        client = self._connection_client
+        self._connection_client = None
+        if client is not None:
+            client.cleanup()
         self.connection_finished.emit()
         if task is not None:
             task.deleteLater()

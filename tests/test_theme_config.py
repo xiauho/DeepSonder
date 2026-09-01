@@ -3,6 +3,8 @@ from unittest import TestCase
 from core.config import (
     AI_CONTEXT_HISTORY_CHAPTERS_MAX,
     DEFAULT_CONFIG,
+    DSH_FILE_PROMPT_BUDGET_DEFAULT,
+    DSH_FILE_PROMPT_BUDGET_MAX,
     _normalize_config,
 )
 from ui.theme import DARK_COLORS, LIGHT_COLORS, build_qss, document_css
@@ -74,3 +76,21 @@ class ThemeConfigTests(TestCase):
         config = {"ai_context_history_chapters": -3}
         _normalize_config(config)
         self.assertEqual(config["ai_context_history_chapters"], 0)
+
+    def test_prompt_transport_settings_are_normalized(self) -> None:
+        self.assertEqual(DEFAULT_CONFIG["dsh_prompt_transport"], "auto")
+        self.assertEqual(
+            DEFAULT_CONFIG["dsh_file_prompt_budget"],
+            DSH_FILE_PROMPT_BUDGET_DEFAULT,
+        )
+
+        config = {
+            "dsh_prompt_transport": "invalid",
+            "dsh_file_prompt_budget": 999_999,
+        }
+        _normalize_config(config)
+        self.assertEqual(config["dsh_prompt_transport"], "auto")
+        self.assertEqual(
+            config["dsh_file_prompt_budget"],
+            DSH_FILE_PROMPT_BUDGET_MAX,
+        )
