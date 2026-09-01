@@ -98,7 +98,19 @@ class DSHClient:
         if workspace is not None:
             if self.working_directory == workspace:
                 self.working_directory = None
-            shutil.rmtree(workspace, ignore_errors=True)
+            # Windows can retain a just-exited child process' cwd handle for a
+            # short interval.  Retry the exact private workspace instead of
+            # silently leaving an empty directory after one transient denial.
+            for delay in (0.0, 0.05, 0.15, 0.3, 0.6, 1.0):
+                if delay:
+                    time.sleep(delay)
+                try:
+                    shutil.rmtree(workspace)
+                except FileNotFoundError:
+                    break
+                except OSError:
+                    continue
+                break
 
     def generate(
         self,

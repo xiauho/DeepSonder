@@ -1,4 +1,5 @@
 import re
+import shutil
 import subprocess
 from types import SimpleNamespace
 from pathlib import Path
@@ -287,9 +288,12 @@ class DSHClientTests(TestCase):
         completed = SimpleNamespace(returncode=0, stdout="generated text\n", stderr="")
         client = DSHClient("dsh")
         client.use_isolated_workspace()
+        workspace = client.working_directory
         with patch("core.dsh_client.subprocess.run", return_value=completed) as run:
             client.generate("system", "user")
         self.assertEqual(Path(run.call_args.kwargs["cwd"]), client.working_directory)
+        client.cleanup()
+        self.assertFalse(workspace.exists())
 
     def test_cleanup_keeps_explicitly_set_working_directory(self) -> None:
         with TemporaryDirectory() as directory:
@@ -300,3 +304,24 @@ class DSHClientTests(TestCase):
             client.cleanup()
             self.assertFalse(isolated.exists())
             self.assertTrue(Path(directory).is_dir())
+
+    def test_cleanup_retries_a_transient_windows_directory_error(self) -> None:
+        client = DSHClient("dsh")
+        client.use_isolated_workspace()
+        workspace = client.working_directory
+        real_rmtree = shutil.rmtree
+        attempts = []
+
+        def flaky_rmtree(path):
+            attempts.append(Path(path))
+            if len(attempts) == 1:
+                raise PermissionError("transient cwd handle")
+            real_rmtree(path)
+
+        with patch("core.dsh_client.shutil.rmtree", side_effect=flaky_rmtree):
+            with patch("core.dsh_client.time.sleep") as sleep:
+                client.cleanup()
+
+        self.assertEqual(attempts, [workspace, workspace])
+        sleep.assert_called_once_with(0.05)
+        self.assertFalse(workspace.exists())
