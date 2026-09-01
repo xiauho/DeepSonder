@@ -12,6 +12,8 @@ from .app_paths import app_config_dir, legacy_application_root, update_cache_dir
 from .theme_tokens import DARK_COLORS, LIGHT_COLORS
 from .storage import atomic_write_text
 
+AI_CONTEXT_HISTORY_CHAPTERS_MAX = 20
+
 DEFAULT_CONFIG = {
     "dsh_command": "dsh",
     "dsh_launcher_args": [],
@@ -160,7 +162,11 @@ def _normalize_config(config: dict[str, Any]) -> None:
         config["expand_target_chars"] = 2000
     try:
         config["ai_context_history_chapters"] = max(
-            0, min(10, int(config.get("ai_context_history_chapters", 5)))
+            0,
+            min(
+                AI_CONTEXT_HISTORY_CHAPTERS_MAX,
+                int(config.get("ai_context_history_chapters", 5)),
+            ),
         )
     except (TypeError, ValueError):
         config["ai_context_history_chapters"] = 5

@@ -46,7 +46,9 @@ SECTION_RULES: dict[str, tuple[int, str, int]] = {
     "core_systems": (3500, "head", 1),
     "selected_power": (3500, "head", 1),
     "state": (4000, "head", 2),
-    "summaries": (2000, "head", 3),
+    # Summaries are rendered chronologically, so trimming must keep the tail:
+    # the chapters nearest to the current one carry the strongest continuity.
+    "summaries": (2000, "tail", 3),
     "characters": (3000, "head", 4),
     "future_plan": (1500, "head", 5),
     "main_arc": (1500, "head", 5),

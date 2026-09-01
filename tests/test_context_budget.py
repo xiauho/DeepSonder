@@ -13,7 +13,12 @@ from core.context_budget import (
     prior_chapter_summaries,
 )
 from core.project import NovelProject
-from core.prompt_builder import build_check_prompt, build_state_update_prompt, build_write_prompt
+from core.prompt_builder import (
+    build_check_prompt,
+    build_expansion_prompt,
+    build_state_update_prompt,
+    build_write_prompt,
+)
 
 
 def section(key, text, cap=1000, keep="head", priority=5):
@@ -143,6 +148,34 @@ class BudgetedPromptTests(TestCase):
         self.assertIn("【写作风格约束】", user)
         self.assertIn("冷峻短句", user)
         self.assertNotIn("不应保留的尾部标记", user)
+
+    def test_twenty_expansion_summaries_fit_and_keep_the_most_recent(self) -> None:
+        summaries = {}
+        for number in range(1, 21):
+            marker = f"CHAPTER_{number:02d}_END"
+            prefix = f"第 {number} 章摘要："
+            summaries[f"chapter_{number:02d}"] = (
+                prefix + "情节" * 300
+            )[: 400 - len(marker)] + marker
+        self.project.save_chapter_summaries(summaries)
+        self.project.save_chapter(
+            "chapter_21",
+            outline="主角承接上一章的危机继续行动。",
+            content="",
+            title="第二十一章",
+        )
+
+        system, user = build_expansion_prompt(
+            self.project,
+            "chapter_21",
+            2000,
+            summary_count=20,
+        )
+
+        self.assertLess(len(system) + len(user), 30000)
+        self.assertIn("最多最近 20 个已完成章节的摘要", user)
+        self.assertIn(TAIL_MARK.strip(), user)
+        self.assertIn("CHAPTER_20_END", user)
 
     def test_check_prompt_stays_under_hard_limit(self) -> None:
         system, user = build_check_prompt(self.project, "chapter_02")

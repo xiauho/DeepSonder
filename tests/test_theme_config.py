@@ -1,6 +1,10 @@
 from unittest import TestCase
 
-from core.config import DEFAULT_CONFIG, _normalize_config
+from core.config import (
+    AI_CONTEXT_HISTORY_CHAPTERS_MAX,
+    DEFAULT_CONFIG,
+    _normalize_config,
+)
 from ui.theme import DARK_COLORS, LIGHT_COLORS, build_qss, document_css
 
 
@@ -64,7 +68,8 @@ class ThemeConfigTests(TestCase):
         self.assertEqual(DEFAULT_CONFIG["ai_context_history_chapters"], 5)
         config = {"ai_context_history_chapters": 99}
         _normalize_config(config)
-        self.assertEqual(config["ai_context_history_chapters"], 10)
+        self.assertEqual(AI_CONTEXT_HISTORY_CHAPTERS_MAX, 20)
+        self.assertEqual(config["ai_context_history_chapters"], 20)
 
         config = {"ai_context_history_chapters": -3}
         _normalize_config(config)

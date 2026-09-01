@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from core.config import DEFAULT_CONFIG
+from core.config import AI_CONTEXT_HISTORY_CHAPTERS_MAX, DEFAULT_CONFIG
 from core.ai_protocol import consistency_issue_counts, format_consistency_report
 from core.export import render_manuscript
 from core.project import NovelProject, chapter_number_from_id
@@ -917,11 +917,14 @@ class SettingsPage(QWidget):
         self.expand_target_chars.setSingleStep(100)
         self.expand_target_chars.setSuffix(" 字")
         self.ai_context_history_chapters = QSpinBox()
-        self.ai_context_history_chapters.setRange(0, 10)
+        self.ai_context_history_chapters.setRange(
+            0, AI_CONTEXT_HISTORY_CHAPTERS_MAX
+        )
         self.ai_context_history_chapters.setSingleStep(1)
         self.ai_context_history_chapters.setSuffix(" 章")
         self.ai_context_history_chapters.setToolTip(
-            "仅控制携带的前文章节摘要数量；当前章节内容和本章规划按任务规则单独处理。"
+            "仅控制尝试携带的前文章节摘要数量；当前章节内容和本章规划按任务规则单独处理。"
+            "上下文空间不足时会优先保留最近章节的摘要。"
         )
         writing_form.addRow("自动保存", self.auto_save)
         writing_form.addRow("保存间隔", self.auto_save_interval)
