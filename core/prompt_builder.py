@@ -3,18 +3,22 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 from .context_budget import (
     AIContext,
     CONTINUATION_SUMMARY_COUNT,
     DEFAULT_PROMPT_BUDGET,
     EXPANSION_SUMMARY_COUNT,
-    allocate,
+    DROPPED_PLACEHOLDER,
+    TAIL_MARK,
+    allocate_with_report,
     build_ai_context,
     build_task_context,
     gather_sections,
     render_selected_foreshadowing,
 )
+from .context_report import PromptBundle, PromptContextReport, SectionUsage
 from .project import NovelProject, chapter_number_from_id
 from .text_anchor import render_anchor_context
 
@@ -45,7 +49,7 @@ def build_expansion_prompt(
     selected_power: list[str] | tuple[str, ...] | None = None,
     context: AIContext | None = None,
     prompt_budget: int = DEFAULT_PROMPT_BUDGET,
-) -> tuple[str, str]:
+) -> PromptBundle:
     """Build a compact outline-to-chapter expansion task.
 
     Unlike continuation, this task deliberately excludes the current chapter
@@ -156,7 +160,16 @@ def build_expansion_prompt(
 <NOVALIST_TASK_DONE>扩写任务已完成</NOVALIST_TASK_DONE>
 """.strip()
 
-    return _finalize(system_prompt, render, sections, prompt_budget)
+    return _finalize(
+        system_prompt,
+        render,
+        sections,
+        prompt_budget,
+        task_kind="chapter_expansion",
+        chapter_id=chapter_id,
+        history_requested=summary_count,
+        history_available=_history_available(context, chapter_id),
+    )
 
 
 def build_expansion_retry_prompt(
@@ -169,9 +182,9 @@ def build_expansion_retry_prompt(
     selected_power: list[str] | tuple[str, ...] | None = None,
     context: AIContext | None = None,
     prompt_budget: int = DEFAULT_PROMPT_BUDGET,
-) -> tuple[str, str]:
+) -> PromptBundle:
     """Build a correction prompt when headless returns a workspace preamble."""
-    _system_prompt, user_prompt = build_expansion_prompt(
+    base = build_expansion_prompt(
         project,
         chapter_id,
         target_chars,
@@ -181,6 +194,7 @@ def build_expansion_retry_prompt(
         context=context,
         prompt_budget=prompt_budget,
     )
+    user_prompt = base.user_prompt
     retry_system = f"""
 {COMMON_RULES}
 
@@ -197,14 +211,14 @@ def build_expansion_retry_prompt(
 
 {user_prompt}
 """.strip()
-    return retry_system, retry_user
+    return _rebundle(base, retry_system, retry_user, "chapter_expansion_retry")
 
 
 def build_foreshadowing_review_prompt(
     chapter_id: str,
     novel_text: str,
     selected_foreshadowing: list[dict] | tuple[dict, ...],
-) -> tuple[str, str]:
+) -> PromptBundle:
     """Build a focused post-expansion review against the generated prose."""
     candidates = render_selected_foreshadowing(selected_foreshadowing)
     system_prompt = f"""
@@ -245,7 +259,30 @@ def build_foreshadowing_review_prompt(
   ]
 }}
 """.strip()
-    return system_prompt, user_prompt
+    return _direct_bundle(
+        system_prompt,
+        user_prompt,
+        task_kind="foreshadowing_review",
+        chapter_id=chapter_id,
+        sections=(
+            SectionUsage(
+                "selected_foreshadowing",
+                len(candidates),
+                len(candidates),
+                "full",
+                1,
+                "head",
+            ),
+            SectionUsage(
+                "generated_content",
+                len(str(novel_text or "").strip()),
+                len(str(novel_text or "").strip()),
+                "full",
+                0,
+                "head",
+            ),
+        ),
+    )
 
 
 def build_write_prompt(
@@ -256,7 +293,7 @@ def build_write_prompt(
     summary_count: int = CONTINUATION_SUMMARY_COUNT,
     context: AIContext | None = None,
     prompt_budget: int = DEFAULT_PROMPT_BUDGET,
-) -> tuple[str, str]:
+) -> PromptBundle:
     summary_count = max(0, int(summary_count))
     context = context or build_ai_context(project, chapter_id)
     chapter = context.chapter
@@ -345,7 +382,16 @@ def build_write_prompt(
 <NOVALIST_TASK_DONE>续写任务已完成</NOVALIST_TASK_DONE>
 """.strip()
 
-    return _finalize(system_prompt, render, sections, prompt_budget)
+    return _finalize(
+        system_prompt,
+        render,
+        sections,
+        prompt_budget,
+        task_kind="continuation_current_chapter",
+        chapter_id=chapter_id,
+        history_requested=summary_count,
+        history_available=_history_available(context, chapter_id),
+    )
 
 
 def build_write_retry_prompt(
@@ -356,9 +402,9 @@ def build_write_retry_prompt(
     summary_count: int = CONTINUATION_SUMMARY_COUNT,
     context: AIContext | None = None,
     prompt_budget: int = DEFAULT_PROMPT_BUDGET,
-) -> tuple[str, str]:
+) -> PromptBundle:
     """Build an explicit retry after an Agent-style response."""
-    system_prompt, user_prompt = build_write_prompt(
+    base = build_write_prompt(
         project,
         chapter_id,
         target_chars,
@@ -366,6 +412,7 @@ def build_write_retry_prompt(
         context=context,
         prompt_budget=prompt_budget,
     )
+    user_prompt = base.user_prompt
     retry_system = f"""
 {COMMON_RULES}
 
@@ -382,7 +429,7 @@ def build_write_retry_prompt(
 
 {user_prompt}
 """.strip()
-    return retry_system, retry_user
+    return _rebundle(base, retry_system, retry_user, "continuation_retry")
 
 
 def build_summary_prompt(
@@ -391,7 +438,7 @@ def build_summary_prompt(
     *,
     context: AIContext | None = None,
     prompt_budget: int = DEFAULT_PROMPT_BUDGET,
-) -> tuple[str, str]:
+) -> PromptBundle:
     context = context or build_ai_context(project, chapter_id)
     chapter = context.chapter
     sections = gather_sections(
@@ -443,7 +490,14 @@ def build_summary_prompt(
 }}
 """.strip()
 
-    return _finalize(system_prompt, render, sections, prompt_budget)
+    return _finalize(
+        system_prompt,
+        render,
+        sections,
+        prompt_budget,
+        task_kind="chapter_summary",
+        chapter_id=chapter_id,
+    )
 
 
 def build_state_update_prompt(
@@ -452,7 +506,7 @@ def build_state_update_prompt(
     *,
     context: AIContext | None = None,
     prompt_budget: int = DEFAULT_PROMPT_BUDGET,
-) -> tuple[str, str]:
+) -> PromptBundle:
     context = context or build_ai_context(project, chapter_id)
     chapter = context.chapter
     old_state = context.story_state
@@ -525,7 +579,14 @@ def build_state_update_prompt(
 }}
 """.strip()
 
-    return _finalize(system_prompt, render, sections, prompt_budget)
+    return _finalize(
+        system_prompt,
+        render,
+        sections,
+        prompt_budget,
+        task_kind="story_state_update",
+        chapter_id=chapter_id,
+    )
 
 
 def build_check_prompt(
@@ -534,7 +595,7 @@ def build_check_prompt(
     *,
     context: AIContext | None = None,
     prompt_budget: int = DEFAULT_PROMPT_BUDGET,
-) -> tuple[str, str]:
+) -> PromptBundle:
     context = context or build_ai_context(project, chapter_id)
     chapter = context.chapter
     sections = gather_sections(
@@ -623,7 +684,16 @@ severity 只能使用：high、medium、low。
 }}
 """.strip()
 
-    return _finalize(system_prompt, render, sections, prompt_budget)
+    return _finalize(
+        system_prompt,
+        render,
+        sections,
+        prompt_budget,
+        task_kind="consistency_check",
+        chapter_id=chapter_id,
+        history_requested=EXPANSION_SUMMARY_COUNT,
+        history_available=_history_available(context, chapter_id),
+    )
 
 
 def build_consistency_repair_prompt(
@@ -633,7 +703,7 @@ def build_consistency_repair_prompt(
     *,
     context: AIContext | None = None,
     prompt_budget: int = DEFAULT_PROMPT_BUDGET,
-) -> tuple[str, str]:
+) -> PromptBundle:
     """Build a constrained one-range repair proposal for one report issue."""
     context = context or build_ai_context(project, chapter_id)
     chapter = context.chapter
@@ -719,7 +789,16 @@ def build_consistency_repair_prompt(
 }}
 """.strip()
 
-    return _finalize(system_prompt, render, sections, prompt_budget)
+    return _finalize(
+        system_prompt,
+        render,
+        sections,
+        prompt_budget,
+        task_kind="consistency_repair",
+        chapter_id=chapter_id,
+        history_requested=EXPANSION_SUMMARY_COUNT,
+        history_available=_history_available(context, chapter_id),
+    )
 
 
 def _finalize(
@@ -727,12 +806,108 @@ def _finalize(
     render,
     sections,
     prompt_budget: int = DEFAULT_PROMPT_BUDGET,
-) -> tuple[str, str]:
+    *,
+    task_kind: str = "unknown",
+    chapter_id: str = "",
+    history_requested: int | None = None,
+    history_available: int | None = None,
+) -> PromptBundle:
     """Budget sections against instruction overhead, then render."""
     overhead = len(system_prompt) + len(render({}))
     budget = max(1000, int(prompt_budget))
-    ctx = allocate(sections, max(1000, budget - overhead))
-    return system_prompt, render(ctx)
+    context_budget = max(1000, budget - overhead)
+    allocation = allocate_with_report(sections, context_budget)
+    user_prompt = render(allocation.values)
+    included = None
+    if history_requested is not None:
+        possible = min(max(0, history_requested), max(0, history_available or 0))
+        included = _included_history_count(allocation.values.get("summaries", ""), possible)
+    report = PromptContextReport(
+        schema_version=1,
+        task_kind=task_kind,
+        chapter_id=chapter_id,
+        prompt_budget=budget,
+        context_budget=context_budget,
+        overhead_chars=overhead,
+        system_prompt_chars=len(system_prompt),
+        user_prompt_chars=len(user_prompt),
+        total_prompt_chars=len(system_prompt) + len(user_prompt),
+        sections=allocation.sections,
+        history_requested=history_requested,
+        history_available=history_available,
+        history_included=included,
+    )
+    return PromptBundle(system_prompt, user_prompt, report)
+
+
+def _direct_bundle(
+    system_prompt: str,
+    user_prompt: str,
+    *,
+    task_kind: str,
+    chapter_id: str,
+    sections: tuple[SectionUsage, ...] = (),
+) -> PromptBundle:
+    total = len(system_prompt) + len(user_prompt)
+    report = PromptContextReport(
+        schema_version=1,
+        task_kind=task_kind,
+        chapter_id=chapter_id,
+        prompt_budget=total,
+        context_budget=sum(item.sent_chars for item in sections),
+        overhead_chars=max(0, total - sum(item.sent_chars for item in sections)),
+        system_prompt_chars=len(system_prompt),
+        user_prompt_chars=len(user_prompt),
+        total_prompt_chars=total,
+        sections=sections,
+    )
+    return PromptBundle(system_prompt, user_prompt, report)
+
+
+def _rebundle(
+    base: PromptBundle,
+    system_prompt: str,
+    user_prompt: str,
+    task_kind: str,
+) -> PromptBundle:
+    report = replace(
+        base.report,
+        task_kind=task_kind,
+        overhead_chars=max(
+            0,
+            base.report.overhead_chars
+            + len(system_prompt)
+            - len(base.system_prompt)
+            + len(user_prompt)
+            - len(base.user_prompt),
+        ),
+        system_prompt_chars=len(system_prompt),
+        user_prompt_chars=len(user_prompt),
+        total_prompt_chars=len(system_prompt) + len(user_prompt),
+    )
+    return PromptBundle(system_prompt, user_prompt, report)
+
+
+def _history_available(context: AIContext, chapter_id: str) -> int:
+    current = chapter_number_from_id(chapter_id)
+    count = 0
+    for key, value in (context.chapter_summaries or {}).items():
+        if key == chapter_id or not str(value).strip():
+            continue
+        number = chapter_number_from_id(key)
+        if current is not None and number is not None and number > current:
+            continue
+        count += 1
+    return count
+
+
+def _included_history_count(rendered: str, possible: int) -> int:
+    if not rendered or rendered == DROPPED_PLACEHOLDER or possible <= 0:
+        return 0
+    headers = sum(1 for line in rendered.splitlines() if line.startswith("### "))
+    if TAIL_MARK.strip() in rendered and headers < possible:
+        headers += 1
+    return min(possible, max(1, headers))
 
 
 def _section(ctx: dict[str, str], key: str, fallback: str = "（暂无）") -> str:

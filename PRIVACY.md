@@ -28,6 +28,13 @@ task file after success, failure, timeout, or cancellation, and removes the
 private workspace when the AI client is released. The file is never written
 inside the user's novel project.
 
+After each AI invocation, Novalist may display an in-memory context report in
+the local interface. This report contains task and chapter identifiers,
+character counts, allocation states, transport mode, invocation outcome, and
+temporary-file cleanup status. It does not retain prompt text, chapter prose,
+canon text, credentials, or absolute file paths. Copying the diagnostic report
+copies only these redacted metrics; Novalist does not upload the report itself.
+
 Do not submit personal data, confidential information, or copyrighted material
 that you are not authorized to process. AI output may be inaccurate or unsuitable
 and must be reviewed before use or publication.

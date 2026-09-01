@@ -14,6 +14,7 @@ import json
 import hashlib
 from dataclasses import dataclass
 
+from .context_report import SectionUsage
 from .models import Chapter, RelatedCanon
 from .project import NovelProject, chapter_number_from_id
 from .project_data import ProjectDataStore
@@ -68,6 +69,15 @@ class Section:
     cap: int
     keep: str  # "head" | "tail"
     priority: int
+
+
+@dataclass(frozen=True)
+class AllocationResult:
+    """Allocated section text plus redacted per-section usage metrics."""
+
+    values: dict[str, str]
+    sections: tuple[SectionUsage, ...]
+    budget: int
 
 
 @dataclass(frozen=True)
@@ -190,24 +200,47 @@ def allocate(sections: list[Section], budget: int) -> dict[str, str]:
     to ``DROPPED_PLACEHOLDER`` so the model sees "omitted for length" instead
     of concluding the data does not exist.
     """
+    return allocate_with_report(sections, budget).values
+
+
+def allocate_with_report(sections: list[Section], budget: int) -> AllocationResult:
+    """Allocate sections and record counts without retaining their text."""
     result: dict[str, str] = {}
-    remaining = max(0, int(budget))
+    usage: list[SectionUsage] = []
+    normalized_budget = max(0, int(budget))
+    remaining = normalized_budget
     for section in sorted(sections, key=lambda item: item.priority):
         text = str(section.text).strip()
         if not text:
             continue
         capped_len = min(len(text), section.cap)
         if capped_len <= remaining:
-            result[section.key] = (
+            rendered = (
                 text if len(text) <= section.cap else _trim(text, section.cap, section.keep)
             )
+            result[section.key] = rendered
+            status = "full" if len(text) <= section.cap else "capped"
             remaining -= capped_len
         elif remaining >= MIN_SECTION_CHARS:
-            result[section.key] = _trim(text, remaining, section.keep)
+            rendered = _trim(text, remaining, section.keep)
+            result[section.key] = rendered
+            status = "trimmed"
             remaining = 0
         else:
-            result[section.key] = DROPPED_PLACEHOLDER
-    return result
+            rendered = DROPPED_PLACEHOLDER
+            result[section.key] = rendered
+            status = "dropped"
+        usage.append(
+            SectionUsage(
+                key=section.key,
+                source_chars=len(text),
+                sent_chars=0 if status == "dropped" else len(rendered),
+                status=status,
+                priority=section.priority,
+                keep=section.keep,
+            )
+        )
+    return AllocationResult(result, tuple(usage), normalized_budget)
 
 
 def gather_sections(

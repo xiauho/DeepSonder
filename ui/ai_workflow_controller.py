@@ -76,6 +76,9 @@ class AIWorkflowController(QObject):
         ] = {}
 
         ai_controller.succeeded.connect(self._on_task_succeeded)
+        report_signal = getattr(ai_engine_controller, "context_reported", None)
+        if report_signal is not None and hasattr(report_signal, "connect"):
+            report_signal.connect(self._on_context_reported)
         document_controller.document_saved.connect(self._on_document_saved)
         project_session.project_changed.connect(self._on_project_changed)
 
@@ -407,17 +410,26 @@ class AIWorkflowController(QObject):
         if project is None:
             return False
         self._emit_output(message)
-        if self.ai_controller.start(
+        token = self.ai_controller.start(
             kind,
             project,
             chapter_id,
             self.editor.text_edit.toPlainText() if editor_text is None else editor_text,
             worker,
             task_context=task_context,
-        ) is None:
+        )
+        if token is None:
             QMessageBox.information(self.parent, "AI 正在工作", "当前任务完成后再试一次。")
             return False
+        begin_report = getattr(self.inspector, "begin_context_report", None)
+        if callable(begin_report):
+            begin_report(kind, chapter_id)
         return True
+
+    def _on_context_reported(self, report) -> None:
+        show_report = getattr(self.inspector, "show_context_report", None)
+        if callable(show_report):
+            show_report(report)
 
     def _on_task_succeeded(self, token, result) -> None:
         try:

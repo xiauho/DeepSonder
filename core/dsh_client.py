@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from .context_budget import ARGV_PROMPT_BUDGET
+from .context_report import PromptContextReport, ReportCallback
 from .task_controller import AITaskCancelled
 from .json_utils import JSONExtractionError, extract_json
 from .storage import atomic_write_text
@@ -56,6 +57,7 @@ class DSHClient:
         working_directory: str | Path | None = None,
         prompt_transport: str = "argv",
         file_prompt_budget: int = 48_000,
+        report_callback: ReportCallback | None = None,
     ):
         self.dsh_command = dsh_command
         self.launcher_args = launcher_args or []
@@ -74,8 +76,10 @@ class DSHClient:
         except (TypeError, ValueError):
             normalized_budget = 48_000
         self.file_prompt_budget = max(ARGV_PROMPT_BUDGET, normalized_budget)
+        self.report_callback = report_callback
         self._file_transport_supported: bool | None = None
         self._isolated_workspace: Path | None = None
+        self._last_command_chars = 0
 
     def set_working_directory(self, directory: str | Path | None) -> None:
         self.working_directory = Path(directory) if directory else None
@@ -120,6 +124,7 @@ class DSHClient:
         *,
         timeout_override: int | None = None,
         cancel_event: threading.Event | None = None,
+        context_report: PromptContextReport | None = None,
     ) -> str:
         """Run dsh headless using argv or a verified local task-file bridge."""
         combined = self._combine_prompts(system_prompt, user_prompt)
@@ -128,30 +133,58 @@ class DSHClient:
             int(timeout_override if timeout_override is not None else self.timeout),
         )
         task_file: Path | None = None
+        transport = "argv"
+        fallback_used = False
+        outcome = "failed"
+        self._last_command_chars = 0
         try:
             transmitted_prompt = combined
-            if self._should_use_file_transport(combined, session_id):
+            wants_file = self._should_use_file_transport(combined, session_id)
+            if wants_file:
                 if not self._ensure_file_transport_support(
                     timeout=min(effective_timeout, 30),
                     cancel_event=cancel_event,
                 ):
                     if self.prompt_transport == "file":
+                        transport = "file_unavailable"
                         raise RuntimeError(
                             "当前 DeepSeek Harness 无法读取 Novalist 的临时任务文件。"
                             "请将 dsh_prompt_transport 改为 argv，或检查 headless 的文件读取能力。"
                         )
+                    fallback_used = True
                 else:
                     task_file = self._write_task_file(combined)
                     transmitted_prompt = self._file_loader_prompt(task_file.name)
-            return self._execute_prompt(
+                    transport = "file"
+            self._last_command_chars = 0
+            result = self._execute_prompt(
                 transmitted_prompt,
                 session_id=session_id,
                 timeout=effective_timeout,
                 cancel_event=cancel_event,
                 submitted_prompt_length=len(combined),
             )
+            outcome = "success"
+            return result
+        except AITaskCancelled:
+            outcome = "cancelled"
+            raise
+        except Exception as exc:
+            outcome = "timeout" if "超时" in str(exc) else "failed"
+            raise
         finally:
             self._remove_task_file(task_file)
+            task_file_cleaned = task_file is None or not task_file.exists()
+            if context_report is not None:
+                completed_report = context_report.complete_invocation(
+                    transport=transport,
+                    submitted_prompt_chars=len(combined),
+                    command_chars=self._last_command_chars,
+                    fallback_used=fallback_used,
+                    outcome=outcome,
+                    task_file_cleaned=task_file_cleaned,
+                )
+                self._publish_context_report(completed_report)
 
     def resolve_prompt_budget(
         self,
@@ -190,6 +223,7 @@ class DSHClient:
             cmd += ["--resume", session_id]
         cmd.append(prompt)
         cmd = self._prepare_command_for_prompt(cmd, command)
+        self._last_command_chars = len(subprocess.list2cmdline(cmd))
 
         if cancel_event is not None:
             return self._generate_cancellable(
@@ -609,6 +643,7 @@ class DSHClient:
         *,
         timeout_override: int | None = None,
         cancel_event: threading.Event | None = None,
+        context_report: PromptContextReport | None = None,
     ) -> Any:
         """Ask dsh for JSON and parse it safely."""
         text = self.generate(
@@ -617,8 +652,19 @@ class DSHClient:
             session_id,
             timeout_override=timeout_override,
             cancel_event=cancel_event,
+            context_report=context_report,
         )
         return self._extract_json(text)
+
+    def _publish_context_report(self, report: PromptContextReport) -> None:
+        """Publish diagnostics without allowing display failures to break AI work."""
+        callback = self.report_callback
+        if callback is None:
+            return
+        try:
+            callback(report)
+        except Exception:
+            pass
 
     def _combine_prompts(self, system_prompt: str, user_prompt: str) -> str:
         system_prompt = (system_prompt or "").strip()

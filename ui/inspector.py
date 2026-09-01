@@ -4,8 +4,9 @@ import html
 import json
 import re
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QUrl, Signal
 from PySide6.QtWidgets import (
+    QApplication,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -16,6 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from core.context_report import PromptContextReport
 from core.project import NovelProject
 from core.project_data import ProjectDataStore
 from ui.icons import set_button_icon
@@ -30,6 +32,115 @@ def rank_character_names(character_names: list[str], chapter_text: str) -> list[
     """
     names = [name.strip() for name in character_names if name.strip()]
     return sorted(names, key=lambda name: -chapter_text.count(name))
+
+
+SECTION_LABELS = {
+    "outline": "本章大纲",
+    "plot_brief": "剧情简写",
+    "style": "写作风格",
+    "content": "章节正文",
+    "generated_content": "生成正文复核",
+    "selected_foreshadowing": "重点伏笔",
+    "core_power": "常驻核心规则",
+    "core_systems": "核心体系",
+    "selected_power": "重点体系",
+    "state": "故事状态",
+    "summaries": "历史摘要",
+    "characters": "相关角色",
+    "future_plan": "后续规划",
+    "main_arc": "主线大纲",
+    "timeline": "时间线",
+    "world": "世界观",
+    "power": "其他体系",
+}
+
+TASK_LABELS = {
+    "expand": "章节扩写",
+    "check": "一致性检查",
+    "repair": "一致性修复",
+    "memory": "同步上下文",
+    "chapter_expansion": "章节扩写",
+    "chapter_expansion_retry": "扩写纠偏重试",
+    "continuation_current_chapter": "章节续写",
+    "continuation_retry": "续写纠偏重试",
+    "foreshadowing_review": "伏笔复核",
+    "chapter_summary": "章节摘要",
+    "story_state_update": "故事状态更新",
+    "consistency_check": "一致性检查",
+    "consistency_repair": "一致性修复",
+}
+
+STATUS_LABELS = {
+    "full": "完整",
+    "capped": "达到单项上限",
+    "trimmed": "受总预算截断",
+    "dropped": "已省略",
+}
+
+OUTCOME_LABELS = {
+    "pending": "等待调用",
+    "success": "调用成功",
+    "failed": "调用失败",
+    "timeout": "调用超时",
+    "cancelled": "已取消",
+}
+
+
+def render_context_reports(reports: list[PromptContextReport]) -> str:
+    """Render redacted metrics only; prompt text is never accepted here."""
+    if not reports:
+        return "<h2>正在准备上下文</h2><p class='muted'>完成提示词组装后将在这里显示统计。</p>"
+    blocks = [
+        "<div class='eyebrow'>AI 上下文报告</div>",
+        "<p><a href='novalist://copy-context-report'>复制脱敏诊断信息</a></p>",
+    ]
+    for index, report in enumerate(reports, start=1):
+        health_label = {
+            "complete": "上下文充足",
+            "partial": "部分内容已裁剪",
+            "critical": "关键内容空间不足",
+        }[report.health]
+        transport_label = {
+            "argv": "命令行传输",
+            "file": "临时文件传输",
+            "file_unavailable": "文件传输不可用",
+            "pending": "等待传输",
+        }.get(report.transport, report.transport)
+        task_label = TASK_LABELS.get(report.task_kind, report.task_kind)
+        outcome_label = OUTCOME_LABELS.get(report.outcome, report.outcome)
+        blocks.append(
+            f"<h2>{index}. {html.escape(task_label)}</h2>"
+            f"<p><b>{health_label}</b> · {html.escape(transport_label)}"
+            f" · {html.escape(outcome_label)}</p>"
+            f"<div class='metric'><b>{report.total_prompt_chars:,}</b>"
+            f"<span>/ {report.prompt_budget:,} 字符</span></div>"
+            f"<p class='muted'>实际提交 {report.submitted_prompt_chars:,} 字符"
+            f" · 启动命令 {report.command_chars:,} 字符</p>"
+        )
+        if report.fallback_used:
+            blocks.append("<p class='muted'>文件通道不可用，本次已自动降级。</p>")
+        if report.history_requested is not None:
+            blocks.append(
+                "<p>历史摘要：请求 "
+                f"{report.history_requested} 章 · 可用 {report.history_available or 0} 章"
+                f" · 纳入 {report.history_included or 0} 章</p>"
+            )
+        rows = []
+        for item in report.sections:
+            label = SECTION_LABELS.get(item.key, item.key)
+            status = STATUS_LABELS.get(item.status, item.status)
+            keep = "保留结尾" if item.keep == "tail" else "保留开头"
+            rows.append(
+                "<li>"
+                f"<b>{html.escape(label)}</b>：{item.sent_chars:,} / {item.source_chars:,} 字符"
+                f" · 优先级 {item.priority + 1} · {html.escape(status)}"
+                + (f" · {keep}" if item.status in {"capped", "trimmed"} else "")
+                + "</li>"
+            )
+        blocks.append("<ul>" + "".join(rows) + "</ul>")
+        if not report.task_file_cleaned:
+            blocks.append("<p><b>警告：</b>临时任务文件未能确认清理。</p>")
+    return "".join(blocks)
 
 
 class Inspector(QWidget):
@@ -75,6 +186,8 @@ class Inspector(QWidget):
             self.memory_browser: "",
             self.report_browser: "",
         }
+        self._context_reports: list[PromptContextReport] = []
+        self.context_browser.anchorClicked.connect(self._on_context_link)
         self.tabs.addTab(self.context_browser, "上下文")
         self.tabs.addTab(self.memory_browser, "记忆")
         self.tabs.addTab(self.report_browser, "报告")
@@ -110,6 +223,39 @@ class Inspector(QWidget):
             self.show_chapter(project, chapter_id)
         else:
             self.show_general(project)
+
+    def begin_context_report(self, task_kind: str, chapter_id: str) -> None:
+        """Start a fresh in-memory report group for one user-visible AI task."""
+        self._context_reports = []
+        title = TASK_LABELS.get(task_kind, task_kind)
+        self._set_browser_html(
+            self.context_browser,
+            f"<div class='eyebrow'>AI 上下文报告</div>"
+            f"<h2>{html.escape(title)}</h2>"
+            f"<p class='muted'>{html.escape(chapter_id)} · 正在准备上下文…</p>",
+        )
+        self.tabs.setCurrentWidget(self.context_browser)
+
+    def show_context_report(self, report: PromptContextReport) -> None:
+        if not isinstance(report, PromptContextReport):
+            return
+        self._context_reports.append(report)
+        self._set_browser_html(
+            self.context_browser,
+            render_context_reports(self._context_reports),
+        )
+        self.tabs.setCurrentWidget(self.context_browser)
+
+    def context_report_payload(self) -> str:
+        return json.dumps(
+            [report.to_dict() for report in self._context_reports],
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    def _on_context_link(self, url: QUrl) -> None:
+        if url.toString() == "novalist://copy-context-report":
+            QApplication.clipboard().setText(self.context_report_payload())
 
     def show_general(self, project: NovelProject) -> None:
         store = ProjectDataStore(project)

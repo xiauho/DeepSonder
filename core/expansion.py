@@ -48,7 +48,7 @@ def run_expansion(
         include_timeline=True,
         selected_power=selected_power,
     )
-    system_prompt, user_prompt = build_expansion_prompt(
+    prompt = build_expansion_prompt(
         project,
         chapter_id,
         target_chars,
@@ -59,7 +59,12 @@ def run_expansion(
         prompt_budget=prompt_budget,
     )
     generate_options = {"cancel_event": cancel_event} if cancel_event is not None else {}
-    raw = dsh.generate(system_prompt, user_prompt, **generate_options)
+    raw = dsh.generate(
+        prompt.system_prompt,
+        prompt.user_prompt,
+        context_report=prompt.report,
+        **generate_options,
+    )
     first_raw: str | None = None
     try:
         parsed = ai_protocol.parse_expansion(
@@ -75,7 +80,7 @@ def run_expansion(
         )
     except ai_protocol.AIProtocolError:
         first_raw = raw
-        retry_system, retry_user = build_expansion_retry_prompt(
+        retry_prompt = build_expansion_retry_prompt(
             project,
             chapter_id,
             target_chars=target_chars,
@@ -87,7 +92,12 @@ def run_expansion(
         )
         # The retry regenerates the full chapter, so it keeps the same timeout
         # budget as the first attempt instead of a shortened one.
-        raw = dsh.generate(retry_system, retry_user, **generate_options)
+        raw = dsh.generate(
+            retry_prompt.system_prompt,
+            retry_prompt.user_prompt,
+            context_report=retry_prompt.report,
+            **generate_options,
+        )
         try:
             parsed = ai_protocol.parse_expansion(
                 raw,
@@ -123,13 +133,18 @@ def _attach_foreshadowing_review(
     generate_options: dict,
 ) -> str:
     """Append a normalized advisory block; review failure keeps prose usable."""
-    system_prompt, user_prompt = build_foreshadowing_review_prompt(
+    prompt = build_foreshadowing_review_prompt(
         chapter_id,
         parsed.text,
         selected_foreshadowing,
     )
     try:
-        review = dsh.generate_json(system_prompt, user_prompt, **generate_options)
+        review = dsh.generate_json(
+            prompt.system_prompt,
+            prompt.user_prompt,
+            context_report=prompt.report,
+            **generate_options,
+        )
     except AITaskCancelled:
         raise
     except Exception:

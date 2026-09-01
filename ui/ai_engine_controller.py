@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from PySide6.QtCore import QObject
+from PySide6.QtCore import QObject, Signal
 
 from core.config import normalize_config
 from core.dsh_client import DSHClient
@@ -12,6 +12,8 @@ from core.dsh_client import DSHClient
 
 class AIEngineController(QObject):
     """Create, rotate and release DSH clients independently of AI tasks."""
+
+    context_reported = Signal(object)
 
     def __init__(
         self,
@@ -47,6 +49,7 @@ class AIEngineController(QObject):
             extra_args=normalized["dsh_extra_args"],
             prompt_transport=normalized["dsh_prompt_transport"],
             file_prompt_budget=normalized["dsh_file_prompt_budget"],
+            report_callback=self.context_reported.emit,
         )
         client.use_isolated_workspace()
         self._client = client

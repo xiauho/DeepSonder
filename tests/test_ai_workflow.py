@@ -15,16 +15,19 @@ class FakeDSH:
         self.state = state
         self.generate_calls: list[tuple[str, str]] = []
         self.json_calls: list[tuple[str, str]] = []
+        self.context_reports = []
 
     def resolve_prompt_budget(self, **_kwargs):
         return 24_000
 
     def generate(self, system_prompt: str, user_prompt: str, *args, **kwargs) -> str:
         self.generate_calls.append((system_prompt, user_prompt))
+        self.context_reports.append(kwargs.get("context_report"))
         return self.summary
 
     def generate_json(self, system_prompt: str, user_prompt: str, *args, **kwargs) -> dict:
         self.json_calls.append((system_prompt, user_prompt))
+        self.context_reports.append(kwargs.get("context_report"))
         return self.state
 
 
@@ -65,6 +68,10 @@ class AIWorkflowTests(TestCase):
             self.assertEqual(build_context.call_count, 1)
             self.assertIn("chapter_summary", dsh.generate_calls[0][1])
             self.assertIn("story_state_update", dsh.json_calls[0][1])
+            self.assertEqual(
+                [report.task_kind for report in dsh.context_reports],
+                ["chapter_summary", "story_state_update"],
+            )
 
     def test_consistency_repair_uses_json_protocol(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

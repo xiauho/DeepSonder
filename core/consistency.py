@@ -18,14 +18,19 @@ def run_consistency_check(
 ) -> str:
     prompt_budget = dsh.resolve_prompt_budget(cancel_event=cancel_event)
     context = build_ai_context(project, chapter_id)
-    system_prompt, user_prompt = build_check_prompt(
+    prompt = build_check_prompt(
         project,
         chapter_id,
         context=context,
         prompt_budget=prompt_budget,
     )
     generate_options = {"cancel_event": cancel_event} if cancel_event is not None else {}
-    return dsh.generate(system_prompt, user_prompt, **generate_options)
+    return dsh.generate(
+        prompt.system_prompt,
+        prompt.user_prompt,
+        context_report=prompt.report,
+        **generate_options,
+    )
 
 
 def run_consistency_repair(
@@ -37,7 +42,7 @@ def run_consistency_repair(
 ):
     prompt_budget = dsh.resolve_prompt_budget(cancel_event=cancel_event)
     context = build_ai_context(project, chapter_id)
-    system_prompt, user_prompt = build_consistency_repair_prompt(
+    prompt = build_consistency_repair_prompt(
         project,
         chapter_id,
         issue,
@@ -45,4 +50,9 @@ def run_consistency_repair(
         prompt_budget=prompt_budget,
     )
     generate_options = {"cancel_event": cancel_event} if cancel_event is not None else {}
-    return dsh.generate_json(system_prompt, user_prompt, **generate_options)
+    return dsh.generate_json(
+        prompt.system_prompt,
+        prompt.user_prompt,
+        context_report=prompt.report,
+        **generate_options,
+    )

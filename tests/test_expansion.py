@@ -16,12 +16,21 @@ class FakeDSH:
     def resolve_prompt_budget(self, **_kwargs):
         return 24_000
 
-    def generate(self, system_prompt, user_prompt, session_id=None, *, timeout_override=None):
+    def generate(
+        self,
+        system_prompt,
+        user_prompt,
+        session_id=None,
+        *,
+        timeout_override=None,
+        context_report=None,
+    ):
         self.calls.append(
             {
                 "system": system_prompt,
                 "user": user_prompt,
                 "timeout_override": timeout_override,
+                "context_report": context_report,
             }
         )
         if not self.outputs:
