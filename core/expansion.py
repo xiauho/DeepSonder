@@ -26,6 +26,7 @@ def run_expansion(
     history_chapters: int = EXPANSION_SUMMARY_COUNT,
     selected_foreshadowing: list[dict] | tuple[dict, ...] | None = None,
     selected_power: list[str] | tuple[str, ...] | None = None,
+    selection_mode: str = "safe",
     cancel_event: threading.Event | None = None,
 ) -> tuple[str, str | None]:
     """Generate a chapter draft, retrying once when the output breaks protocol.
@@ -49,6 +50,12 @@ def run_expansion(
         include_timeline=True,
         selected_power=selected_power,
         profile=EXPANSION_CONTEXT_PROFILE,
+        relevance_query=json.dumps(
+            list(selected_foreshadowing or ()),
+            ensure_ascii=False,
+            default=str,
+        ),
+        selection_mode=selection_mode,
     )
     prompt = build_expansion_prompt(
         project,

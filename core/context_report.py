@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, replace
 from typing import Callable, Iterator
 
+from .context_selection import CanonSelectionStat
+
 
 @dataclass(frozen=True)
 class SectionUsage:
@@ -32,6 +34,7 @@ class PromptContextReport:
     user_prompt_chars: int
     total_prompt_chars: int
     sections: tuple[SectionUsage, ...] = ()
+    selections: tuple[CanonSelectionStat, ...] = ()
     history_requested: int | None = None
     history_available: int | None = None
     history_included: int | None = None
@@ -45,6 +48,13 @@ class PromptContextReport:
     @property
     def health(self) -> str:
         """Return a stable UI severity derived only from allocation states."""
+        if any(
+            item.required > 0
+            and item.prompt_included is not None
+            and item.prompt_included < item.required
+            for item in self.selections
+        ):
+            return "critical"
         if any(item.status == "dropped" and item.priority <= 2 for item in self.sections):
             return "critical"
         if any(item.status in {"capped", "trimmed", "dropped"} for item in self.sections):

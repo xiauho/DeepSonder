@@ -136,6 +136,8 @@ def build_ai_context(
     include_timeline: bool = True,
     selected_power: list[str] | tuple[str, ...] | None = None,
     profile: ContextProfile | None = None,
+    relevance_query: str | None = None,
+    selection_mode: str | None = None,
 ) -> AIContext:
     """Load prompt sources through one project data facade.
 
@@ -152,6 +154,8 @@ def build_ai_context(
         include_timeline=include_timeline,
         selected_power=selected_power,
         profile=profile,
+        relevance_query=relevance_query,
+        selection_mode=selection_mode,
     )
 
 
@@ -165,6 +169,8 @@ def build_task_context(
     include_timeline: bool = True,
     selected_power: list[str] | tuple[str, ...] | None = None,
     profile: ContextProfile | None = None,
+    relevance_query: str | None = None,
+    selection_mode: str | None = None,
 ) -> AIContext:
     """Build an AI context with an explicit canon loading profile."""
     profile = profile or LEGACY_CONTEXT_PROFILE
@@ -175,6 +181,7 @@ def build_task_context(
         include_timeline = profile.include_timeline
     store = ProjectDataStore(project)
     chapter = store.load_chapter(chapter_id)
+    story_state = store.load_story_state() if profile.include_story_state else {}
     character_query = None
     if character_scope == "planning":
         character_query = "\n".join(
@@ -182,6 +189,27 @@ def build_task_context(
         )
     elif character_scope == "none":
         character_query = ""
+    extra_relevance = str(relevance_query or "")
+    if profile.relevance_scope == "planning":
+        relevance_query = "\n".join(
+            part for part in (chapter.title, chapter.outline, chapter.plot_brief) if part
+        )
+    elif profile.relevance_scope == "chapter":
+        relevance_query = chapter.raw
+    elif profile.relevance_scope == "chapter_state":
+        relevance_query = chapter.raw + "\n" + json.dumps(
+            story_state,
+            ensure_ascii=False,
+            default=str,
+        )
+    else:
+        relevance_query = ""
+    if extra_relevance:
+        relevance_query = f"{relevance_query}\n{extra_relevance}".strip()
+        if character_query is not None:
+            character_query = f"{character_query}\n{extra_relevance}".strip()
+    if selection_mode is None:
+        selection_mode = "legacy_all" if profile is LEGACY_CONTEXT_PROFILE else "safe"
     core_systems = store.list_core_systems() if include_power else []
     selected_systems = tuple(core_systems) + tuple(selected_power or ())
     return AIContext(
@@ -196,8 +224,10 @@ def build_task_context(
             include_timeline=include_timeline,
             selected_power=selected_systems,
             core_power_paths=core_systems,
+            relevance_query=relevance_query,
+            selection_mode=selection_mode,
         ),
-        story_state=store.load_story_state() if profile.include_story_state else {},
+        story_state=story_state,
         chapter_summaries=(
             store.load_chapter_summaries() if profile.include_summaries else {}
         ),

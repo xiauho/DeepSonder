@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .context_selection import CanonSelectionStat
+
 
 @dataclass
 class Chapter:
@@ -31,6 +33,7 @@ class RelatedCanon:
     core_power: str = ""
     core_systems: str = ""
     selected_power: str = ""
+    selection: tuple[CanonSelectionStat, ...] = ()
 
     def to_block(self) -> str:
         parts = []

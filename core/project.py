@@ -25,6 +25,16 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from .context_selection import (
+    POWER_ENTRY_CHARS,
+    POWER_SELECTION_CHARS,
+    WORLD_ENTRY_CHARS,
+    WORLD_SELECTION_CHARS,
+    CanonSelectionStat,
+    normalize_selection_mode,
+    required_stat,
+    select_ranked_documents,
+)
 from .models import Chapter, RelatedCanon
 from .storage import atomic_write_text
 
@@ -465,6 +475,8 @@ class NovelProject:
         include_timeline: bool = True,
         selected_power: list[str | Path] | tuple[str | Path, ...] | None = None,
         core_power_paths: list[str | Path] | tuple[str | Path, ...] | None = None,
+        relevance_query: str | None = None,
+        selection_mode: str = "legacy_all",
     ) -> RelatedCanon:
         """Load canon relevant to one task without forcing every canon file in.
 
@@ -473,6 +485,7 @@ class NovelProject:
         and omit expensive low-signal sections such as the full world/power
         directories.
         """
+        selection_mode = normalize_selection_mode(selection_mode)
         cache_key = (
             str(chapter_id),
             character_query,
@@ -481,6 +494,8 @@ class NovelProject:
             bool(include_timeline),
             tuple(self._selected_power_keys(selected_power)),
             tuple(self._selected_power_keys(core_power_paths)),
+            str(relevance_query or ""),
+            selection_mode,
         )
         signature = self._related_canon_signature(
             chapter_id,
@@ -496,17 +511,42 @@ class NovelProject:
 
         chapter = self.load_chapter(chapter_id)
         haystack = character_query if character_query is not None else chapter.raw
+        relevance_query = str(relevance_query if relevance_query is not None else haystack)
+        selection_stats: list[CanonSelectionStat] = []
 
         characters_parts = []
-        for path in self.list_characters():
+        character_paths = self.list_characters()
+        for path in character_paths:
             name = path.stem
             if name and name in haystack:
                 characters_parts.append(f"### {name}\n{self.read_file(path).strip()}")
+        selection_stats.append(
+            CanonSelectionStat(
+                category="characters",
+                mode=selection_mode,
+                candidates=len(character_paths),
+                included=len(characters_parts),
+                matched=len(characters_parts),
+                reasons=(("name_match", len(characters_parts)),)
+                if characters_parts
+                else (),
+            )
+        )
 
-        world_parts = []
+        world = ""
         if include_world:
-            for path in self.list_world():
-                world_parts.append(self.read_file(path).strip())
+            ranked_world = select_ranked_documents(
+                self.list_world(),
+                query=relevance_query,
+                category="world",
+                mode=selection_mode,
+                reader=self.read_file,
+                total_chars=WORLD_SELECTION_CHARS,
+                entry_chars=WORLD_ENTRY_CHARS,
+                add_heading=selection_mode == "safe",
+            )
+            world = ranked_world.text
+            selection_stats.append(ranked_world.stat)
         core_power = ""
         core_system_parts = []
         selected_power_parts = []
@@ -529,6 +569,7 @@ class NovelProject:
                 selected_power_parts.append(
                     f"### {path.stem}\n{self.read_file(path).strip()}"
                 )
+            other_power_paths = []
             for path in self.list_power():
                 if (
                     path.resolve() == core_path.resolve()
@@ -536,21 +577,66 @@ class NovelProject:
                     or str(path.resolve()).casefold() in selected_keys
                 ):
                     continue
-                power_parts.append(f"### {path.stem}\n{self.read_file(path).strip()}")
+                other_power_paths.append(path)
+            ranked_power = select_ranked_documents(
+                other_power_paths,
+                query=relevance_query,
+                category="power",
+                mode=selection_mode,
+                reader=self.read_file,
+                total_chars=POWER_SELECTION_CHARS,
+                entry_chars=POWER_ENTRY_CHARS,
+            )
+            power_parts = [ranked_power.text] if ranked_power.text else []
+            selection_stats.extend(
+                (
+                    required_stat(
+                        "core_power",
+                        1 if core_power else 0,
+                        "global_core",
+                        selection_mode,
+                    ),
+                    required_stat(
+                        "core_systems",
+                        len(core_system_parts),
+                        "author_core",
+                        selection_mode,
+                    ),
+                    required_stat(
+                        "selected_power",
+                        len(selected_power_parts),
+                        "manual_selection",
+                        selection_mode,
+                    ),
+                    ranked_power.stat,
+                )
+            )
 
         timeline = ""
         timeline_path = self.canon_dir / "timeline.md"
         if include_timeline and timeline_path.exists():
             timeline = self.read_file(timeline_path)
+        if include_timeline:
+            selection_stats.append(
+                CanonSelectionStat(
+                    category="timeline",
+                    mode=selection_mode,
+                    candidates=1 if timeline_path.exists() else 0,
+                    included=1 if timeline else 0,
+                    matched=1 if timeline else 0,
+                    reasons=(("task_profile", 1),) if timeline else (),
+                )
+            )
 
         related = RelatedCanon(
-            world="\n\n".join(world_parts),
+            world=world,
             power="\n\n".join(power_parts),
             timeline=timeline,
             characters="\n\n".join(characters_parts),
             core_power=core_power,
             core_systems="\n\n".join(core_system_parts),
             selected_power="\n\n".join(selected_power_parts),
+            selection=tuple(selection_stats),
         )
         self._related_canon_cache[cache_key] = (signature, related)
         return related

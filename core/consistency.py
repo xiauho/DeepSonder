@@ -15,6 +15,7 @@ def run_consistency_check(
     project: NovelProject,
     chapter_id: str,
     dsh: DSHClient,
+    selection_mode: str = "safe",
     cancel_event: threading.Event | None = None,
 ) -> str:
     prompt_budget = dsh.resolve_prompt_budget(cancel_event=cancel_event)
@@ -22,6 +23,7 @@ def run_consistency_check(
         project,
         chapter_id,
         profile=CONSISTENCY_CONTEXT_PROFILE,
+        selection_mode=selection_mode,
     )
     prompt = build_check_prompt(
         project,
@@ -43,6 +45,7 @@ def run_consistency_repair(
     chapter_id: str,
     issue: dict,
     dsh: DSHClient,
+    selection_mode: str = "safe",
     cancel_event: threading.Event | None = None,
 ):
     prompt_budget = dsh.resolve_prompt_budget(cancel_event=cancel_event)
@@ -50,6 +53,8 @@ def run_consistency_repair(
         project,
         chapter_id,
         profile=REPAIR_CONTEXT_PROFILE,
+        relevance_query=str(issue),
+        selection_mode=selection_mode,
     )
     prompt = build_consistency_repair_prompt(
         project,

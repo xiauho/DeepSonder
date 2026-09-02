@@ -11,6 +11,7 @@ class ContextProfile:
 
     task_kind: str
     character_scope: str = "chapter"  # chapter | planning | none
+    relevance_scope: str = "chapter_state"  # planning | chapter | chapter_state | none
     include_world: bool = True
     include_power: bool = True
     include_timeline: bool = True
@@ -26,6 +27,7 @@ LEGACY_CONTEXT_PROFILE = ContextProfile("legacy_all")
 EXPANSION_CONTEXT_PROFILE = ContextProfile(
     "chapter_expansion",
     character_scope="planning",
+    relevance_scope="planning",
 )
 
 CONTINUATION_CONTEXT_PROFILE = ContextProfile("continuation_current_chapter")
@@ -38,6 +40,7 @@ CONSISTENCY_CONTEXT_PROFILE = ContextProfile(
 
 REPAIR_CONTEXT_PROFILE = ContextProfile(
     "consistency_repair",
+    relevance_scope="none",
     include_summaries=False,
     include_main_arc=False,
     include_future_plan=False,
@@ -46,6 +49,7 @@ REPAIR_CONTEXT_PROFILE = ContextProfile(
 
 SUMMARY_CONTEXT_PROFILE = ContextProfile(
     "chapter_summary",
+    relevance_scope="chapter",
     include_summaries=False,
     include_main_arc=False,
     include_future_plan=False,
@@ -55,6 +59,7 @@ SUMMARY_CONTEXT_PROFILE = ContextProfile(
 STATE_UPDATE_CONTEXT_PROFILE = ContextProfile(
     "story_state_update",
     character_scope="none",
+    relevance_scope="none",
     include_world=False,
     include_power=False,
     include_timeline=False,

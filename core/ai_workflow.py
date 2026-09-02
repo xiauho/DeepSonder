@@ -19,8 +19,9 @@ class AIWorkflowService:
     on Qt. The caller remains responsible for threading and user confirmation.
     """
 
-    def __init__(self, dsh: DSHClient):
+    def __init__(self, dsh: DSHClient, *, selection_mode: str = "safe"):
         self.dsh = dsh
+        self.selection_mode = selection_mode
 
     def expand(
         self,
@@ -40,6 +41,7 @@ class AIWorkflowService:
             history_chapters=history_chapters,
             selected_foreshadowing=selected_foreshadowing,
             selected_power=selected_power,
+            selection_mode=self.selection_mode,
             cancel_event=cancel_event,
         )
 
@@ -49,7 +51,13 @@ class AIWorkflowService:
         chapter_id: str,
         cancel_event: threading.Event | None = None,
     ) -> str:
-        return consistency.run_consistency_check(project, chapter_id, self.dsh, cancel_event)
+        return consistency.run_consistency_check(
+            project,
+            chapter_id,
+            self.dsh,
+            selection_mode=self.selection_mode,
+            cancel_event=cancel_event,
+        )
 
     def repair_consistency(
         self,
@@ -59,7 +67,12 @@ class AIWorkflowService:
         cancel_event: threading.Event | None = None,
     ):
         return consistency.run_consistency_repair(
-            project, chapter_id, issue, self.dsh, cancel_event
+            project,
+            chapter_id,
+            issue,
+            self.dsh,
+            selection_mode=self.selection_mode,
+            cancel_event=cancel_event,
         )
 
     def update_memory(
@@ -73,6 +86,7 @@ class AIWorkflowService:
             project,
             chapter_id,
             profile=SUMMARY_CONTEXT_PROFILE,
+            selection_mode=self.selection_mode,
         )
         summary_prompt = build_summary_prompt(
             project,

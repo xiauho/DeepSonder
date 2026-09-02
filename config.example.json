@@ -8,6 +8,7 @@
   "dsh_file_prompt_budget": 48000,
   "expand_target_chars": 2000,
   "ai_context_history_chapters": 5,
+  "ai_context_selection_mode": "safe",
   "theme": "dark",
   "ui_language": "zh-CN",
   "ui_font_size": 14,

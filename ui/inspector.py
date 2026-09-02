@@ -77,6 +77,18 @@ STATUS_LABELS = {
     "dropped": "已省略",
 }
 
+SELECTION_REASON_LABELS = {
+    "global_core": "全局核心",
+    "author_core": "作者标记为核心",
+    "manual_selection": "作者手动选择",
+    "title_match": "标题命中",
+    "heading_match": "小标题命中",
+    "metadata_match": "别名或标签命中",
+    "name_match": "名称命中",
+    "task_profile": "任务固定需要",
+    "background": "低优先级背景",
+}
+
 OUTCOME_LABELS = {
     "pending": "等待调用",
     "success": "调用成功",
@@ -125,6 +137,39 @@ def render_context_reports(reports: list[PromptContextReport]) -> str:
                 f"{report.history_requested} 章 · 可用 {report.history_available or 0} 章"
                 f" · 纳入 {report.history_included or 0} 章</p>"
             )
+        if report.selections:
+            if any(item.mode == "legacy_all" for item in report.selections):
+                blocks.append(
+                    "<p class='muted'>本次使用兼容模式：相关资料保持旧版整体加载顺序。</p>"
+                )
+            selection_rows = []
+            for item in report.selections:
+                if item.candidates <= 0:
+                    continue
+                label = SECTION_LABELS.get(item.category, item.category)
+                final_count = (
+                    str(item.prompt_included)
+                    if item.prompt_included is not None
+                    else "兼容模式未细分"
+                )
+                reasons = "、".join(
+                    f"{SELECTION_REASON_LABELS.get(reason, reason)} {count}"
+                    for reason, count in item.reasons
+                    if count
+                )
+                required = f" · 必需 {item.required}" if item.required else ""
+                excluded = item.excluded_unmatched + item.excluded_capacity
+                selection_rows.append(
+                    "<li>"
+                    f"<b>{html.escape(label)}</b>：候选 {item.candidates}"
+                    f" · 相关 {item.matched} · 预选 {item.included}"
+                    f" · 最终纳入 {final_count} · 筛选排除 {excluded}"
+                    f"{required}"
+                    + (f"<br><span class='muted'>{html.escape(reasons)}</span>" if reasons else "")
+                    + "</li>"
+                )
+            if selection_rows:
+                blocks.append("<h3>相关资料筛选</h3><ul>" + "".join(selection_rows) + "</ul>")
         rows = []
         for item in report.sections:
             label = SECTION_LABELS.get(item.key, item.key)

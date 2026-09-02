@@ -178,7 +178,12 @@ class AIWorkflowController(QObject):
             QMessageBox.warning(self.parent, "读取章节失败", str(exc))
             return
         title = chapter.title or chapter_id
-        workflow = AIWorkflowService(dsh)
+        workflow = AIWorkflowService(
+            dsh,
+            selection_mode=str(
+                self.config.get("ai_context_selection_mode") or "safe"
+            ),
+        )
         self._start(
             "check",
             chapter_id,
@@ -288,7 +293,12 @@ class AIWorkflowController(QObject):
         if dsh is None:
             QMessageBox.warning(self.parent, "AI 未就绪", "当前没有可用的 dsh 客户端，请先检查设置。")
             return
-        workflow = AIWorkflowService(dsh)
+        workflow = AIWorkflowService(
+            dsh,
+            selection_mode=str(
+                self.config.get("ai_context_selection_mode") or "safe"
+            ),
+        )
         self._start(
             "repair",
             chapter_id,
@@ -320,7 +330,12 @@ class AIWorkflowController(QObject):
                 "当前没有可用的 dsh 客户端，请先检查设置。",
             )
             return None
-        return project, chapter_id, AIWorkflowService(dsh)
+        return project, chapter_id, AIWorkflowService(
+            dsh,
+            selection_mode=str(
+                self.config.get("ai_context_selection_mode") or "safe"
+            ),
+        )
 
     def _save_current_file(self) -> bool:
         if not self.editor.current_path():

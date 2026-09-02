@@ -17,6 +17,7 @@ DSH_PROMPT_TRANSPORTS = {"auto", "argv", "file"}
 DSH_FILE_PROMPT_BUDGET_MIN = 24_000
 DSH_FILE_PROMPT_BUDGET_MAX = 120_000
 DSH_FILE_PROMPT_BUDGET_DEFAULT = 48_000
+AI_CONTEXT_SELECTION_MODES = {"safe", "legacy_all"}
 
 DEFAULT_CONFIG = {
     "dsh_command": "dsh",
@@ -37,6 +38,7 @@ DEFAULT_CONFIG = {
     "auto_save_interval": 30,
     "expand_target_chars": 2000,
     "ai_context_history_chapters": 5,
+    "ai_context_selection_mode": "safe",
     "show_line_numbers": False,
     "ai_notice_acknowledged": False,
     # Update preferences and non-sensitive check metadata
@@ -195,6 +197,12 @@ def _normalize_config(config: dict[str, Any]) -> None:
         )
     except (TypeError, ValueError):
         config["ai_context_history_chapters"] = 5
+    selection_mode = str(
+        config.get("ai_context_selection_mode") or "safe"
+    ).strip().lower()
+    config["ai_context_selection_mode"] = (
+        selection_mode if selection_mode in AI_CONTEXT_SELECTION_MODES else "safe"
+    )
     config.pop("continue_target_chars", None)
     config["auto_save"] = bool(config.get("auto_save", True))
     config["ai_notice_acknowledged"] = bool(config.get("ai_notice_acknowledged", False))

@@ -19,6 +19,7 @@ from .context_budget import (
     render_selected_foreshadowing,
 )
 from .context_report import PromptBundle, PromptContextReport, SectionUsage
+from .context_selection import CanonSelectionStat
 from .context_profiles import (
     CONSISTENCY_CONTEXT_PROFILE,
     CONTINUATION_CONTEXT_PROFILE,
@@ -57,6 +58,7 @@ def build_expansion_prompt(
     selected_power: list[str] | tuple[str, ...] | None = None,
     context: AIContext | None = None,
     prompt_budget: int = DEFAULT_PROMPT_BUDGET,
+    selection_mode: str = "safe",
 ) -> PromptBundle:
     """Build a compact outline-to-chapter expansion task.
 
@@ -73,6 +75,12 @@ def build_expansion_prompt(
         include_timeline=True,
         selected_power=selected_power,
         profile=EXPANSION_CONTEXT_PROFILE,
+        relevance_query=json.dumps(
+            list(selected_foreshadowing or ()),
+            ensure_ascii=False,
+            default=str,
+        ),
+        selection_mode=selection_mode,
     )
     chapter = context.chapter
     sections = gather_sections(
@@ -178,6 +186,7 @@ def build_expansion_prompt(
         chapter_id=chapter_id,
         history_requested=summary_count,
         history_available=_history_available(context, chapter_id),
+        selection_stats=context.related.selection,
     )
 
 
@@ -191,6 +200,7 @@ def build_expansion_retry_prompt(
     selected_power: list[str] | tuple[str, ...] | None = None,
     context: AIContext | None = None,
     prompt_budget: int = DEFAULT_PROMPT_BUDGET,
+    selection_mode: str = "safe",
 ) -> PromptBundle:
     """Build a correction prompt when headless returns a workspace preamble."""
     base = build_expansion_prompt(
@@ -202,6 +212,7 @@ def build_expansion_retry_prompt(
         selected_power=selected_power,
         context=context,
         prompt_budget=prompt_budget,
+        selection_mode=selection_mode,
     )
     user_prompt = base.user_prompt
     retry_system = f"""
@@ -302,12 +313,14 @@ def build_write_prompt(
     summary_count: int = CONTINUATION_SUMMARY_COUNT,
     context: AIContext | None = None,
     prompt_budget: int = DEFAULT_PROMPT_BUDGET,
+    selection_mode: str = "safe",
 ) -> PromptBundle:
     summary_count = max(0, int(summary_count))
     context = context or build_ai_context(
         project,
         chapter_id,
         profile=CONTINUATION_CONTEXT_PROFILE,
+        selection_mode=selection_mode,
     )
     chapter = context.chapter
     sections = gather_sections(
@@ -325,6 +338,9 @@ def build_write_prompt(
             "main_arc",
             "timeline",
             "world",
+            "core_power",
+            "core_systems",
+            "selected_power",
             "power",
         ),
         content_cap=6000,
@@ -404,6 +420,7 @@ def build_write_prompt(
         chapter_id=chapter_id,
         history_requested=summary_count,
         history_available=_history_available(context, chapter_id),
+        selection_stats=context.related.selection,
     )
 
 
@@ -415,6 +432,7 @@ def build_write_retry_prompt(
     summary_count: int = CONTINUATION_SUMMARY_COUNT,
     context: AIContext | None = None,
     prompt_budget: int = DEFAULT_PROMPT_BUDGET,
+    selection_mode: str = "safe",
 ) -> PromptBundle:
     """Build an explicit retry after an Agent-style response."""
     base = build_write_prompt(
@@ -424,6 +442,7 @@ def build_write_retry_prompt(
         summary_count=summary_count,
         context=context,
         prompt_budget=prompt_budget,
+        selection_mode=selection_mode,
     )
     user_prompt = base.user_prompt
     retry_system = f"""
@@ -451,11 +470,13 @@ def build_summary_prompt(
     *,
     context: AIContext | None = None,
     prompt_budget: int = DEFAULT_PROMPT_BUDGET,
+    selection_mode: str = "safe",
 ) -> PromptBundle:
     context = context or build_ai_context(
         project,
         chapter_id,
         profile=SUMMARY_CONTEXT_PROFILE,
+        selection_mode=selection_mode,
     )
     chapter = context.chapter
     sections = gather_sections(
@@ -514,6 +535,7 @@ def build_summary_prompt(
         prompt_budget,
         task_kind="chapter_summary",
         chapter_id=chapter_id,
+        selection_stats=context.related.selection,
     )
 
 
@@ -523,11 +545,13 @@ def build_state_update_prompt(
     *,
     context: AIContext | None = None,
     prompt_budget: int = DEFAULT_PROMPT_BUDGET,
+    selection_mode: str = "safe",
 ) -> PromptBundle:
     context = context or build_ai_context(
         project,
         chapter_id,
         profile=STATE_UPDATE_CONTEXT_PROFILE,
+        selection_mode=selection_mode,
     )
     chapter = context.chapter
     old_state = context.story_state
@@ -607,6 +631,7 @@ def build_state_update_prompt(
         prompt_budget,
         task_kind="story_state_update",
         chapter_id=chapter_id,
+        selection_stats=context.related.selection,
     )
 
 
@@ -616,11 +641,13 @@ def build_check_prompt(
     *,
     context: AIContext | None = None,
     prompt_budget: int = DEFAULT_PROMPT_BUDGET,
+    selection_mode: str = "safe",
 ) -> PromptBundle:
     context = context or build_ai_context(
         project,
         chapter_id,
         profile=CONSISTENCY_CONTEXT_PROFILE,
+        selection_mode=selection_mode,
     )
     chapter = context.chapter
     sections = gather_sections(
@@ -718,6 +745,7 @@ severity 只能使用：high、medium、low。
         chapter_id=chapter_id,
         history_requested=EXPANSION_SUMMARY_COUNT,
         history_available=_history_available(context, chapter_id),
+        selection_stats=context.related.selection,
     )
 
 
@@ -728,12 +756,15 @@ def build_consistency_repair_prompt(
     *,
     context: AIContext | None = None,
     prompt_budget: int = DEFAULT_PROMPT_BUDGET,
+    selection_mode: str = "safe",
 ) -> PromptBundle:
     """Build a constrained one-range repair proposal for one report issue."""
     context = context or build_ai_context(
         project,
         chapter_id,
         profile=REPAIR_CONTEXT_PROFILE,
+        relevance_query=json.dumps(dict(issue), ensure_ascii=False, default=str),
+        selection_mode=selection_mode,
     )
     chapter = context.chapter
     sections = gather_sections(
@@ -822,6 +853,7 @@ def build_consistency_repair_prompt(
         prompt_budget,
         task_kind="consistency_repair",
         chapter_id=chapter_id,
+        selection_stats=context.related.selection,
         history_requested=EXPANSION_SUMMARY_COUNT,
         history_available=_history_available(context, chapter_id),
     )
@@ -837,6 +869,7 @@ def _finalize(
     chapter_id: str = "",
     history_requested: int | None = None,
     history_available: int | None = None,
+    selection_stats: tuple[CanonSelectionStat, ...] = (),
 ) -> PromptBundle:
     """Budget sections against instruction overhead, then render."""
     overhead = len(system_prompt) + len(render({}))
@@ -848,6 +881,23 @@ def _finalize(
     if history_requested is not None:
         possible = min(max(0, history_requested), max(0, history_available or 0))
         included = _included_history_count(allocation.values.get("summaries", ""), possible)
+    finalized_selection = _finalize_selection_stats(
+        selection_stats,
+        allocation.values,
+    )
+    missing_required = [
+        item.category
+        for item in finalized_selection
+        if item.required > 0
+        and item.prompt_included is not None
+        and item.prompt_included < item.required
+    ]
+    if missing_required:
+        raise RuntimeError(
+            "本次上下文预算无法容纳全部核心或手动选择资料："
+            + "、".join(missing_required)
+            + "。请减少核心/手选资料，或使用已验证的扩展文件传输预算。"
+        )
     report = PromptContextReport(
         schema_version=1,
         task_kind=task_kind,
@@ -859,11 +909,39 @@ def _finalize(
         user_prompt_chars=len(user_prompt),
         total_prompt_chars=len(system_prompt) + len(user_prompt),
         sections=allocation.sections,
+        selections=finalized_selection,
         history_requested=history_requested,
         history_available=history_available,
         history_included=included,
     )
     return PromptBundle(system_prompt, user_prompt, report)
+
+
+def _finalize_selection_stats(
+    stats: tuple[CanonSelectionStat, ...],
+    values: dict[str, str],
+) -> tuple[CanonSelectionStat, ...]:
+    finalized = []
+    for item in stats:
+        if item.category not in values:
+            continue
+        rendered = str(values.get(item.category) or "")
+        if not rendered or rendered == DROPPED_PLACEHOLDER:
+            prompt_included = 0
+        elif item.category in {"core_power", "timeline"}:
+            prompt_included = 1
+        else:
+            headings = sum(
+                1 for line in rendered.splitlines() if line.startswith("### ")
+            )
+            if headings:
+                prompt_included = min(item.included, headings)
+            elif item.mode == "legacy_all":
+                prompt_included = item.included if item.included <= 1 else None
+            else:
+                prompt_included = min(1, item.included)
+        finalized.append(replace(item, prompt_included=prompt_included))
+    return tuple(finalized)
 
 
 def _direct_bundle(
