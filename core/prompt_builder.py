@@ -893,9 +893,14 @@ def _finalize(
         and item.prompt_included < item.required
     ]
     if missing_required:
+        labels = {
+            "core_power": "全局核心规则",
+            "core_systems": "核心体系",
+            "selected_power": "手动选择体系",
+        }
         raise RuntimeError(
             "本次上下文预算无法容纳全部核心或手动选择资料："
-            + "、".join(missing_required)
+            + "、".join(labels.get(item, item) for item in missing_required)
             + "。请减少核心/手选资料，或使用已验证的扩展文件传输预算。"
         )
     report = PromptContextReport(

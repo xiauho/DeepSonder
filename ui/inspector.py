@@ -158,12 +158,24 @@ def render_context_reports(reports: list[PromptContextReport]) -> str:
                     if count
                 )
                 required = f" · 必需 {item.required}" if item.required else ""
-                excluded = item.excluded_unmatched + item.excluded_capacity
+                budget_excluded = (
+                    max(0, item.included - item.prompt_included)
+                    if item.prompt_included is not None
+                    else None
+                )
+                budget_text = (
+                    f" · 总预算排除 {budget_excluded}"
+                    if budget_excluded is not None
+                    else ""
+                )
                 selection_rows.append(
                     "<li>"
                     f"<b>{html.escape(label)}</b>：候选 {item.candidates}"
                     f" · 相关 {item.matched} · 预选 {item.included}"
-                    f" · 最终纳入 {final_count} · 筛选排除 {excluded}"
+                    f" · 最终纳入 {final_count}"
+                    f" · 未匹配排除 {item.excluded_unmatched}"
+                    f" · 分类容量排除 {item.excluded_capacity}"
+                    f"{budget_text}"
                     f"{required}"
                     + (f"<br><span class='muted'>{html.escape(reasons)}</span>" if reasons else "")
                     + "</li>"

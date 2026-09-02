@@ -10,7 +10,7 @@ class ContextProfile:
     """Declare which project sources one AI task is allowed to load."""
 
     task_kind: str
-    character_scope: str = "chapter"  # chapter | planning | none
+    character_scope: str = "chapter"  # chapter | planning | relevance | none
     relevance_scope: str = "chapter_state"  # planning | chapter | chapter_state | none
     include_world: bool = True
     include_power: bool = True
@@ -40,6 +40,7 @@ CONSISTENCY_CONTEXT_PROFILE = ContextProfile(
 
 REPAIR_CONTEXT_PROFILE = ContextProfile(
     "consistency_repair",
+    character_scope="relevance",
     relevance_scope="none",
     include_summaries=False,
     include_main_arc=False,

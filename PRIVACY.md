@@ -35,6 +35,13 @@ temporary-file cleanup status. It does not retain prompt text, chapter prose,
 canon text, credentials, or absolute file paths. Copying the diagnostic report
 copies only these redacted metrics; Novalist does not upload the report itself.
 
+The default `safe` context-selection mode ranks canon locally using explicit
+references such as character names, document titles, Markdown headings,
+aliases, and tags. Selection does not make an additional model request and
+does not send data anywhere by itself. Reports may include aggregate candidate,
+matched, included, and excluded counts plus generic selection reasons, but not
+canon filenames or the matched text.
+
 Do not submit personal data, confidential information, or copyrighted material
 that you are not authorized to process. AI output may be inaccurate or unsuitable
 and must be reviewed before use or publication.

@@ -189,6 +189,8 @@ def build_task_context(
         )
     elif character_scope == "none":
         character_query = ""
+    elif character_scope == "relevance":
+        character_query = ""
     extra_relevance = str(relevance_query or "")
     if profile.relevance_scope == "planning":
         relevance_query = "\n".join(
@@ -208,6 +210,8 @@ def build_task_context(
         relevance_query = f"{relevance_query}\n{extra_relevance}".strip()
         if character_query is not None:
             character_query = f"{character_query}\n{extra_relevance}".strip()
+    if character_scope == "relevance":
+        character_query = relevance_query
     if selection_mode is None:
         selection_mode = "legacy_all" if profile is LEGACY_CONTEXT_PROFILE else "safe"
     core_systems = store.list_core_systems() if include_power else []

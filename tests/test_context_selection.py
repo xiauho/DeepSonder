@@ -83,10 +83,18 @@ class ContextSelectionTests(TestCase):
     def test_repair_uses_issue_text_instead_of_unrelated_full_chapter_for_ranking(self) -> None:
         other = self.project.canon_dir / "world" / "旧城.md"
         self.project.write_file(other, "# 旧城规则\n\n旧城修复标记：城门只能向内开启。")
+        self.project.write_file(
+            self.project.canon_dir / "characters" / "周弦.md",
+            "# 周弦\n\n当前章节角色。",
+        )
+        self.project.write_file(
+            self.project.canon_dir / "characters" / "顾衍.md",
+            "# 顾衍\n\n问题直接相关角色标记。",
+        )
         issue = {
             "issue_id": "issue_1",
-            "chapter_quote": "周弦在门前停下。",
-            "description": "旧城城门方向与旧城规则冲突",
+            "chapter_quote": "顾衍在门前停下。",
+            "description": "顾衍打开旧城城门的方向与旧城规则冲突",
         }
         prompt = build_consistency_repair_prompt(
             self.project,
@@ -96,6 +104,8 @@ class ContextSelectionTests(TestCase):
         )
 
         self.assertIn("旧城修复标记", prompt.user_prompt)
+        self.assertIn("问题直接相关角色标记", prompt.user_prompt)
+        self.assertNotIn("当前章节角色。", prompt.user_prompt)
 
     def test_legacy_mode_keeps_all_documents_as_a_compatible_fallback(self) -> None:
         context = build_task_context(
@@ -139,6 +149,8 @@ class ContextSelectionTests(TestCase):
         serialized = json.dumps(prompt.report.to_dict(), ensure_ascii=False)
         self.assertNotIn("核心体系标记", serialized)
         self.assertNotIn("手选体系标记", serialized)
+        self.assertNotIn("星术", serialized)
+        self.assertNotIn("门禁", serialized)
 
     def test_prompt_build_stops_if_multiple_required_systems_cannot_fit(self) -> None:
         from core.project_data import ProjectDataStore
@@ -152,7 +164,7 @@ class ContextSelectionTests(TestCase):
             )
             store.set_system_importance(path, "core")
 
-        with self.assertRaisesRegex(RuntimeError, "core_systems"):
+        with self.assertRaisesRegex(RuntimeError, "核心体系"):
             build_expansion_prompt(
                 self.project,
                 "chapter_01",
