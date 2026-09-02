@@ -174,6 +174,48 @@ class AIProtocolTests(TestCase):
                 expected_chapter_id="chapter_01",
             )
 
+    def test_consistency_report_safely_normalizes_generic_data_target(self) -> None:
+        report = parse_consistency_report(
+            {
+                "type": "consistency_report",
+                "issues": [
+                    {
+                        "severity": "low",
+                        "category": "state",
+                        "kind": "sync_gap",
+                        "description": "故事状态资料未更新",
+                        "evidence": "正文证据",
+                        "recommended_target": "data",
+                        "repairability": "automatic",
+                    }
+                ],
+            }
+        )
+
+        issue = report["issues"][0]
+        self.assertEqual(issue["recommended_target"], "manual")
+        self.assertEqual(issue["repairability"], "manual")
+
+    def test_consistency_report_prevents_non_chapter_automatic_repair(self) -> None:
+        report = parse_consistency_report(
+            {
+                "type": "consistency_report",
+                "issues": [
+                    {
+                        "severity": "medium",
+                        "category": "character",
+                        "kind": "hard_conflict",
+                        "description": "角色卡需要人工确认",
+                        "evidence": "正文证据",
+                        "recommended_target": "character_card",
+                        "repairability": "automatic",
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(report["issues"][0]["repairability"], "manual")
+
     def test_consistency_report_rejects_unknown_enum_values(self) -> None:
         with self.assertRaisesRegex(AIProtocolError, "无效 category"):
             parse_consistency_report(

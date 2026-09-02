@@ -97,6 +97,16 @@ class MainWindow(QMainWindow):
         "memory": "psychology",
         "continue": "auto_awesome",
     }
+    ACTION_BUTTON_LABELS = {
+        "new_chapter": "新建章节",
+        "open_project": "打开项目",
+        "save": "保存",
+        "export": "导出",
+        "focus": "专注模式",
+        "check": "一致性检查",
+        "memory": "更新故事记忆",
+        "continue": "AI 扩写",
+    }
 
     def __init__(self, parent=None, config: dict | None = None):
         super().__init__(parent)
@@ -349,23 +359,23 @@ class MainWindow(QMainWindow):
         action_layout = QHBoxLayout(self.action_bar)
         action_layout.setContentsMargins(14, 8, 14, 8)
         action_layout.setSpacing(7)
-        action_layout.addWidget(self._action_button("new_chapter", "新章节"))
-        action_layout.addWidget(self._action_button("open_project", "打开项目"))
-        action_layout.addWidget(self._action_button("save", "保存"))
-        action_layout.addWidget(self._action_button("export", "导出"))
+        action_layout.addWidget(self._action_button("new_chapter"))
+        action_layout.addWidget(self._action_button("open_project"))
+        action_layout.addWidget(self._action_button("save"))
+        action_layout.addWidget(self._action_button("export"))
         action_layout.addStretch(1)
-        focus_button = self._action_button("focus", "专注模式")
+        focus_button = self._action_button("focus")
         focus_button.setObjectName("ghostButton")
         focus_button.style().unpolish(focus_button)
         focus_button.style().polish(focus_button)
         action_layout.addWidget(focus_button)
-        check_button = self._action_button("check", "检查设定")
+        check_button = self._action_button("check")
         check_button.setObjectName("secondaryButton")
         action_layout.addWidget(check_button)
-        memory_button = self._action_button("memory", "更新记忆")
+        memory_button = self._action_button("memory")
         memory_button.setObjectName("secondaryButton")
         action_layout.addWidget(memory_button)
-        continue_button = self._action_button("continue", "AI 扩写")
+        continue_button = self._action_button("continue")
         continue_button.setObjectName("accentButton")
         action_layout.addWidget(continue_button)
         content_layout.addWidget(self.action_bar)
@@ -453,7 +463,8 @@ class MainWindow(QMainWindow):
         page_layout.addWidget(self.outer_splitter, 1)
         return page
 
-    def _action_button(self, key: str, text: str) -> IconTextButton:
+    def _action_button(self, key: str) -> IconTextButton:
+        text = self.ACTION_BUTTON_LABELS.get(key, self.actions[key].text())
         icon_name = self.ACTION_ICONS.get(key)
         button = IconTextButton(icon_name, text, centered=True) if icon_name else IconTextButton("circle", text, centered=True)
         if not icon_name:
@@ -470,7 +481,6 @@ class MainWindow(QMainWindow):
     def _sync_action_button(action: QAction, button: IconTextButton) -> None:
         button.setEnabled(action.isEnabled())
         button.setToolTip(action.text())
-        button.set_label(action.text())
 
     def _build_menus(self) -> None:
         file_menu = self.menuBar().addMenu("文件")

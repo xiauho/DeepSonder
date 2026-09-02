@@ -133,6 +133,10 @@ _CONSISTENCY_KIND_ALIASES = {
     "优化建议": "suggestion",
 }
 _CONSISTENCY_TARGET_ALIASES = {
+    # Some models use ``data`` as a generic label for project-side material.
+    # It is too ambiguous to route to a character card, story state, outline,
+    # or canon automatically, so preserve the issue as a manual action.
+    "data": "manual",
     "正文": "chapter",
     "章节正文": "chapter",
     "角色卡": "character_card",
@@ -416,6 +420,14 @@ def parse_consistency_report(
             CONSISTENCY_REPAIRABILITIES,
             "repairability",
         )
+        if normalized["repairability"] == "automatic" and (
+            normalized["recommended_target"] != "chapter"
+            or normalized["kind"] not in {"hard_conflict", "continuity_risk"}
+        ):
+            # Automatic repair is intentionally limited to a safely anchored
+            # chapter edit.  Project-side data and advisory issue kinds always
+            # require author review, even if a model labels them automatic.
+            normalized["repairability"] = "manual"
         normalized_issues.append(normalized)
     value["issues"] = normalized_issues
     # ``ok`` means no detected issue.  Normalize older model responses that

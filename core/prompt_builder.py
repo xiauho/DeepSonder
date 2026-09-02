@@ -690,6 +690,10 @@ def build_check_prompt(
 category 只能使用：relationship、character、state、location、power、item、timeline、world、outline、foreshadowing、place、event。
 kind 只能使用：hard_conflict、continuity_risk、sync_gap、outline_deviation、missing_information、suggestion。
 severity 只能使用：high、medium、low。
+recommended_target 只能使用：chapter、character_card、story_state、outline、canon、manual。
+repairability 只能使用：automatic、choice_required、manual。
+禁止使用 data 或其他未列出值作为 recommended_target；无法确定具体资料目标时使用 manual。
+只有 recommended_target 为 chapter，且 kind 为 hard_conflict 或 continuity_risk 时，repairability 才可以为 automatic。
 
 【主线大纲】
 {_section(ctx, "main_arc")}

@@ -166,6 +166,15 @@ class PromptBuilderTests(TestCase):
         self.assertIn('"completion_message"', user)
         self.assertIn('"kind": "hard_conflict"', user)
         self.assertIn("资料未同步", user)
+        self.assertIn(
+            "recommended_target 只能使用：chapter、character_card、story_state、outline、canon、manual",
+            user,
+        )
+        self.assertIn(
+            "repairability 只能使用：automatic、choice_required、manual",
+            user,
+        )
+        self.assertIn("禁止使用 data", user)
 
     def test_repair_prompt_is_minimal_and_anchored(self) -> None:
         system, user = prompt_builder.build_consistency_repair_prompt(
