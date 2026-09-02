@@ -6,6 +6,7 @@ import threading
 
 from . import ai_protocol, consistency, expansion
 from .context_budget import build_ai_context
+from .context_profiles import SUMMARY_CONTEXT_PROFILE
 from .dsh_client import DSHClient
 from .project import NovelProject
 from .prompt_builder import build_state_update_prompt, build_summary_prompt
@@ -68,7 +69,11 @@ class AIWorkflowService:
         cancel_event: threading.Event | None = None,
     ) -> tuple[str, dict, str]:
         prompt_budget = self.dsh.resolve_prompt_budget(cancel_event=cancel_event)
-        context = build_ai_context(project, chapter_id)
+        context = build_ai_context(
+            project,
+            chapter_id,
+            profile=SUMMARY_CONTEXT_PROFILE,
+        )
         summary_prompt = build_summary_prompt(
             project,
             chapter_id,

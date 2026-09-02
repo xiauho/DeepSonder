@@ -19,6 +19,14 @@ from .context_budget import (
     render_selected_foreshadowing,
 )
 from .context_report import PromptBundle, PromptContextReport, SectionUsage
+from .context_profiles import (
+    CONSISTENCY_CONTEXT_PROFILE,
+    CONTINUATION_CONTEXT_PROFILE,
+    EXPANSION_CONTEXT_PROFILE,
+    REPAIR_CONTEXT_PROFILE,
+    STATE_UPDATE_CONTEXT_PROFILE,
+    SUMMARY_CONTEXT_PROFILE,
+)
 from .project import NovelProject, chapter_number_from_id
 from .text_anchor import render_anchor_context
 
@@ -64,6 +72,7 @@ def build_expansion_prompt(
         include_power=True,
         include_timeline=True,
         selected_power=selected_power,
+        profile=EXPANSION_CONTEXT_PROFILE,
     )
     chapter = context.chapter
     sections = gather_sections(
@@ -295,7 +304,11 @@ def build_write_prompt(
     prompt_budget: int = DEFAULT_PROMPT_BUDGET,
 ) -> PromptBundle:
     summary_count = max(0, int(summary_count))
-    context = context or build_ai_context(project, chapter_id)
+    context = context or build_ai_context(
+        project,
+        chapter_id,
+        profile=CONTINUATION_CONTEXT_PROFILE,
+    )
     chapter = context.chapter
     sections = gather_sections(
         project,
@@ -439,12 +452,16 @@ def build_summary_prompt(
     context: AIContext | None = None,
     prompt_budget: int = DEFAULT_PROMPT_BUDGET,
 ) -> PromptBundle:
-    context = context or build_ai_context(project, chapter_id)
+    context = context or build_ai_context(
+        project,
+        chapter_id,
+        profile=SUMMARY_CONTEXT_PROFILE,
+    )
     chapter = context.chapter
     sections = gather_sections(
         project,
         chapter_id,
-        ("state", "summaries", "characters", "timeline", "core_power", "core_systems", "world", "power", "outline", "plot_brief", "content"),
+        ("state", "characters", "timeline", "core_power", "core_systems", "world", "power", "outline", "plot_brief", "content"),
         content_keep="head",
         context=context,
     )
@@ -507,7 +524,11 @@ def build_state_update_prompt(
     context: AIContext | None = None,
     prompt_budget: int = DEFAULT_PROMPT_BUDGET,
 ) -> PromptBundle:
-    context = context or build_ai_context(project, chapter_id)
+    context = context or build_ai_context(
+        project,
+        chapter_id,
+        profile=STATE_UPDATE_CONTEXT_PROFILE,
+    )
     chapter = context.chapter
     old_state = context.story_state
     expected_number = chapter_number_from_id(chapter_id)
@@ -596,7 +617,11 @@ def build_check_prompt(
     context: AIContext | None = None,
     prompt_budget: int = DEFAULT_PROMPT_BUDGET,
 ) -> PromptBundle:
-    context = context or build_ai_context(project, chapter_id)
+    context = context or build_ai_context(
+        project,
+        chapter_id,
+        profile=CONSISTENCY_CONTEXT_PROFILE,
+    )
     chapter = context.chapter
     sections = gather_sections(
         project,
@@ -705,7 +730,11 @@ def build_consistency_repair_prompt(
     prompt_budget: int = DEFAULT_PROMPT_BUDGET,
 ) -> PromptBundle:
     """Build a constrained one-range repair proposal for one report issue."""
-    context = context or build_ai_context(project, chapter_id)
+    context = context or build_ai_context(
+        project,
+        chapter_id,
+        profile=REPAIR_CONTEXT_PROFILE,
+    )
     chapter = context.chapter
     sections = gather_sections(
         project,
@@ -713,11 +742,8 @@ def build_consistency_repair_prompt(
         (
             "outline",
             "plot_brief",
-            "content",
             "state",
-            "summaries",
             "characters",
-            "main_arc",
             "timeline",
             "core_power",
             "core_systems",

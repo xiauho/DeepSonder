@@ -14,6 +14,7 @@ import json
 import hashlib
 from dataclasses import dataclass
 
+from .context_profiles import ContextProfile, LEGACY_CONTEXT_PROFILE
 from .context_report import SectionUsage
 from .models import Chapter, RelatedCanon
 from .project import NovelProject, chapter_number_from_id
@@ -134,6 +135,7 @@ def build_ai_context(
     include_power: bool = True,
     include_timeline: bool = True,
     selected_power: list[str] | tuple[str, ...] | None = None,
+    profile: ContextProfile | None = None,
 ) -> AIContext:
     """Load prompt sources through one project data facade.
 
@@ -149,6 +151,7 @@ def build_ai_context(
         include_power=include_power,
         include_timeline=include_timeline,
         selected_power=selected_power,
+        profile=profile,
     )
 
 
@@ -161,8 +164,15 @@ def build_task_context(
     include_power: bool = True,
     include_timeline: bool = True,
     selected_power: list[str] | tuple[str, ...] | None = None,
+    profile: ContextProfile | None = None,
 ) -> AIContext:
     """Build an AI context with an explicit canon loading profile."""
+    profile = profile or LEGACY_CONTEXT_PROFILE
+    if profile is not LEGACY_CONTEXT_PROFILE:
+        character_scope = profile.character_scope
+        include_world = profile.include_world
+        include_power = profile.include_power
+        include_timeline = profile.include_timeline
     store = ProjectDataStore(project)
     chapter = store.load_chapter(chapter_id)
     character_query = None
@@ -170,7 +180,9 @@ def build_task_context(
         character_query = "\n".join(
             part for part in (chapter.title, chapter.outline, chapter.plot_brief) if part
         )
-    core_systems = store.list_core_systems()
+    elif character_scope == "none":
+        character_query = ""
+    core_systems = store.list_core_systems() if include_power else []
     selected_systems = tuple(core_systems) + tuple(selected_power or ())
     return AIContext(
         project_root=str(store.root.resolve()).casefold(),
@@ -185,11 +197,13 @@ def build_task_context(
             selected_power=selected_systems,
             core_power_paths=core_systems,
         ),
-        story_state=store.load_story_state(),
-        chapter_summaries=store.load_chapter_summaries(),
-        main_arc=store.load_main_arc(),
-        future_plan=store.load_future_plan(),
-        style_guide=store.load_style_guide(),
+        story_state=store.load_story_state() if profile.include_story_state else {},
+        chapter_summaries=(
+            store.load_chapter_summaries() if profile.include_summaries else {}
+        ),
+        main_arc=store.load_main_arc() if profile.include_main_arc else "",
+        future_plan=store.load_future_plan() if profile.include_future_plan else "",
+        style_guide=store.load_style_guide() if profile.include_style else "",
     )
 
 

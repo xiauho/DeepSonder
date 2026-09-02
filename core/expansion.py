@@ -7,6 +7,7 @@ import threading
 
 from . import ai_protocol
 from .context_budget import EXPANSION_SUMMARY_COUNT, build_ai_context
+from .context_profiles import EXPANSION_CONTEXT_PROFILE
 from .dsh_client import DSHClient
 from .project import NovelProject
 from .prompt_builder import (
@@ -47,6 +48,7 @@ def run_expansion(
         include_power=True,
         include_timeline=True,
         selected_power=selected_power,
+        profile=EXPANSION_CONTEXT_PROFILE,
     )
     prompt = build_expansion_prompt(
         project,
