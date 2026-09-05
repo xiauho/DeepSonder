@@ -13,8 +13,6 @@ from uuid import uuid4
 
 from .foreshadowing import ForeshadowingStore
 from .project import (
-    DEFAULT_CORE_POWER_RULES,
-    DEFAULT_STYLE_GUIDE,
     DEFAULT_TIMELINE,
     SYSTEM_REGISTRY_FILENAME,
     NovelProject,
@@ -359,20 +357,6 @@ class ProjectDataStore:
             json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
         )
 
-    def ensure_system_registry(self) -> dict:
-        """Create metadata for legacy systems without changing their files."""
-        registry = self.load_system_registry()
-        raw_entries = {}
-        if self.system_registry_path.exists():
-            try:
-                raw = json.loads(self.system_registry_path.read_text(encoding="utf-8"))
-                raw_entries = raw.get("entries", {}) if isinstance(raw, dict) else {}
-            except (OSError, UnicodeError, json.JSONDecodeError):
-                raw_entries = {}
-        if not self.system_registry_path.exists() or raw_entries != registry["entries"]:
-            self.save_system_registry(registry)
-        return registry
-
     def system_metadata(self, path: Path) -> dict[str, str]:
         key = self._system_key(Path(path))
         return self.load_system_registry().get("entries", {}).get(
@@ -432,20 +416,6 @@ class ProjectDataStore:
         legacy_key = key.removeprefix("canon/")
         item = entries.get(legacy_key)
         return item if isinstance(item, dict) else {}
-
-    def ensure_core_power_entry(self) -> Path:
-        """Create the default always-on rules file for legacy projects."""
-        path = self.core_power_path
-        if not path.exists():
-            self.write_new_file(path, DEFAULT_CORE_POWER_RULES)
-        return path
-
-    def ensure_style_guide(self) -> Path:
-        """Create the single project-level style guide for legacy projects."""
-        path = self.style_guide_path
-        if not path.exists():
-            self.write_new_file(path, DEFAULT_STYLE_GUIDE)
-        return path
 
     def load_style_guide(self) -> str:
         """Return author-written style rules without template-only comments.
@@ -1271,8 +1241,18 @@ class ProjectDataStore:
         chapter_id: str,
         summary: str,
         state: dict,
+        *,
+        accepted_record: dict | None = None,
     ) -> None:
         """Persist summary and state together with best-effort rollback."""
+        from .accepted_memory import load_accepted_memory, save_accepted_memory
+
+        old_records = load_accepted_memory(self.project)
+        new_records = deepcopy(old_records)
+        if accepted_record is not None:
+            new_records[chapter_id] = deepcopy(accepted_record)
+        else:
+            new_records.pop(chapter_id, None)
         old_summaries = deepcopy(self.load_chapter_summaries())
         old_state = deepcopy(self.load_story_state())
         new_summaries = deepcopy(old_summaries)
@@ -1280,10 +1260,14 @@ class ProjectDataStore:
         try:
             self.save_chapter_summaries(new_summaries)
             self.save_story_state(state)
+            if accepted_record is not None or old_records:
+                save_accepted_memory(self.project, new_records)
         except Exception:
             try:
                 self.save_chapter_summaries(old_summaries)
                 self.save_story_state(old_state)
+                if accepted_record is not None or old_records:
+                    save_accepted_memory(self.project, old_records)
             except Exception:
                 # Preserve the original failure; callers still receive a clear
                 # error while the next load can surface any rollback issue.

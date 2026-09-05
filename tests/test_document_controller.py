@@ -90,7 +90,9 @@ class DocumentControllerTests(unittest.TestCase):
             project = NovelProject.create(Path(tmp) / "proj", "测试")
             session = ProjectSession()
             changes = []
-            session.data_changed.connect(lambda value: changes.append(value))
+            session.data_change_detail.connect(
+                lambda value, _change: changes.append(value)
+            )
             controller = DocumentController(FakeEditor(), session)
             session.set_project(project)
 
@@ -112,7 +114,9 @@ class DocumentControllerTests(unittest.TestCase):
             project = NovelProject.create(Path(tmp) / "proj", "测试")
             session = ProjectSession()
             changes = []
-            session.data_changed.connect(changes.append)
+            session.data_change_detail.connect(
+                lambda value, _change: changes.append(value)
+            )
             session.set_project(project)
             controller = DocumentController(FakeEditor(), session)
 
@@ -206,7 +210,9 @@ class DocumentControllerTests(unittest.TestCase):
             editor.category = "章节"
             controller = DocumentController(editor, session)
             changes = []
-            session.data_changed.connect(changes.append)
+            session.data_change_detail.connect(
+                lambda value, _change: changes.append(value)
+            )
 
             controller.delete_chapter("chapter_01")
 
@@ -242,7 +248,9 @@ class DocumentControllerTests(unittest.TestCase):
             editor.category = "角色"
             controller = DocumentController(editor, session)
             changes = []
-            session.data_changed.connect(changes.append)
+            session.data_change_detail.connect(
+                lambda value, _change: changes.append(value)
+            )
 
             controller.delete_character("林夜")
 
@@ -280,7 +288,9 @@ class DocumentControllerTests(unittest.TestCase):
             editor.category = "世界观"
             controller = DocumentController(editor, session)
             changes = []
-            session.data_changed.connect(changes.append)
+            session.data_change_detail.connect(
+                lambda value, _change: changes.append(value)
+            )
 
             controller.delete_canon_entry("world", world)
 

@@ -5,6 +5,7 @@ from pathlib import Path
 from PySide6.QtCore import QCoreApplication
 
 from core.project import NovelProject
+from core.project_schema import PROJECT_MANIFEST_RELATIVE_PATH
 from ui.project_session import ProjectSession
 
 
@@ -17,10 +18,13 @@ class ProjectSessionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             project = NovelProject.create(Path(tmp) / "proj", "测试")
             session = ProjectSession()
+            self.assertFalse(hasattr(session, "data_changed"))
             changed = []
             data_changed = []
             session.project_changed.connect(lambda value: changed.append(value))
-            session.data_changed.connect(lambda value: data_changed.append(value))
+            session.data_change_detail.connect(
+                lambda value, _change: data_changed.append(value)
+            )
 
             loaded = session.load(project.root)
             session.notify_data_changed()
@@ -48,7 +52,10 @@ class ProjectSessionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             project = NovelProject.create(Path(tmp) / "proj", "测试")
             project.style_guide_path.unlink()
+            (project.root / PROJECT_MANIFEST_RELATIVE_PATH).unlink()
 
-            loaded = ProjectSession().load(project.root)
+            session = ProjectSession()
+            loaded = session.load(project.root)
 
             self.assertTrue(loaded.style_guide_path.is_file())
+            self.assertTrue(session.last_migration_result.migrated)

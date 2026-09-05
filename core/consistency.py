@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from dataclasses import replace
 
 from .context_budget import build_ai_context
 from .context_profiles import CONSISTENCY_CONTEXT_PROFILE, REPAIR_CONTEXT_PROFILE
@@ -15,16 +16,17 @@ def run_consistency_check(
     project: NovelProject,
     chapter_id: str,
     dsh: DSHClient,
-    selection_mode: str = "safe",
     cancel_event: threading.Event | None = None,
+    *,
+    history_remote_enabled: bool = True,
 ) -> str:
-    prompt_budget = dsh.resolve_prompt_budget(cancel_event=cancel_event)
+    prompt_budget = dsh.prompt_build_budget()
     context = build_ai_context(
         project,
         chapter_id,
         profile=CONSISTENCY_CONTEXT_PROFILE,
-        selection_mode=selection_mode,
     )
+    context = replace(context, history_remote_enabled=history_remote_enabled)
     prompt = build_check_prompt(
         project,
         chapter_id,
@@ -45,16 +47,14 @@ def run_consistency_repair(
     chapter_id: str,
     issue: dict,
     dsh: DSHClient,
-    selection_mode: str = "safe",
     cancel_event: threading.Event | None = None,
 ):
-    prompt_budget = dsh.resolve_prompt_budget(cancel_event=cancel_event)
+    prompt_budget = dsh.prompt_build_budget()
     context = build_ai_context(
         project,
         chapter_id,
         profile=REPAIR_CONTEXT_PROFILE,
         relevance_query=str(issue),
-        selection_mode=selection_mode,
     )
     prompt = build_consistency_repair_prompt(
         project,

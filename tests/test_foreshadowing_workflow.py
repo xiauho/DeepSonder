@@ -64,3 +64,26 @@ class ForeshadowingWorkflowTests(TestCase):
             self.assertEqual(resolved["status"], "resolved")
             self.assertEqual(resolved["resolved_chapter"], "chapter_01")
             self.assertNotIn(path_key, controller._pending_foreshadowing_resolutions)
+
+    def test_plain_text_fallback_diagnostic_reports_session_count(self) -> None:
+        session = ProjectSession()
+        document_controller = FakeDocumentController()
+        controller = AIWorkflowController(
+            config={},
+            project_session=session,
+            editor=object(),
+            document_controller=document_controller,
+            ai_controller=FakeAIController(),
+            ai_engine_controller=object(),
+            inspector=object(),
+            reports_page=object(),
+            go_to_writing=lambda: True,
+        )
+        messages = []
+        controller.output_requested.connect(messages.append)
+
+        controller._record_plain_text_fallbacks(1)
+        controller._record_plain_text_fallbacks(2)
+
+        self.assertIn("本会话累计 1 次", messages[0])
+        self.assertIn("本会话累计 3 次", messages[1])

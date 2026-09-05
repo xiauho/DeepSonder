@@ -2,21 +2,14 @@ import tempfile
 from pathlib import Path
 from unittest import TestCase
 
-from core.memory import apply_state_update, merge_story_state
 from core.project import NovelProject, chapter_number_from_id
 
 
 class StoryStateTests(TestCase):
-    def test_generated_empty_hooks_clear_resolved_hooks(self) -> None:
-        merged = merge_story_state(
-            {"foreshadowing": ["old hook"], "characters": {"A": {"state": "旧"}}},
-            {"foreshadowing": [], "characters": {"A": {"state": "新"}}},
-        )
-        self.assertEqual(merged["foreshadowing"], [])
-        self.assertEqual(merged["characters"]["A"]["state"], "新")
-
     def test_unsectioned_markdown_is_available_as_content(self) -> None:
-        outline, content = NovelProject._split_chapter("# 标题\n\n一段没有分区的正文")
+        outline, _brief, content, _extras = NovelProject._parse_chapter(
+            "# 标题\n\n一段没有分区的正文"
+        )
         self.assertEqual(outline, "")
         self.assertEqual(content, "一段没有分区的正文")
 
@@ -55,25 +48,3 @@ class StoryStateTests(TestCase):
         self.assertEqual(chapter_number_from_id("Chapter-3"), 3)
         self.assertIsNone(chapter_number_from_id("序章"))
         self.assertIsNone(chapter_number_from_id("final_v2"))
-
-    def test_apply_state_update_pins_current_chapter_to_processed_chapter(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            project = NovelProject.create(Path(tmp) / "proj", "测试")
-            # A model echoing the template's example value must not reset progress.
-            merged = apply_state_update(
-                project,
-                {"current_chapter": 1, "characters": {}, "foreshadowing": []},
-                "chapter_07",
-            )
-            self.assertEqual(merged["current_chapter"], 7)
-            self.assertEqual(project.load_story_state()["current_chapter"], 7)
-
-    def test_apply_state_update_keeps_model_value_for_custom_chapter_ids(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            project = NovelProject.create(Path(tmp) / "proj", "测试")
-            merged = apply_state_update(
-                project,
-                {"current_chapter": 5, "characters": {}, "foreshadowing": []},
-                "序章",
-            )
-            self.assertEqual(merged["current_chapter"], 5)

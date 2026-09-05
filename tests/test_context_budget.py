@@ -17,7 +17,6 @@ from core.project import NovelProject
 from core.prompt_builder import (
     build_check_prompt,
     build_expansion_prompt,
-    build_state_update_prompt,
     build_write_prompt,
 )
 
@@ -71,12 +70,14 @@ class AllocateTests(TestCase):
         def render(values):
             return values.get("first", "") + values.get("second", "")
 
-        _system, argv_prompt = prompt_builder._finalize(
+        argv_bundle = prompt_builder._finalize(
             "system", render, sections, 24_000
         )
-        _system, file_prompt = prompt_builder._finalize(
+        file_bundle = prompt_builder._finalize(
             "system", render, sections, 48_000
         )
+        argv_prompt = argv_bundle.user_prompt
+        file_prompt = file_bundle.user_prompt
 
         self.assertNotIn("扩展预算尾部标记", argv_prompt)
         self.assertIn("扩展预算尾部标记", file_prompt)
@@ -149,12 +150,13 @@ class BudgetedPromptTests(TestCase):
         self._tmp.cleanup()
 
     def test_write_prompt_stays_under_hard_limit_and_keeps_tail(self) -> None:
-        system, user = build_write_prompt(self.project, "chapter_02", 2000)
+        prompt = build_write_prompt(self.project, "chapter_02", 2000)
+        system, user = prompt.system_prompt, prompt.user_prompt
         self.assertLess(len(system) + len(user), 30000)
         self.assertIn("【当前章节已有正文】", user)
         # The sliding window marks the cut and must keep the chapter's ending,
         # because that is what the continuation has to join.
-        self.assertIn("（前文过长，已截断）", user)
+        self.assertIn("正文中段已截断，保留章节开头与最近结尾", user)
         self.assertIn("夜色中的列城亮起灯火。\n\n只输出以下标记之间的小说正文", user)
 
     def test_long_style_guide_is_bounded_and_prompt_stays_under_hard_limit(self) -> None:
@@ -163,7 +165,8 @@ class BudgetedPromptTests(TestCase):
             encoding="utf-8",
         )
 
-        system, user = build_write_prompt(self.project, "chapter_02", 2000)
+        prompt = build_write_prompt(self.project, "chapter_02", 2000)
+        system, user = prompt.system_prompt, prompt.user_prompt
 
         self.assertLess(len(system) + len(user), 30000)
         self.assertIn("【写作风格约束】", user)
@@ -186,23 +189,19 @@ class BudgetedPromptTests(TestCase):
             title="第二十一章",
         )
 
-        system, user = build_expansion_prompt(
+        prompt = build_expansion_prompt(
             self.project,
             "chapter_21",
             2000,
             summary_count=20,
         )
+        system, user = prompt.system_prompt, prompt.user_prompt
 
         self.assertLess(len(system) + len(user), 30000)
         self.assertIn("最多最近 20 个已完成章节的摘要", user)
-        self.assertIn(TAIL_MARK.strip(), user)
         self.assertIn("CHAPTER_20_END", user)
 
     def test_check_prompt_stays_under_hard_limit(self) -> None:
-        system, user = build_check_prompt(self.project, "chapter_02")
+        prompt = build_check_prompt(self.project, "chapter_02")
+        system, user = prompt.system_prompt, prompt.user_prompt
         self.assertLess(len(system) + len(user), 30000)
-
-    def test_state_update_prompt_stays_under_hard_limit(self) -> None:
-        system, user = build_state_update_prompt(self.project, "chapter_02")
-        self.assertLess(len(system) + len(user), 30000)
-        self.assertIn('"current_chapter": 2', user)

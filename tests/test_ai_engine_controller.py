@@ -37,8 +37,12 @@ class AIEngineControllerTests(unittest.TestCase):
             first = controller.client
             self.assertIsNotNone(first)
             self.assertTrue(first.isolated)
-            self.assertEqual(first.options["prompt_transport"], "auto")
-            self.assertEqual(first.options["file_prompt_budget"], 48_000)
+            self.assertNotIn("prompt_transport", first.options)
+            self.assertEqual(first.options["file_prompt_budget"], 20_424)
+            self.assertEqual(first.options["input_token_budget"], 24_000)
+            self.assertEqual(first.options["runtime_reserve_tokens"], 6_000)
+            self.assertEqual(first.options["model_context_window_tokens"], 0)
+            self.assertEqual(first.options["context_strategy"], "balanced")
             self.assertTrue(callable(first.options["report_callback"]))
 
             running[0] = True

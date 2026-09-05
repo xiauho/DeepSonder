@@ -8,8 +8,6 @@ from core.ai_protocol import (
     parse_consistency_repair,
     parse_continuation,
     parse_expansion,
-    parse_story_state,
-    parse_summary,
 )
 
 
@@ -67,6 +65,8 @@ class AIProtocolTests(TestCase):
         result = parse_continuation("他推开舱门，冷风裹着灰尘扑面而来。")
         self.assertEqual(result.text, "他推开舱门，冷风裹着灰尘扑面而来。")
         self.assertFalse(result.used_marker)
+        self.assertTrue(result.plain_text_fallback)
+        self.assertIn("纯正文兼容回退", result.protocol_warning)
 
     def test_expansion_protocol_has_expansion_completion_message(self) -> None:
         result = parse_expansion(
@@ -255,19 +255,3 @@ class AIProtocolTests(TestCase):
                     ],
                 }
             )
-
-    def test_summary_and_state_require_task_types(self) -> None:
-        self.assertEqual(
-            parse_summary('{"type":"chapter_summary","summary":"摘要"}'),
-            "摘要",
-        )
-        state = parse_story_state(
-            '{"type":"story_state_update","current_chapter":1,'
-            '"current_location":"地点","characters":{},"foreshadowing":[]}'
-        )
-        self.assertNotIn("type", state)
-        self.assertIn("completion_message", parse_consistency_report(
-            '{"type":"consistency_report","issues":[]}'
-        ))
-        with self.assertRaises(AIProtocolError):
-            parse_summary('{"type":"continuation","summary":"错误"}')

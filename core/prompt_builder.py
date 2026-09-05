@@ -11,7 +11,6 @@ from .context_budget import (
     DEFAULT_PROMPT_BUDGET,
     EXPANSION_SUMMARY_COUNT,
     DROPPED_PLACEHOLDER,
-    TAIL_MARK,
     allocate_with_report,
     build_ai_context,
     build_task_context,
@@ -25,11 +24,11 @@ from .context_profiles import (
     CONTINUATION_CONTEXT_PROFILE,
     EXPANSION_CONTEXT_PROFILE,
     REPAIR_CONTEXT_PROFILE,
-    STATE_UPDATE_CONTEXT_PROFILE,
-    SUMMARY_CONTEXT_PROFILE,
 )
-from .project import NovelProject, chapter_number_from_id
+from .project import NovelProject
 from .text_anchor import render_anchor_context
+from .history_context import history_token_budget
+from .token_budget import DEFAULT_TOKEN_SAFETY_FACTOR
 
 COMMON_RULES = """
 你是 Novalist 的小说创作 AI。
@@ -58,7 +57,7 @@ def build_expansion_prompt(
     selected_power: list[str] | tuple[str, ...] | None = None,
     context: AIContext | None = None,
     prompt_budget: int = DEFAULT_PROMPT_BUDGET,
-    selection_mode: str = "safe",
+    history_token_limit: int | None = None,
 ) -> PromptBundle:
     """Build a compact outline-to-chapter expansion task.
 
@@ -80,7 +79,6 @@ def build_expansion_prompt(
             ensure_ascii=False,
             default=str,
         ),
-        selection_mode=selection_mode,
     )
     chapter = context.chapter
     sections = gather_sections(
@@ -141,6 +139,7 @@ def build_expansion_prompt(
 
 【本次上下文范围】
 - 历史剧情：最多最近 {summary_count} 个已完成章节的摘要
+- 如提供更早的已采用记忆，仅将其作为关联事实参考；来源版本未确认的旧摘要不视为已验证事实。
 - 当前正文：未加载，扩写只依据本章规划生成
 - 角色资料：仅加载本章标题、大纲和剧情简写中命中的角色卡
 - 世界观与体系设定：全局规则始终加载；核心体系自动纳入重点范围；其他体系作为低优先级背景资料加载
@@ -183,9 +182,10 @@ def build_expansion_prompt(
         sections,
         prompt_budget,
         task_kind="chapter_expansion",
+        history_token_limit=history_token_limit,
         chapter_id=chapter_id,
         history_requested=summary_count,
-        history_available=_history_available(context, chapter_id),
+        state_scope=context.state_scope,
         selection_stats=context.related.selection,
     )
 
@@ -200,7 +200,7 @@ def build_expansion_retry_prompt(
     selected_power: list[str] | tuple[str, ...] | None = None,
     context: AIContext | None = None,
     prompt_budget: int = DEFAULT_PROMPT_BUDGET,
-    selection_mode: str = "safe",
+    history_token_limit: int | None = None,
 ) -> PromptBundle:
     """Build a correction prompt when headless returns a workspace preamble."""
     base = build_expansion_prompt(
@@ -212,7 +212,7 @@ def build_expansion_retry_prompt(
         selected_power=selected_power,
         context=context,
         prompt_budget=prompt_budget,
-        selection_mode=selection_mode,
+        history_token_limit=history_token_limit,
     )
     user_prompt = base.user_prompt
     retry_system = f"""
@@ -313,14 +313,12 @@ def build_write_prompt(
     summary_count: int = CONTINUATION_SUMMARY_COUNT,
     context: AIContext | None = None,
     prompt_budget: int = DEFAULT_PROMPT_BUDGET,
-    selection_mode: str = "safe",
 ) -> PromptBundle:
     summary_count = max(0, int(summary_count))
     context = context or build_ai_context(
         project,
         chapter_id,
         profile=CONTINUATION_CONTEXT_PROFILE,
-        selection_mode=selection_mode,
     )
     chapter = context.chapter
     sections = gather_sections(
@@ -343,7 +341,8 @@ def build_write_prompt(
             "selected_power",
             "power",
         ),
-        content_cap=6000,
+        content_keep="head_tail",
+        content_cap=min(16_000, max(6_000, int(prompt_budget) // 4)),
         summary_count=summary_count,
         context=context,
     )
@@ -377,7 +376,8 @@ def build_write_prompt(
 
 【本次上下文范围】
 - 历史剧情：最多最近 {summary_count} 个已完成章节的摘要
-- 当前正文：只提供结尾窗口，用于保持直接衔接
+- 如提供更早的已采用记忆，仅将其作为关联事实参考；来源版本未确认的旧摘要不视为已验证事实。
+- 当前正文：保留少量章节开头和更长的最近结尾，用于锁定视角并保持直接衔接
 
 {_style_block(ctx)}
 
@@ -419,7 +419,7 @@ def build_write_prompt(
         task_kind="continuation_current_chapter",
         chapter_id=chapter_id,
         history_requested=summary_count,
-        history_available=_history_available(context, chapter_id),
+        state_scope=context.state_scope,
         selection_stats=context.related.selection,
     )
 
@@ -432,7 +432,6 @@ def build_write_retry_prompt(
     summary_count: int = CONTINUATION_SUMMARY_COUNT,
     context: AIContext | None = None,
     prompt_budget: int = DEFAULT_PROMPT_BUDGET,
-    selection_mode: str = "safe",
 ) -> PromptBundle:
     """Build an explicit retry after an Agent-style response."""
     base = build_write_prompt(
@@ -442,7 +441,6 @@ def build_write_retry_prompt(
         summary_count=summary_count,
         context=context,
         prompt_budget=prompt_budget,
-        selection_mode=selection_mode,
     )
     user_prompt = base.user_prompt
     retry_system = f"""
@@ -464,190 +462,17 @@ def build_write_retry_prompt(
     return _rebundle(base, retry_system, retry_user, "continuation_retry")
 
 
-def build_summary_prompt(
-    project: NovelProject,
-    chapter_id: str,
-    *,
-    context: AIContext | None = None,
-    prompt_budget: int = DEFAULT_PROMPT_BUDGET,
-    selection_mode: str = "safe",
-) -> PromptBundle:
-    context = context or build_ai_context(
-        project,
-        chapter_id,
-        profile=SUMMARY_CONTEXT_PROFILE,
-        selection_mode=selection_mode,
-    )
-    chapter = context.chapter
-    sections = gather_sections(
-        project,
-        chapter_id,
-        ("state", "characters", "timeline", "core_power", "core_systems", "world", "power", "outline", "plot_brief", "content"),
-        content_keep="head",
-        context=context,
-    )
-    system_prompt = f"""
-{COMMON_RULES}
-
-任务类型：chapter_summary。
-只输出合法 JSON，不要输出 Markdown 代码围栏或解释。
-""".strip()
-
-    def render(ctx: dict[str, str]) -> str:
-        return f"""
-请为当前章节生成结构化摘要。摘要不超过 200 个中文字符，只描述正文中已经发生的事实。
-
-【相关设定】
-{_related_block(ctx) or "（暂无）"}
-
-【当前故事状态】
-{_section(ctx, "state")}
-
-【章节标题】
-{chapter.title}
-
-【本章规划】
-{_section(ctx, "outline")}
-
-【剧情简写】
-{_section(ctx, "plot_brief")}
-
-【章节正文】
-{_section(ctx, "content", "（本章暂无正文）")}
-
-返回格式：
-{{
-  "type": "chapter_summary",
-  "chapter_id": "{chapter_id}",
-  "summary": "章节摘要",
-  "completion_message": "章节摘要任务已完成",
-  "events": ["主要事件"],
-  "character_changes": [{{"character": "角色名", "change": "状态变化"}}],
-  "location_changes": ["地点变化"],
-  "foreshadowing_changes": {{"added": ["新增伏笔"], "resolved": ["已回收伏笔"]}}
-}}
-""".strip()
-
-    return _finalize(
-        system_prompt,
-        render,
-        sections,
-        prompt_budget,
-        task_kind="chapter_summary",
-        chapter_id=chapter_id,
-        selection_stats=context.related.selection,
-    )
-
-
-def build_state_update_prompt(
-    project: NovelProject,
-    chapter_id: str,
-    *,
-    context: AIContext | None = None,
-    prompt_budget: int = DEFAULT_PROMPT_BUDGET,
-    selection_mode: str = "safe",
-) -> PromptBundle:
-    context = context or build_ai_context(
-        project,
-        chapter_id,
-        profile=STATE_UPDATE_CONTEXT_PROFILE,
-        selection_mode=selection_mode,
-    )
-    chapter = context.chapter
-    old_state = context.story_state
-    expected_number = chapter_number_from_id(chapter_id)
-    # A literal example value gets echoed back by the model, so the template
-    # must carry the real chapter ordinal whenever one is known.
-    example_number = expected_number
-    if example_number is None:
-        old_number = old_state.get("current_chapter")
-        example_number = old_number if isinstance(old_number, int) else 1
-    number_rule = (
-        f"7. current_chapter 必须填写为 {expected_number}（当前正在处理的章节序号），不要改用其他数字。\n"
-        if expected_number is not None
-        else ""
-    )
-    sections = gather_sections(
-        project,
-        chapter_id,
-        ("outline", "plot_brief", "content", "state"),
-        content_keep="head",
-        context=context,
-    )
-    system_prompt = f"""
-{COMMON_RULES}
-
-任务类型：story_state_update。
-只输出合法 JSON，不要输出 Markdown 代码围栏或解释。
-""".strip()
-
-    def render(ctx: dict[str, str]) -> str:
-        return f"""
-请根据当前章节正文和旧故事状态，生成更新后的故事状态。
-
-要求：
-1. 未发生变化的字段保持原值。
-2. 不要删除旧角色，除非正文明确说明角色已经不存在。
-3. 已回收的伏笔从 foreshadowing 中移除。
-4. 新增但尚未回收的伏笔加入 foreshadowing。
-5. 只返回本章发生变化的角色字段，未提及的字段会自动保持旧值。
-6. 旧故事状态中以“…”结尾的值是截断版本，不要原样抄回。
-{number_rule}
-【旧故事状态】
-{_section(ctx, "state")}
-
-【本章大纲】
-{_section(ctx, "outline", "（暂无）")}
-
-【剧情简写】
-{_section(ctx, "plot_brief")}
-
-【本章正文】
-{_section(ctx, "content", "（暂无）")}
-
-返回格式：
-{{
-  "type": "story_state_update",
-  "completion_message": "故事状态更新任务已完成",
-  "current_chapter": {example_number},
-  "current_location": "当前地点",
-  "characters": {{
-    "角色名": {{
-      "location": "所在地点",
-      "state": "状态描述",
-      "power_level": "当前修为/战力等级",
-      "items": ["物品1"],
-      "relations": {{"角色名": "关系描述"}}
-    }}
-  }},
-  "foreshadowing": ["未回收伏笔"]
-}}
-""".strip()
-
-    return _finalize(
-        system_prompt,
-        render,
-        sections,
-        prompt_budget,
-        task_kind="story_state_update",
-        chapter_id=chapter_id,
-        selection_stats=context.related.selection,
-    )
-
-
 def build_check_prompt(
     project: NovelProject,
     chapter_id: str,
     *,
     context: AIContext | None = None,
     prompt_budget: int = DEFAULT_PROMPT_BUDGET,
-    selection_mode: str = "safe",
 ) -> PromptBundle:
     context = context or build_ai_context(
         project,
         chapter_id,
         profile=CONSISTENCY_CONTEXT_PROFILE,
-        selection_mode=selection_mode,
     )
     chapter = context.chapter
     sections = gather_sections(
@@ -748,7 +573,7 @@ repairability 只能使用：automatic、choice_required、manual。
         task_kind="consistency_check",
         chapter_id=chapter_id,
         history_requested=EXPANSION_SUMMARY_COUNT,
-        history_available=_history_available(context, chapter_id),
+        state_scope=context.state_scope,
         selection_stats=context.related.selection,
     )
 
@@ -760,7 +585,6 @@ def build_consistency_repair_prompt(
     *,
     context: AIContext | None = None,
     prompt_budget: int = DEFAULT_PROMPT_BUDGET,
-    selection_mode: str = "safe",
 ) -> PromptBundle:
     """Build a constrained one-range repair proposal for one report issue."""
     context = context or build_ai_context(
@@ -768,7 +592,6 @@ def build_consistency_repair_prompt(
         chapter_id,
         profile=REPAIR_CONTEXT_PROFILE,
         relevance_query=json.dumps(dict(issue), ensure_ascii=False, default=str),
-        selection_mode=selection_mode,
     )
     chapter = context.chapter
     sections = gather_sections(
@@ -859,7 +682,6 @@ def build_consistency_repair_prompt(
         chapter_id=chapter_id,
         selection_stats=context.related.selection,
         history_requested=EXPANSION_SUMMARY_COUNT,
-        history_available=_history_available(context, chapter_id),
     )
 
 
@@ -874,17 +696,30 @@ def _finalize(
     history_requested: int | None = None,
     history_available: int | None = None,
     selection_stats: tuple[CanonSelectionStat, ...] = (),
+    history_token_limit: int | None = None,
+    state_scope: str = "",
 ) -> PromptBundle:
     """Budget sections against instruction overhead, then render."""
     overhead = len(system_prompt) + len(render({}))
     budget = max(1000, int(prompt_budget))
     context_budget = max(1000, budget - overhead)
-    allocation = allocate_with_report(sections, context_budget)
+    allocation = allocate_with_report(
+        sections, context_budget,
+        history_token_limit=(
+            history_token_budget(int(budget * DEFAULT_TOKEN_SAFETY_FACTOR), "balanced")
+            if history_token_limit is None else history_token_limit
+        ),
+    )
     user_prompt = render(allocation.values)
     included = None
-    if history_requested is not None:
-        possible = min(max(0, history_requested), max(0, history_available or 0))
-        included = _included_history_count(allocation.values.get("summaries", ""), possible)
+    history_window = next((s.history for s in sections if s.history is not None), None)
+    if allocation.history is not None:
+        included = allocation.history.included
+        history_available = len(history_window.entries)
+        history_requested = history_window.requested
+    elif history_requested is not None:
+        included = 0
+        history_available = 0
     finalized_selection = _finalize_selection_stats(
         selection_stats,
         allocation.values,
@@ -922,6 +757,19 @@ def _finalize(
         history_requested=history_requested,
         history_available=history_available,
         history_included=included,
+        history_in_range=history_window.in_range if history_window else 0,
+        history_missing=history_window.missing if history_window else 0,
+        history_excluded_budget=allocation.history.excluded_budget if allocation.history else 0,
+        history_token_budget=allocation.history.token_budget if allocation.history else 0,
+        history_estimated_tokens=allocation.history.estimated_tokens if allocation.history else 0,
+        history_remote_candidates=history_window.remote_candidates if history_window else 0,
+        history_remote_matched=history_window.remote_matched if history_window else 0,
+        history_remote_included=allocation.history.remote_included if allocation.history else 0,
+        history_stale=history_window.stale if history_window else 0,
+        history_unverified=history_window.unverified if history_window else 0,
+        history_provenance_error=history_window.provenance_error if history_window else False,
+        history_sources=allocation.history.sources if allocation.history else (),
+        state_scope=state_scope,
     )
     return PromptBundle(system_prompt, user_prompt, report)
 
@@ -945,8 +793,6 @@ def _finalize_selection_stats(
             )
             if headings:
                 prompt_included = min(item.included, headings)
-            elif item.mode == "legacy_all":
-                prompt_included = item.included if item.included <= 1 else None
             else:
                 prompt_included = min(1, item.included)
         finalized.append(replace(item, prompt_included=prompt_included))
@@ -999,28 +845,6 @@ def _rebundle(
         total_prompt_chars=len(system_prompt) + len(user_prompt),
     )
     return PromptBundle(system_prompt, user_prompt, report)
-
-
-def _history_available(context: AIContext, chapter_id: str) -> int:
-    current = chapter_number_from_id(chapter_id)
-    count = 0
-    for key, value in (context.chapter_summaries or {}).items():
-        if key == chapter_id or not str(value).strip():
-            continue
-        number = chapter_number_from_id(key)
-        if current is not None and number is not None and number > current:
-            continue
-        count += 1
-    return count
-
-
-def _included_history_count(rendered: str, possible: int) -> int:
-    if not rendered or rendered == DROPPED_PLACEHOLDER or possible <= 0:
-        return 0
-    headers = sum(1 for line in rendered.splitlines() if line.startswith("### "))
-    if TAIL_MARK.strip() in rendered and headers < possible:
-        headers += 1
-    return min(possible, max(1, headers))
 
 
 def _section(ctx: dict[str, str], key: str, fallback: str = "（暂无）") -> str:

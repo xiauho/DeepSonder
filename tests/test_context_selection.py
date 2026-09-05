@@ -56,7 +56,6 @@ class ContextSelectionTests(TestCase):
             self.project,
             "chapter_01",
             profile=EXPANSION_CONTEXT_PROFILE,
-            selection_mode="safe",
         )
         world_stat = next(
             item for item in context.related.selection if item.category == "world"
@@ -107,21 +106,6 @@ class ContextSelectionTests(TestCase):
         self.assertIn("问题直接相关角色标记", prompt.user_prompt)
         self.assertNotIn("当前章节角色。", prompt.user_prompt)
 
-    def test_legacy_mode_keeps_all_documents_as_a_compatible_fallback(self) -> None:
-        context = build_task_context(
-            self.project,
-            "chapter_01",
-            profile=EXPANSION_CONTEXT_PROFILE,
-            selection_mode="legacy_all",
-        )
-        world_stat = next(
-            item for item in context.related.selection if item.category == "world"
-        )
-
-        self.assertEqual(world_stat.included, world_stat.candidates)
-        self.assertEqual(world_stat.excluded_unmatched, 0)
-        self.assertNotIn("### 星港\n", context.related.world)
-
     def test_core_and_manually_selected_systems_are_required_and_reported(self) -> None:
         core_system = self.project.canon_dir / "power" / "星术.md"
         selected_system = self.project.canon_dir / "power" / "门禁.md"
@@ -171,12 +155,10 @@ class ContextSelectionTests(TestCase):
                 prompt_budget=24_000,
             )
 
-    def test_invalid_config_mode_falls_back_to_safe(self) -> None:
-        self.assertEqual(
-            normalize_config({"ai_context_selection_mode": "unknown"})[
-                "ai_context_selection_mode"
-            ],
-            "safe",
+    def test_retired_context_mode_is_removed_from_config(self) -> None:
+        self.assertNotIn(
+            "ai_context_selection_mode",
+            normalize_config({"ai_context_selection_mode": "legacy_all"}),
         )
 
 
@@ -193,7 +175,6 @@ class RankedDocumentUnitTests(TestCase):
                 paths,
                 query="目标",
                 category="world",
-                mode="safe",
                 reader=lambda path: path.read_text(encoding="utf-8"),
                 total_chars=400,
                 entry_chars=400,

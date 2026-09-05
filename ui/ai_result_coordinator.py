@@ -294,13 +294,15 @@ class AIResultCoordinator:
         self,
         *,
         summary: str,
+        details: str = "",
         context_matches: Callable[[], bool],
         commit: Callable[[], object],
     ) -> CommitOutcome:
+        detail_block = f"\n\n{details}" if str(details or "").strip() else ""
         answer = QMessageBox.question(
             self.parent,
             "确认更新长期记忆",
-            f"章节摘要：\n{summary}\n\n确认写入章节摘要和故事状态吗？",
+            f"章节摘要：\n{summary}{detail_block}\n\n确认写入章节摘要和故事状态吗？",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.Yes,
         )

@@ -12,11 +12,18 @@ from PySide6.QtWidgets import QDialog, QMessageBox
 
 from core import ai_protocol
 from core.character_cards import create_character_cards, missing_character_cards
+from core.chapter_memory import ChapterMemoryProposal
 from core.ai_result_service import AIResultService
 from core.ai_workflow import AIWorkflowService
 from core.config import save_config
+from core.expansion import ExpansionRunResult
 from core.project_data import ProjectDataStore
 from core.text_anchor import enrich_report_anchors, resolve_text_anchor
+from core.token_budget import (
+    DEFAULT_CHUNK_OVERLAP_TOKENS,
+    DEFAULT_CHUNK_TOKEN_BUDGET,
+    DEFAULT_INPUT_TOKEN_BUDGET,
+)
 from ui.ai_result_coordinator import AIResultCoordinator
 from ui.chapter_selection_dialog import ChapterSelectionDialog
 from ui.expansion_context_selection_dialog import ExpansionContextSelectionDialog
@@ -74,6 +81,7 @@ class AIWorkflowController(QObject):
         self._pending_foreshadowing_resolutions: dict[
             str, PendingForeshadowingResolution
         ] = {}
+        self._plain_text_fallback_count = 0
 
         ai_controller.succeeded.connect(self._on_task_succeeded)
         report_signal = getattr(ai_engine_controller, "context_reported", None)
@@ -98,6 +106,8 @@ class AIWorkflowController(QObject):
         selected_power = tuple(str(path) for path in selected_power)
         target_chars = int(self.config.get("expand_target_chars", 2000))
         history_chapters = int(self.config.get("ai_context_history_chapters", 5))
+        history_mode = str(self.config.get("ai_history_mode", "custom"))
+        history_remote_enabled = bool(self.config.get("ai_history_remote_enabled", True))
         self._start(
             "expand",
             chapter_id,
@@ -107,6 +117,8 @@ class AIWorkflowController(QObject):
                 chapter_id,
                 target_chars=target_chars,
                 history_chapters=history_chapters,
+                history_mode=history_mode,
+                history_remote_enabled=history_remote_enabled,
                 selected_foreshadowing=selected_foreshadowing,
                 selected_power=selected_power,
                 cancel_event=cancel_event,
@@ -122,11 +134,17 @@ class AIWorkflowController(QObject):
         if request is None:
             return
         project, chapter_id, workflow = request
+        history_remote_enabled = bool(self.config.get("ai_history_remote_enabled", True))
         self._start(
             "check",
             chapter_id,
             f"正在检查设定 · {chapter_id}",
-            lambda cancel_event: workflow.check(project, chapter_id, cancel_event=cancel_event),
+            lambda cancel_event: workflow.check(
+                project,
+                chapter_id,
+                cancel_event=cancel_event,
+                history_remote_enabled=history_remote_enabled,
+            ),
         )
 
     def check_from_reports(self) -> None:
@@ -178,18 +196,17 @@ class AIWorkflowController(QObject):
             QMessageBox.warning(self.parent, "读取章节失败", str(exc))
             return
         title = chapter.title or chapter_id
-        workflow = AIWorkflowService(
-            dsh,
-            selection_mode=str(
-                self.config.get("ai_context_selection_mode") or "safe"
-            ),
-        )
+        workflow = self._workflow(dsh)
+        history_remote_enabled = bool(self.config.get("ai_history_remote_enabled", True))
         self._start(
             "check",
             chapter_id,
             f"正在检查设定 · {title}",
             lambda cancel_event: workflow.check(
-                project, chapter_id, cancel_event=cancel_event
+                project,
+                chapter_id,
+                cancel_event=cancel_event,
+                history_remote_enabled=history_remote_enabled,
             ),
             task_context={
                 "origin": "reports",
@@ -293,12 +310,7 @@ class AIWorkflowController(QObject):
         if dsh is None:
             QMessageBox.warning(self.parent, "AI 未就绪", "当前没有可用的 dsh 客户端，请先检查设置。")
             return
-        workflow = AIWorkflowService(
-            dsh,
-            selection_mode=str(
-                self.config.get("ai_context_selection_mode") or "safe"
-            ),
-        )
+        workflow = self._workflow(dsh)
         self._start(
             "repair",
             chapter_id,
@@ -330,10 +342,23 @@ class AIWorkflowController(QObject):
                 "当前没有可用的 dsh 客户端，请先检查设置。",
             )
             return None
-        return project, chapter_id, AIWorkflowService(
+        return project, chapter_id, self._workflow(dsh)
+
+    def _workflow(self, dsh) -> AIWorkflowService:
+        """Create a workflow with the same normalized token policy as the UI."""
+        return AIWorkflowService(
             dsh,
-            selection_mode=str(
-                self.config.get("ai_context_selection_mode") or "safe"
+            input_token_budget=int(
+                self.config.get("ai_input_token_budget", DEFAULT_INPUT_TOKEN_BUDGET)
+            ),
+            chunk_token_budget=int(
+                self.config.get("ai_chunk_token_budget", DEFAULT_CHUNK_TOKEN_BUDGET)
+            ),
+            chunk_overlap_tokens=int(
+                self.config.get(
+                    "ai_chunk_overlap_tokens",
+                    DEFAULT_CHUNK_OVERLAP_TOKENS,
+                )
             ),
         )
 
@@ -462,8 +487,10 @@ class AIWorkflowController(QObject):
             # only after the result handler has made its commit decision.
             self.ai_controller.release_result(token)
 
-    def _on_expansion_done(self, token, result: tuple[str, str | None]) -> None:
-        raw, first_raw = result
+    def _on_expansion_done(self, token, result: ExpansionRunResult) -> None:
+        raw = result.raw_output
+        first_raw = result.first_raw_output
+        self._record_plain_text_fallbacks(result.plain_text_fallback_count)
         if first_raw is not None:
             self._emit_output(
                 "首次返回未通过协议校验，已自动纠偏重试。首次原始返回（可人工挽救）：\n"
@@ -715,45 +742,56 @@ class AIWorkflowController(QObject):
         self._emit_output("已应用一处最小正文修复，尚未自动保存。")
         self._emit_status("AI 修复已应用，请审阅后保存")
 
-    def _on_memory_done(self, token, result: tuple[str, dict, str]) -> None:
-        summary, new_state, completion_message = result
-        try:
-            draft = self.ai_result_service.prepare_memory(summary, new_state)
-        except ValueError as exc:
-            QMessageBox.warning(self.parent, "更新失败", str(exc))
-            return
-        self._emit_output(f"✅ {completion_message}；记忆结果已生成，等待确认写入")
-        self._emit_status("记忆更新已完成，等待确认写入")
+    def _on_memory_done(self, token, proposal: ChapterMemoryProposal) -> None:
+        self._emit_output(
+            f"✅ {proposal.completion_message}；"
+            f"生成 {len(proposal.patches)} 条状态 Patch、"
+            f"发现 {len(proposal.conflicts)} 条冲突或警告"
+        )
         chapter_id = token.chapter_id
         project = self.project_session.project
         if not chapter_id or project is None:
-            self._emit_output("记忆更新已取消，未修改项目数据。")
+            self._emit_output("记忆提案已取消，未修改项目数据。")
+            return
+        if proposal.has_blockers:
+            details = proposal.preview_text()
+            QMessageBox.warning(
+                self.parent,
+                "记忆提案存在阻断冲突",
+                f"为避免覆盖不一致状态，本次未写入。\n\n{details}",
+            )
+            self._emit_output("记忆提案存在阻断冲突，故事状态未写入。")
+            self._emit_status("记忆更新被冲突检测阻止")
             return
         outcome = self.ai_result_coordinator.confirm_memory(
-            summary=draft.summary,
+            summary=proposal.summary,
+            details=proposal.preview_text(),
             context_matches=lambda: self._task_context_matches(token),
-            commit=lambda: self.ai_result_service.commit_memory(project, chapter_id, draft),
+            commit=lambda: self.ai_result_service.commit_memory_proposal(
+                project,
+                chapter_id,
+                proposal,
+            ),
         )
         if outcome.status == "cancelled":
             self._emit_output("记忆更新已取消，未修改项目数据。")
             return
         if outcome.status == "stale":
-            self._emit_output("记忆更新结果已丢弃：项目或章节已切换。")
+            self._emit_output("记忆提案已丢弃：项目或章节已发生变化。")
             return
         if outcome.status == "failed":
-            self._emit_output(f"记忆更新失败：{outcome.error or '未知错误'}")
+            self._emit_output(f"记忆提案写入失败：{outcome.error or '未知错误'}")
             self._emit_status("长期记忆更新失败")
-            QMessageBox.critical(self.parent, "更新失败", outcome.error or "长期记忆写入失败。")
+            QMessageBox.critical(
+                self.parent,
+                "更新失败",
+                outcome.error or "长期记忆写入失败。",
+            )
             return
         commit_result = outcome.value
         if commit_result is None:
             return
-        if commit_result.chapter_was_corrected:
-            self._emit_output(
-                f"AI 返回的 current_chapter={commit_result.received_chapter} 与当前章节不符，"
-                f"已按章节 {commit_result.expected_chapter} 修正。"
-            )
-        self._emit_output(f"长期记忆已更新\n{draft.summary}")
+        self._emit_output(f"长期记忆已通过事实 Patch 更新\n{proposal.summary}")
         self.project_session.notify_data_changed(
             [
                 project.memory_dir / "story_state.json",
@@ -824,6 +862,16 @@ class AIWorkflowController(QObject):
         self._emit_output(f"✅ {message}")
         self._emit_status(message)
         QMessageBox.information(self.parent, "AI 任务完成", message)
+
+    def _record_plain_text_fallbacks(self, count: int) -> None:
+        count = max(0, int(count))
+        if not count:
+            return
+        self._plain_text_fallback_count += count
+        self._emit_output(
+            "协议诊断：本次扩写触发纯正文兼容回退 "
+            f"{count} 次；本会话累计 {self._plain_text_fallback_count} 次。"
+        )
 
     def _emit_output(self, message: str) -> None:
         self.output_requested.emit(message)

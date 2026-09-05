@@ -47,8 +47,12 @@ class AIEngineController(QObject):
             profile="headless",
             timeout=normalized["dsh_timeout"],
             extra_args=normalized["dsh_extra_args"],
-            prompt_transport=normalized["dsh_prompt_transport"],
             file_prompt_budget=normalized["dsh_file_prompt_budget"],
+            task_file_max_bytes=normalized["dsh_task_file_max_bytes"],
+            input_token_budget=normalized["ai_input_token_budget"],
+            runtime_reserve_tokens=normalized["ai_runtime_reserve_tokens"],
+            model_context_window_tokens=normalized["ai_model_context_window_tokens"],
+            context_strategy=normalized["ai_context_strategy"],
             report_callback=self.context_reported.emit,
         )
         client.use_isolated_workspace()

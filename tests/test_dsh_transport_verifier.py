@@ -68,7 +68,7 @@ class DSHTransportVerifierTests(TestCase):
 
     def test_simulated_timeout_removes_task_file_and_workspace(self) -> None:
         prompt = build_synthetic_prompt(10_000)
-        client = SimulatedTimeoutClient("dsh", prompt_transport="file")
+        client = SimulatedTimeoutClient("dsh")
         client.use_isolated_workspace()
         workspace = client.working_directory
         client._file_transport_supported = True

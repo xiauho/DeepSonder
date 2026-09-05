@@ -10,6 +10,7 @@ from PySide6.QtCore import QObject, Signal
 
 from core.project import NovelProject
 from core.project_data import ProjectDataStore
+from core.project_migrations import ProjectMigrationResult, migrate_project
 
 
 @dataclass(frozen=True)
@@ -29,13 +30,13 @@ class ProjectSession(QObject):
     """Own the active project and publish changes that views can observe."""
 
     project_changed = Signal(object)
-    data_changed = Signal(object)
     data_change_detail = Signal(object, object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._project: NovelProject | None = None
         self._data_store: ProjectDataStore | None = None
+        self._last_migration_result: ProjectMigrationResult | None = None
 
     @property
     def project(self) -> NovelProject | None:
@@ -51,17 +52,17 @@ class ProjectSession(QObject):
             raise RuntimeError("当前没有打开的项目。")
         return self._data_store
 
+    @property
+    def last_migration_result(self) -> ProjectMigrationResult | None:
+        return self._last_migration_result
+
     def load(self, path: Path) -> NovelProject:
         """Load and activate one valid project directory."""
         path = Path(path)
         if not NovelProject.is_project(path):
             raise ValueError(f"该目录不是有效的 Novalist 创作项目：\n{path}")
+        self._last_migration_result = migrate_project(path)
         project = NovelProject(path)
-        # Migrate projects created before the always-on ability core existed.
-        store = ProjectDataStore(project)
-        store.ensure_core_power_entry()
-        store.ensure_system_registry()
-        store.ensure_style_guide()
         self.set_project(project)
         return project
 
@@ -78,19 +79,13 @@ class ProjectSession(QObject):
         *,
         kind: str = "project",
     ) -> None:
-        """Tell dependent views which project data changed.
-
-        ``data_changed`` remains a compatibility signal for existing callers.
-        New views should consume ``data_change_detail`` so they can refresh only
-        the projections affected by the changed files.
-        """
+        """Tell dependent views exactly which project data changed."""
         if self._project is not None:
             change = ProjectChange(
                 paths=tuple(str(Path(path)) for path in (paths or ())),
                 kind=str(kind or "project"),
                 full_refresh=paths is None,
             )
-            self.data_changed.emit(self._project)
             self.data_change_detail.emit(self._project, change)
 
     def clear(self) -> None:

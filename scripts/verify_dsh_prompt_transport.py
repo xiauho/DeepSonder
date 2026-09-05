@@ -25,7 +25,6 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.config import load_config, normalize_config  # noqa: E402
-from core.context_budget import ARGV_PROMPT_BUDGET  # noqa: E402
 from core.dsh_client import DSHClient  # noqa: E402
 from core.storage import atomic_write_text  # noqa: E402
 from core.task_controller import AITaskCancelled  # noqa: E402
@@ -195,8 +194,11 @@ def run_verification(config: dict, *, long_chars: int) -> dict[str, Any]:
         profile="headless",
         timeout=normalized["dsh_timeout"],
         extra_args=normalized["dsh_extra_args"],
-        prompt_transport="auto",
         file_prompt_budget=max(long_chars + 3_000, normalized["dsh_file_prompt_budget"]),
+        input_token_budget=max(
+            normalized["ai_input_token_budget"],
+            min(120_000, long_chars * 2),
+        ),
     )
     client.use_isolated_workspace()
     cases: list[dict[str, Any]] = []
@@ -209,7 +211,7 @@ def run_verification(config: dict, *, long_chars: int) -> dict[str, Any]:
             cases.append(
                 _case(
                     "connection_and_file_capability",
-                    "扩展任务文件传输可用" in connection_status,
+                    "argv 控制传输与 file 业务传输均可用" in connection_status,
                     status=connection_status,
                 )
             )
@@ -227,15 +229,17 @@ def run_verification(config: dict, *, long_chars: int) -> dict[str, Any]:
         short_marker = "NVL_SHORT_" + uuid.uuid4().hex.upper()
         try:
             output = client.generate(
-                "这是 Novalist 的短命令行传输验收。",
+                "这是 Novalist 的短业务提示词文件传输验收。",
                 f"请只回复这一行标记：{short_marker}",
                 timeout_override=min(normalized["dsh_timeout"], 60),
             )
             trace = client.invocations[-1]
             cases.append(
                 _case(
-                    "short_argv_transport",
-                    short_marker in output and trace.transport == "argv",
+                    "short_file_business_transport",
+                    short_marker in output
+                    and trace.transport == "file"
+                    and trace.command_chars < SAFE_LOADER_COMMAND_CHARS,
                     transport=trace.transport,
                     command_chars=trace.command_chars,
                     response_chars=len(output),
@@ -244,13 +248,12 @@ def run_verification(config: dict, *, long_chars: int) -> dict[str, Any]:
         except Exception as exc:
             cases.append(
                 _case(
-                    "short_argv_transport",
+                    "short_file_business_transport",
                     False,
                     error_type=type(exc).__name__,
                     error=str(exc)[:500],
                 )
             )
-
         try:
             output = client.generate(
                 "这是传输完整性验收，只处理用户任务中的合成数据。",
@@ -318,8 +321,8 @@ def run_verification(config: dict, *, long_chars: int) -> dict[str, Any]:
 
         timeout_client = SimulatedTimeoutClient(
             "dsh",
-            prompt_transport="file",
             file_prompt_budget=long_chars + 3_000,
+            input_token_budget=min(120_000, long_chars * 2),
         )
         timeout_client.use_isolated_workspace()
         timeout_client._file_transport_supported = True
@@ -346,18 +349,19 @@ def run_verification(config: dict, *, long_chars: int) -> dict[str, Any]:
             )
         )
 
-        fallback_client = DSHClient(
+        delayed_client = DSHClient(
             "dsh",
-            prompt_transport="auto",
             file_prompt_budget=long_chars + 3_000,
+            input_token_budget=min(120_000, long_chars * 2),
         )
-        fallback_client._file_transport_supported = False
-        fallback_budget = fallback_client.resolve_prompt_budget()
+        delayed_client._file_transport_supported = False
+        build_budget = delayed_client.prompt_build_budget()
         cases.append(
             _case(
-                "unavailable_file_transport_fallback",
-                fallback_budget == ARGV_PROMPT_BUDGET,
-                fallback_budget=fallback_budget,
+                "file_budget_is_local_and_does_not_probe_capability",
+                build_budget > 0,
+                build_budget=build_budget,
+                capability_probe_cached_as_unavailable=True,
             )
         )
         return _finish_report(normalized, client, synthetic, cases)

@@ -66,6 +66,8 @@ TASK_LABELS = {
     "foreshadowing_review": "伏笔复核",
     "chapter_summary": "章节摘要",
     "story_state_update": "故事状态更新",
+    "chapter_digest_shard": "章节事实归并",
+    "chapter_memory_proposal": "章节记忆提案",
     "consistency_check": "一致性检查",
     "consistency_repair": "一致性修复",
 }
@@ -129,19 +131,77 @@ def render_context_reports(reports: list[PromptContextReport]) -> str:
             f"<p class='muted'>实际提交 {report.submitted_prompt_chars:,} 字符"
             f" · 启动命令 {report.command_chars:,} 字符</p>"
         )
-        if report.fallback_used:
-            blocks.append("<p class='muted'>文件通道不可用，本次已自动降级。</p>")
+        if report.estimated_input_tokens:
+            budget_text = (
+                f" / {report.input_token_budget:,}"
+                if report.input_token_budget
+                else ""
+            )
+            blocks.append(
+                f"<p class='muted'>估算输入 {report.estimated_input_tokens:,}"
+                f"{budget_text} token · 运行预留 "
+                f"{report.runtime_reserve_tokens:,} token"
+                f" · {html.escape(report.token_estimator)}</p>"
+            )
+        if report.model_context_window_tokens:
+            strategy_label = {
+                "compatible": "兼容",
+                "balanced": "均衡",
+                "deep": "深度",
+            }.get(report.context_strategy, report.context_strategy or "未指定")
+            used_total = report.estimated_input_tokens + report.runtime_reserve_tokens
+            utilization = min(
+                100.0,
+                used_total * 100 / report.model_context_window_tokens,
+            )
+            blocks.append(
+                f"<p class='muted'>模型窗口 {report.model_context_window_tokens:,} token"
+                f" · {html.escape(strategy_label)}策略"
+                f" · 输入与预留占用约 {utilization:.1f}%</p>"
+            )
+        if report.transport == "file":
+            verification = "回执已验证" if report.file_ack_verified else "回执未验证"
+            blocks.append(
+                f"<p class='muted'>任务文件 {report.task_file_bytes:,} 字节"
+                f" · {verification}</p>"
+            )
         if report.history_requested is not None:
             blocks.append(
                 "<p>历史摘要：请求 "
                 f"{report.history_requested} 章 · 可用 {report.history_available or 0} 章"
-                f" · 纳入 {report.history_included or 0} 章</p>"
+                f" · 纳入 {report.history_included or 0} 章"
+                f" · 缺少摘要 {report.history_missing} 章"
+                f" · 预算排除 {report.history_excluded_budget} 章</p>"
             )
-        if report.selections:
-            if any(item.mode == "legacy_all" for item in report.selections):
+            if report.history_token_budget:
                 blocks.append(
-                    "<p class='muted'>本次使用兼容模式：相关资料保持旧版整体加载顺序。</p>"
+                    f"<p class='muted'>历史摘要估算 {report.history_estimated_tokens:,}"
+                    f" / {report.history_token_budget:,} token（仍受总预算限制）</p>"
                 )
+            if report.history_missing:
+                blocks.append("<p class='muted'>部分前文章节尚无摘要，可先更新这些章节的故事记忆。</p>")
+            blocks.append(
+                f"<p>远期记忆：候选 {report.history_remote_candidates} 章 · 命中 "
+                f"{report.history_remote_matched} 章 · 纳入 {report.history_remote_included} 章"
+                f" · 过期或无效排除 {report.history_stale} 章"
+                f" · 近期旧摘要版本未确认 {report.history_unverified} 章</p>"
+            )
+            if report.history_provenance_error:
+                blocks.append("<p>记忆来源记录损坏或版本不兼容，本次已停止引用相关历史；请检查已采用记忆文件。</p>")
+            for source in report.history_sources:
+                label = "远期关联" if source["kind"] == "remote" else "近期参考"
+                reason = "、".join({"entity_match": "人物/地点及别名命中", "keyword_match": "情节关键词命中"}.get(r, r) for r in source["reasons"])
+                version = source["source_hash"][:12] or "未确认"
+                blocks.append(
+                    f"<p class='muted'>{html.escape(source['chapter_id'])} · {label}"
+                    f" · 正文版本 {html.escape(version)}"
+                    f" · {html.escape(reason or '近期章节')}"
+                    f" · 事实引用 {html.escape(', '.join(source['fact_ids'])) or '摘要'}</p>"
+                )
+        if report.state_scope:
+            from core.context_budget import state_scope_label
+            blocks.append(f"<p class='muted'>{html.escape(state_scope_label(report.state_scope))}</p>")
+        if report.selections:
             selection_rows = []
             for item in report.selections:
                 if item.candidates <= 0:
@@ -150,7 +210,7 @@ def render_context_reports(reports: list[PromptContextReport]) -> str:
                 final_count = (
                     str(item.prompt_included)
                     if item.prompt_included is not None
-                    else "兼容模式未细分"
+                    else "背景资料"
                 )
                 reasons = "、".join(
                     f"{SELECTION_REASON_LABELS.get(reason, reason)} {count}"

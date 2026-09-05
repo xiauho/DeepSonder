@@ -1,16 +1,17 @@
 """DSH (DeepSeek Harness) client adapter.
 
-The adapter keeps the `headless` profile's prompt-as-final-argument contract,
+The adapter keeps the `headless` profile's task-as-final-argument contract,
 as shown in dsh's own help:
 
     dsh --profile headless "run the tests"
 
-Long prompts can be stored in Novalist's isolated workspace after a live file
-read probe succeeds; only the short loader task remains on the command line.
+Every business prompt is stored in Novalist's isolated workspace after a live
+file-read probe succeeds. The command line carries only a short loader task.
 """
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import signal
@@ -20,22 +21,32 @@ import tempfile
 import threading
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .context_budget import ARGV_PROMPT_BUDGET
+from .context_budget import DEFAULT_PROMPT_BUDGET
 from .context_report import PromptContextReport, ReportCallback
 from .task_controller import AITaskCancelled
 from .json_utils import JSONExtractionError, extract_json
 from .storage import atomic_write_text
+from .token_budget import (
+    DEFAULT_INPUT_TOKEN_BUDGET,
+    DEFAULT_RUNTIME_RESERVE_TOKENS,
+    DEFAULT_TOKEN_ESTIMATOR,
+    ConservativeTokenEstimator,
+    TokenBudget,
+)
 
 
 WINDOWS_CMDLINE_LIMIT = 7800
 WINDOWS_CREATEPROCESS_LIMIT = 30000
-FILE_TRANSPORT_SWITCH_LIMIT = 20000
 DSH_PROBE_MARKER = "NOVALIST_PROBE_OK"
 DSH_FILE_PROBE_PREFIX = "NOVALIST_FILE_PROBE_"
 DSH_FILE_READ_FAILED = "NOVALIST_FILE_TASK_READ_FAILED"
+DSH_FILE_TASK_SCHEMA = "NOVALIST_TASK_FILE_V1"
+DSH_FILE_ACK_PREFIX = "NOVALIST_FILE_ACK:"
+DEFAULT_TASK_FILE_MAX_BYTES = 512_000
 EMPTY_TASK_HINTS = (
     "I don't see an actual task",
     "I don't see a specific task",
@@ -44,6 +55,26 @@ EMPTY_TASK_HINTS = (
     "只收到运行时上下文",
     "没有看到实际任务",
 )
+
+
+@dataclass(frozen=True)
+class _TaskFile:
+    """One verified, short-lived file bridge artifact."""
+
+    path: Path
+    task_id: str
+    nonce_head: str
+    nonce_middle: str
+    nonce_tail: str
+    payload_sha256: str
+    byte_count: int
+
+    @property
+    def expected_ack(self) -> str:
+        return (
+            f"{DSH_FILE_ACK_PREFIX}{self.nonce_head}:"
+            f"{self.nonce_middle}:{self.nonce_tail}"
+        )
 
 
 class DSHClient:
@@ -55,8 +86,13 @@ class DSHClient:
         timeout: int = 180,
         extra_args: list[str] | None = None,
         working_directory: str | Path | None = None,
-        prompt_transport: str = "argv",
         file_prompt_budget: int = 48_000,
+        task_file_max_bytes: int = DEFAULT_TASK_FILE_MAX_BYTES,
+        input_token_budget: int = DEFAULT_INPUT_TOKEN_BUDGET,
+        runtime_reserve_tokens: int = DEFAULT_RUNTIME_RESERVE_TOKENS,
+        model_context_window_tokens: int = 0,
+        context_strategy: str = "balanced",
+        token_estimator: ConservativeTokenEstimator = DEFAULT_TOKEN_ESTIMATOR,
         report_callback: ReportCallback | None = None,
     ):
         self.dsh_command = dsh_command
@@ -65,17 +101,38 @@ class DSHClient:
         self.timeout = timeout
         self.extra_args = extra_args or []
         self.working_directory = Path(working_directory) if working_directory else None
-        normalized_transport = str(prompt_transport or "argv").strip().lower()
-        self.prompt_transport = (
-            normalized_transport
-            if normalized_transport in {"auto", "argv", "file"}
-            else "argv"
-        )
         try:
             normalized_budget = int(file_prompt_budget)
         except (TypeError, ValueError):
             normalized_budget = 48_000
-        self.file_prompt_budget = max(ARGV_PROMPT_BUDGET, normalized_budget)
+        self.file_prompt_budget = max(DEFAULT_PROMPT_BUDGET, normalized_budget)
+        try:
+            normalized_file_bytes = int(task_file_max_bytes)
+        except (TypeError, ValueError):
+            normalized_file_bytes = DEFAULT_TASK_FILE_MAX_BYTES
+        self.task_file_max_bytes = max(64_000, normalized_file_bytes)
+        try:
+            normalized_input_tokens = int(input_token_budget)
+        except (TypeError, ValueError):
+            normalized_input_tokens = DEFAULT_INPUT_TOKEN_BUDGET
+        self.input_token_budget = max(1_000, normalized_input_tokens)
+        try:
+            normalized_runtime_reserve = int(runtime_reserve_tokens)
+        except (TypeError, ValueError):
+            normalized_runtime_reserve = DEFAULT_RUNTIME_RESERVE_TOKENS
+        self.runtime_reserve_tokens = max(0, normalized_runtime_reserve)
+        try:
+            normalized_context_window = int(model_context_window_tokens)
+        except (TypeError, ValueError):
+            normalized_context_window = 0
+        self.model_context_window_tokens = max(0, normalized_context_window)
+        self.context_strategy = str(context_strategy or "balanced")
+        self.token_budget = TokenBudget(
+            input_limit=self.input_token_budget,
+            runtime_reserve=self.runtime_reserve_tokens,
+            model_context_window=self.model_context_window_tokens,
+        )
+        self.token_estimator = token_estimator
         self.report_callback = report_callback
         self._file_transport_supported: bool | None = None
         self._isolated_workspace: Path | None = None
@@ -87,9 +144,9 @@ class DSHClient:
     def use_isolated_workspace(self) -> None:
         """Run dsh in a private empty directory instead of the user's project.
 
-        Story context travels either inline or through one short-lived task
-        file created in this directory.  Keeping that bridge outside the
-        novel project prevents the agent from seeing unrelated project files.
+        Story context travels through one short-lived task file created in this
+        directory. Keeping that bridge outside the novel project prevents the
+        agent from seeing unrelated project files.
         """
         if self._isolated_workspace is None or not self._isolated_workspace.is_dir():
             self._isolated_workspace = Path(tempfile.mkdtemp(prefix="novalist-dsh-"))
@@ -126,36 +183,43 @@ class DSHClient:
         cancel_event: threading.Event | None = None,
         context_report: PromptContextReport | None = None,
     ) -> str:
-        """Run dsh headless using argv or a verified local task-file bridge."""
+        """Run dsh with argv as control plane and one task file as data plane."""
         combined = self._combine_prompts(system_prompt, user_prompt)
+        estimated_input_tokens = max(
+            self.token_estimator.estimate_pair(system_prompt, user_prompt),
+            # Measure the exact wrapper sent to DSH as well.  The fixed role
+            # allowance covers Harness framing that is not visible here.
+            self.token_estimator.estimate(combined) + 32,
+        )
         effective_timeout = max(
             1,
             int(timeout_override if timeout_override is not None else self.timeout),
         )
-        task_file: Path | None = None
-        transport = "argv"
-        fallback_used = False
+        task_file: _TaskFile | None = None
+        transport = "file"
+        file_ack_verified = False
         outcome = "failed"
         self._last_command_chars = 0
         try:
-            transmitted_prompt = combined
-            wants_file = self._should_use_file_transport(combined, session_id)
-            if wants_file:
-                if not self._ensure_file_transport_support(
-                    timeout=min(effective_timeout, 30),
-                    cancel_event=cancel_event,
-                ):
-                    if self.prompt_transport == "file":
-                        transport = "file_unavailable"
-                        raise RuntimeError(
-                            "当前 DeepSeek Harness 无法读取 Novalist 的临时任务文件。"
-                            "请将 dsh_prompt_transport 改为 argv，或检查 headless 的文件读取能力。"
-                        )
-                    fallback_used = True
-                else:
-                    task_file = self._write_task_file(combined)
-                    transmitted_prompt = self._file_loader_prompt(task_file.name)
-                    transport = "file"
+            if cancel_event is not None and cancel_event.is_set():
+                raise AITaskCancelled()
+            if not self.token_budget.accepts(estimated_input_tokens):
+                raise RuntimeError(
+                    "Novalist 业务提示词超过输入 token 安全上限"
+                    f"（估算 {estimated_input_tokens} > {self.input_token_budget}）。"
+                    "请缩减上下文、降低分块大小或先执行摘要后重试。"
+                )
+            if not self._ensure_file_transport_support(
+                timeout=min(effective_timeout, 30),
+                cancel_event=cancel_event,
+            ):
+                transport = "file_unavailable"
+                raise RuntimeError(
+                    "DeepSeek Harness 无法验证读取 Novalist 的临时任务文件。"
+                    "为避免提示词截断，本次任务已停止；请检查 headless 的文件读取能力。"
+                )
+            task_file = self._write_task_file(combined)
+            transmitted_prompt = self._file_loader_prompt(task_file.path.name)
             self._last_command_chars = 0
             result = self._execute_prompt(
                 transmitted_prompt,
@@ -164,6 +228,9 @@ class DSHClient:
                 cancel_event=cancel_event,
                 submitted_prompt_length=len(combined),
             )
+            if task_file is not None:
+                result = self._validate_file_response(result, task_file)
+                file_ack_verified = True
             outcome = "success"
             return result
         except AITaskCancelled:
@@ -174,38 +241,30 @@ class DSHClient:
             raise
         finally:
             self._remove_task_file(task_file)
-            task_file_cleaned = task_file is None or not task_file.exists()
+            task_file_cleaned = task_file is None or not task_file.path.exists()
             if context_report is not None:
                 completed_report = context_report.complete_invocation(
                     transport=transport,
                     submitted_prompt_chars=len(combined),
                     command_chars=self._last_command_chars,
-                    fallback_used=fallback_used,
                     outcome=outcome,
                     task_file_cleaned=task_file_cleaned,
+                    task_file_bytes=task_file.byte_count if task_file is not None else 0,
+                    file_ack_verified=file_ack_verified,
+                    input_token_budget=self.input_token_budget,
+                    runtime_reserve_tokens=self.runtime_reserve_tokens,
+                    model_context_window_tokens=self.model_context_window_tokens,
+                    context_strategy=self.context_strategy,
+                    estimated_input_tokens=estimated_input_tokens,
+                    token_estimator=self.token_estimator.name,
                 )
                 self._publish_context_report(completed_report)
 
-    def resolve_prompt_budget(
-        self,
-        *,
-        cancel_event: threading.Event | None = None,
-    ) -> int:
-        """Return the safe builder budget after resolving file capability."""
-        if self.prompt_transport == "argv":
-            return ARGV_PROMPT_BUDGET
-        supported = self._ensure_file_transport_support(
-            timeout=min(self.timeout, 30),
-            cancel_event=cancel_event,
-        )
-        if supported:
-            return self.file_prompt_budget
-        if self.prompt_transport == "file":
-            raise RuntimeError(
-                "当前 DeepSeek Harness 无法读取 Novalist 的临时任务文件。"
-                "请改用自动或 argv 兼容模式。"
-            )
-        return ARGV_PROMPT_BUDGET
+    def prompt_build_budget(self) -> int:
+        """Return a conservative character budget below the token hard limit."""
+        token_headroom = max(1_000, self.input_token_budget - 512)
+        safe_chars = int(token_headroom / self.token_estimator.safety_factor)
+        return max(1_000, min(self.file_prompt_budget, safe_chars))
 
     def _execute_prompt(
         self,
@@ -221,7 +280,7 @@ class DSHClient:
         cmd += self.extra_args
         if session_id:
             cmd += ["--resume", session_id]
-        cmd.append(prompt)
+        cmd.append(self._serialize_prompt_argument(prompt))
         cmd = self._prepare_command_for_prompt(cmd, command)
         self._last_command_chars = len(subprocess.list2cmdline(cmd))
 
@@ -380,22 +439,22 @@ class DSHClient:
             except (OSError, subprocess.TimeoutExpired):
                 pass
 
-    def _should_use_file_transport(
-        self,
-        prompt: str,
-        session_id: str | None,
-    ) -> bool:
-        if self.prompt_transport == "argv":
-            return False
-        if self.prompt_transport == "file":
-            return True
-        command = self._resolve_command()
-        cmd = [command, *self.launcher_args, "--profile", self.profile]
-        cmd += self.extra_args
-        if session_id:
-            cmd += ["--resume", session_id]
-        cmd.append(prompt)
-        return len(subprocess.list2cmdline(cmd)) > FILE_TRANSPORT_SWITCH_LIMIT
+    @staticmethod
+    def _serialize_prompt_argument(prompt: str) -> str:
+        """Keep one logical prompt inside one Windows process argument.
+
+        npm/npx can forward package binaries through nested ``.cmd`` shims.
+        Literal CR/LF characters are command separators at that layer even
+        when Python originally supplied a single argv item.  U+2028 remains
+        one Unicode character through the launch chain while preserving a
+        line boundary for the model.  POSIX argv supports literal newlines.
+        """
+        value = str(prompt)
+        if os.name != "nt":
+            return value
+        return value.replace("\r\n", "\n").replace("\r", "\n").replace(
+            "\n", "\u2028"
+        )
 
     def _ensure_file_transport_support(
         self,
@@ -404,8 +463,8 @@ class DSHClient:
         cancel_event: threading.Event | None,
     ) -> bool:
         """Probe once whether this headless composition can read a task file."""
-        if self._file_transport_supported is not None:
-            return self._file_transport_supported
+        if self._file_transport_supported is True:
+            return True
 
         marker = DSH_FILE_PROBE_PREFIX + uuid.uuid4().hex.upper()
         probe_payload = (
@@ -416,33 +475,114 @@ class DSHClient:
         )
         task_file = self._write_task_file(probe_payload)
         try:
-            output = self._execute_prompt(
-                self._file_loader_prompt(task_file.name),
+            raw_output = self._execute_prompt(
+                self._file_loader_prompt(task_file.path.name),
                 session_id=None,
                 timeout=max(1, int(timeout)),
                 cancel_event=cancel_event,
                 submitted_prompt_length=len(probe_payload),
             )
-            self._file_transport_supported = marker in output
+            try:
+                output = self._validate_file_response(raw_output, task_file)
+            except RuntimeError:
+                supported = False
+            else:
+                supported = marker in output
+                if supported:
+                    self._file_transport_supported = True
         finally:
             self._remove_task_file(task_file)
-        return bool(self._file_transport_supported)
+        return supported
 
-    def _write_task_file(self, prompt: str) -> Path:
-        """Write one private UTF-8 task file in Novalist's isolated workspace."""
+    def _write_task_file(self, prompt: str) -> _TaskFile:
+        """Write and re-read one authenticated UTF-8 task file."""
         if self._isolated_workspace is None or not self._isolated_workspace.is_dir():
             self.use_isolated_workspace()
         workspace = self._isolated_workspace
         if workspace is None:
             raise RuntimeError("无法创建 Novalist 的隔离 AI 工作目录。")
         self.working_directory = workspace
-        path = workspace / f".novalist-task-{uuid.uuid4().hex}.md"
-        atomic_write_text(path, prompt, encoding="utf-8")
-        return path
+        task_id = uuid.uuid4().hex
+        nonce_head = uuid.uuid4().hex.upper()
+        nonce_middle = uuid.uuid4().hex.upper()
+        nonce_tail = uuid.uuid4().hex.upper()
+        payload = str(prompt)
+        challenged_payload = self._inject_middle_challenge(payload, nonce_middle)
+        payload_bytes = challenged_payload.encode("utf-8")
+        payload_sha256 = hashlib.sha256(payload_bytes).hexdigest()
+        envelope = (
+            f"{DSH_FILE_TASK_SCHEMA}\n"
+            f"task_id: {task_id}\n"
+            "encoding: UTF-8\n"
+            f"payload_chars: {len(challenged_payload)}\n"
+            f"payload_bytes: {len(payload_bytes)}\n"
+            f"payload_sha256: {payload_sha256}\n"
+            f"task_nonce_head: {nonce_head}\n\n"
+            "[传输协议]\n"
+            "- 必须完整读取本文件后再执行任务。\n"
+            "- 任务正文中部和文件末尾还有随机校验值。最终回复第一行必须严格使用格式：\n"
+            f"  {DSH_FILE_ACK_PREFIX}<task_nonce_head>:<task_nonce_middle>:<task_nonce_tail>\n"
+            "- NOVALIST_TRANSPORT_CHECKPOINT 仅用于传输校验，不属于任务正文。\n"
+            "- 从第二行开始输出任务要求的结果，不要重复或解释传输协议。\n"
+            f"- 如果无法完整读取文件，只回复 {DSH_FILE_READ_FAILED}。\n\n"
+            f"{challenged_payload}\n"
+            "NOVALIST_TASK_FILE_FOOTER\n"
+            f"task_nonce_tail: {nonce_tail}"
+        )
+        encoded = envelope.encode("utf-8")
+        if len(encoded) > self.task_file_max_bytes:
+            raise RuntimeError(
+                "Novalist 任务文件超过安全上限"
+                f"（{len(encoded)} > {self.task_file_max_bytes} 字节）。"
+                "请缩减任务上下文后重试。"
+            )
+        path = workspace / f".novalist-task-{task_id}.md"
+        atomic_write_text(path, envelope, encoding="utf-8")
+        try:
+            persisted = path.read_bytes()
+        except OSError as exc:
+            path.unlink(missing_ok=True)
+            raise RuntimeError("Novalist 无法回读临时任务文件。") from exc
+        if persisted != encoded:
+            path.unlink(missing_ok=True)
+            raise RuntimeError("Novalist 临时任务文件写入校验失败。")
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
+        return _TaskFile(
+            path,
+            task_id,
+            nonce_head,
+            nonce_middle,
+            nonce_tail,
+            payload_sha256,
+            len(encoded),
+        )
 
-    def _remove_task_file(self, path: Path | None) -> None:
-        if path is None:
+    @staticmethod
+    def _inject_middle_challenge(payload: str, nonce_middle: str) -> str:
+        """Place an out-of-band read challenge near the payload midpoint."""
+        value = str(payload)
+        midpoint = len(value) // 2
+        before = value.rfind("\n", 0, midpoint)
+        after = value.find("\n", midpoint)
+        candidates = [index for index in (before, after) if index >= 0]
+        split_at = (
+            min(candidates, key=lambda index: abs(index - midpoint))
+            if candidates
+            else midpoint
+        )
+        checkpoint = (
+            "\nNOVALIST_TRANSPORT_CHECKPOINT: "
+            f"task_nonce_middle={nonce_middle}\n"
+        )
+        return value[:split_at] + checkpoint + value[split_at:]
+
+    def _remove_task_file(self, task_file: _TaskFile | None) -> None:
+        if task_file is None:
             return
+        path = task_file.path
         workspace = self._isolated_workspace
         try:
             if workspace is None or path.parent.resolve() != workspace.resolve():
@@ -458,9 +598,29 @@ class DSHClient:
             f"请完整读取当前工作目录中的 {filename}（UTF-8）。\n"
             "该文件中 NOVALIST_TASK_START 与 NOVALIST_TASK_END 之间的内容"
             "才是本次完整任务。请立即执行该任务，不要仅概括文件内容，也不要"
-            "修改或删除任何文件。\n"
+            "修改或删除任何文件。最终回复必须遵守文件头部的传输协议，并从文件"
+            "头、任务正文中部和文件尾分别取得 nonce；加载指令本身不包含这些值。\n"
             f"如果无法完整读取，只回复 {DSH_FILE_READ_FAILED}。"
         )
+
+    @staticmethod
+    def _validate_file_response(output: str, task_file: _TaskFile) -> str:
+        """Accept output only when it proves the exact task file was read."""
+        normalized = str(output or "").strip()
+        if normalized == DSH_FILE_READ_FAILED or normalized.startswith(
+            DSH_FILE_READ_FAILED + "\n"
+        ):
+            raise RuntimeError("DeepSeek Harness 未能完整读取 Novalist 临时任务文件。")
+        first, separator, remainder = normalized.partition("\n")
+        expected = task_file.expected_ack
+        if first.strip() != expected:
+            raise RuntimeError(
+                "DeepSeek Harness 的任务文件回执无效，无法确认业务提示词已跨段读取。"
+            )
+        result = remainder.strip() if separator else ""
+        if not result:
+            raise RuntimeError("DeepSeek Harness 已确认任务文件，但返回结果为空。")
+        return result
 
     def _prepare_command_for_prompt(self, cmd: list[str], resolved_command: str) -> list[str]:
         """Avoid the ~8K ``cmd.exe`` limit used by Windows npm shims.
@@ -516,11 +676,11 @@ class DSHClient:
 
         script_refs = re.findall(r'"([^"\r\n]+\.js)"', shim, re.IGNORECASE)
         script_refs += re.findall(
-            r'(?<!["\w])([^\s"\r\n]+\.js)(?=\s|$)',
+            r'(?<!["\w])([^\s"\r\n]+\.js)(?=["\s]|$)',
             shim,
             re.IGNORECASE,
         )
-        script: Path | None = None
+        scripts: list[Path] = []
         for script_ref in script_refs:
             script_ref = script_ref.strip()
             # Support both the conventional ``%~dp0`` form and the older
@@ -532,10 +692,20 @@ class DSHClient:
             if not candidate.is_absolute():
                 candidate = path.parent / candidate
             if candidate.is_file():
-                script = candidate
-                break
-        if script is None:
+                scripts.append(candidate)
+        if not scripts:
             return None
+        # Modern npm/npx wrappers mention a helper such as npm-prefix.js
+        # before the actual CLI. Prefer an executable-looking CLI entry so
+        # bypassing the .cmd layer preserves argument forwarding.
+        script = min(
+            scripts,
+            key=lambda item: (
+                0 if "cli" in item.stem.casefold() else 1,
+                1 if "prefix" in item.stem.casefold() else 0,
+                scripts.index(item),
+            ),
+        )
 
         node_path = path.parent / "node.exe"
         node = str(node_path) if node_path.is_file() else shutil.which("node")
@@ -598,23 +768,7 @@ class DSHClient:
                 "可能存在任务参数丢失或 headless 配置不匹配。\n"
                 f"原始返回：{preview}"
             )
-        file_status = "命令行兼容模式"
-        if self.prompt_transport != "argv":
-            try:
-                file_supported = self._ensure_file_transport_support(
-                    timeout=min(self.timeout, 30),
-                    cancel_event=None,
-                )
-            except RuntimeError as exc:
-                raise RuntimeError(
-                    "dsh 可以执行普通任务，但本地任务文件探测失败。\n"
-                    f"{exc}"
-                ) from exc
-            file_status = (
-                "扩展任务文件传输可用"
-                if file_supported
-                else "任务文件不可读，已回退命令行兼容模式"
-            )
+        file_status = "argv 控制传输与 file 业务传输均可用"
         return (
             f"dsh 可用，任务传递正常，{file_status}（{version}）"
             if version
@@ -625,7 +779,9 @@ class DSHClient:
         """Resolve npm command shims before passing them to CreateProcess."""
         command = str(self.dsh_command or "dsh").strip()
         if Path(command).suffix.lower() in {".cmd", ".bat", ".com", ".exe"}:
-            return command
+            if Path(command).is_absolute():
+                return command
+            return shutil.which(command) or command
         resolved = shutil.which(command)
         return resolved or command
 

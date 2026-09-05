@@ -24,7 +24,17 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from core.config import AI_CONTEXT_HISTORY_CHAPTERS_MAX, DEFAULT_CONFIG
+from core.config import AI_CONTEXT_HISTORY_CHAPTERS_MAX, DEFAULT_CONFIG, normalize_config
+from core.history_context import resolve_history_count, history_token_budget
+from core.context_capacity import (
+    CONTEXT_STRATEGY_BALANCED,
+    CONTEXT_STRATEGY_COMPATIBLE,
+    CONTEXT_STRATEGY_DEEP,
+    MODEL_CONTEXT_WINDOW_MAX,
+    MODEL_CONTEXT_WINDOW_MIN,
+    MODEL_CONTEXT_WINDOW_PRESETS,
+    derive_context_capacity,
+)
 from core.ai_protocol import consistency_issue_counts, format_consistency_report
 from core.export import render_manuscript
 from core.project import NovelProject, chapter_number_from_id
@@ -555,40 +565,26 @@ class ReportsPage(QWidget):
 
     def show_result(
         self,
-        report: dict[str, Any] | str,
+        report: dict[str, Any],
         rendered: str | None = None,
         *,
         project: NovelProject | None = None,
     ) -> None:
-        """Display a structured report and derive summary counts from it.
-
-        A plain-string fallback remains for older callers, but all current
-        consistency results pass the validated report object.
-        """
-        if isinstance(report, dict):
-            self._report = dict(report)
-            self._result = rendered or format_consistency_report(self._report)
-            bound_project = project or self._project
-            self._report_project_root = (
-                str(bound_project.root.resolve()).casefold()
-                if bound_project is not None
-                else ""
-            )
-            counts = consistency_issue_counts(self._report)
-            self._values[0].setText(str(counts["high"]))
-            self._values[1].setText(str(counts["medium"]))
-            self._values[2].setText(str(counts["low"]))
-        else:
-            self._report = None
-            self._result = str(report or "")
-            self._report_project_root = ""
-            # Compatibility for legacy string-only callers. New callers use
-            # structured counts above and do not rely on text heuristics.
-            severe = len(re.findall(r"严重|critical|severe", self._result, re.IGNORECASE))
-            warning = len(re.findall(r"警告|warning", self._result, re.IGNORECASE))
-            self._values[0].setText(str(severe))
-            self._values[1].setText(str(warning))
-            self._values[2].setText("0")
+        """Display a validated structured report and derive summary counts."""
+        if not isinstance(report, dict):
+            raise TypeError("一致性检查结果必须是结构化报告。")
+        self._report = dict(report)
+        self._result = rendered or format_consistency_report(self._report)
+        bound_project = project or self._project
+        self._report_project_root = (
+            str(bound_project.root.resolve()).casefold()
+            if bound_project is not None
+            else ""
+        )
+        counts = consistency_issue_counts(self._report)
+        self._values[0].setText(str(counts["high"]))
+        self._values[1].setText(str(counts["medium"]))
+        self._values[2].setText(str(counts["low"]))
         self._render_report()
 
     def _render_report(self) -> None:
@@ -916,6 +912,9 @@ class SettingsPage(QWidget):
         self.expand_target_chars.setRange(300, 10000)
         self.expand_target_chars.setSingleStep(100)
         self.expand_target_chars.setSuffix(" 字")
+        self.ai_history_mode = QComboBox()
+        self.ai_history_mode.addItem("自动 · 跟随上下文策略", "auto")
+        self.ai_history_mode.addItem("自定义最近章节数", "custom")
         self.ai_context_history_chapters = QSpinBox()
         self.ai_context_history_chapters.setRange(
             0, AI_CONTEXT_HISTORY_CHAPTERS_MAX
@@ -923,14 +922,21 @@ class SettingsPage(QWidget):
         self.ai_context_history_chapters.setSingleStep(1)
         self.ai_context_history_chapters.setSuffix(" 章")
         self.ai_context_history_chapters.setToolTip(
-            "仅控制尝试携带的前文章节摘要数量；当前章节内容和本章规划按任务规则单独处理。"
-            "上下文空间不足时会优先保留最近章节的摘要。"
+            "用于 AI 扩写，0 表示不携带历史章节摘要。只参考最近指定范围内已有的摘要；"
+            "预算不足时优先保留较近章节，不会自动调用 AI 补生成摘要。"
         )
+        self.history_preview = QLabel()
+        self.history_remote = QCheckBox("补充更早相关剧情（仅已采用且版本有效的记忆）")
+        self.history_preview.setObjectName("mutedLabel")
+        self.history_preview.setWordWrap(True)
         writing_form.addRow("自动保存", self.auto_save)
         writing_form.addRow("保存间隔", self.auto_save_interval)
         writing_form.addRow("正文字号", self.editor_font_size)
         writing_form.addRow("AI 扩写字数", self.expand_target_chars)
-        writing_form.addRow("AI 前文参考章节数", self.ai_context_history_chapters)
+        writing_form.addRow("AI 扩写前文参考", self.ai_history_mode)
+        writing_form.addRow("自定义最近章节数", self.ai_context_history_chapters)
+        writing_form.addRow("前文参考说明", self.history_preview)
+        writing_form.addRow("远期参考（扩写/检查）", self.history_remote)
         writing_layout.addLayout(writing_form)
         content_layout.addWidget(writing)
 
@@ -958,12 +964,46 @@ class SettingsPage(QWidget):
         self.extra_args.setPlaceholderText("可选的 dsh 参数")
         self.profile = QLabel("headless（固定）")
         self.profile.setObjectName("mutedLabel")
+        self.prompt_transport = QLabel("argv 控制指令 + file 业务数据（固定）")
+        self.prompt_transport.setObjectName("mutedLabel")
+        self.prompt_transport.setToolTip(
+            "命令行只传递短加载指令；完整业务提示词统一写入隔离临时任务文件。"
+        )
+        self.model_context_window = QComboBox()
+        self.model_context_window.addItem("自动 / 未确认（安全预算）", 0)
+        for window in MODEL_CONTEXT_WINDOW_PRESETS:
+            label = "1M" if window == 1_000_000 else f"{window // 1000}K"
+            self.model_context_window.addItem(label, window)
+        self.model_context_window.addItem("自定义", -1)
+        self.model_context_window.setToolTip(
+            "应与当前 DSH 模型的 combined input/output context window 一致。"
+            "不确定时请选择自动 / 未确认。"
+        )
+        self.custom_context_window = QSpinBox()
+        self.custom_context_window.setRange(
+            MODEL_CONTEXT_WINDOW_MIN // 1000,
+            MODEL_CONTEXT_WINDOW_MAX // 1000,
+        )
+        self.custom_context_window.setSingleStep(32)
+        self.custom_context_window.setSuffix(" K token")
+        self.context_strategy = QComboBox()
+        self.context_strategy.addItem("兼容 · 优先稳定", CONTEXT_STRATEGY_COMPATIBLE)
+        self.context_strategy.addItem("均衡 · 日常创作", CONTEXT_STRATEGY_BALANCED)
+        self.context_strategy.addItem("深度 · 全局检查", CONTEXT_STRATEGY_DEEP)
+        self.context_budget_preview = QLabel()
+        self.context_budget_preview.setObjectName("mutedLabel")
+        self.context_budget_preview.setWordWrap(True)
         self.timeout = QSpinBox()
         self.timeout.setRange(30, 1800)
         self.timeout.setSuffix(" 秒")
         ai_form.addRow("命令", self.command)
         ai_form.addRow("启动参数", self.launcher_args)
         ai_form.addRow("运行配置", self.profile)
+        ai_form.addRow("提示词传输", self.prompt_transport)
+        ai_form.addRow("模型上下文窗口", self.model_context_window)
+        ai_form.addRow("自定义窗口", self.custom_context_window)
+        ai_form.addRow("上下文使用策略", self.context_strategy)
+        ai_form.addRow("自动预算", self.context_budget_preview)
         ai_form.addRow("附加参数", self.extra_args)
         ai_form.addRow("最长等待", self.timeout)
         ai_layout.addLayout(ai_form)
@@ -1053,9 +1093,22 @@ class SettingsPage(QWidget):
         reset.clicked.connect(self._restore_defaults)
         root.addWidget(reset, 0, Qt.AlignmentFlag.AlignLeft)
         self.auto_save.toggled.connect(self.auto_save_interval.setEnabled)
+        self.model_context_window.currentIndexChanged.connect(
+            self._update_context_budget_preview
+        )
+        self.custom_context_window.valueChanged.connect(
+            self._update_context_budget_preview
+        )
+        self.context_strategy.currentIndexChanged.connect(
+            self._update_context_budget_preview
+        )
+        self.ai_history_mode.currentIndexChanged.connect(self._update_context_budget_preview)
+        self.ai_context_history_chapters.valueChanged.connect(self._update_context_budget_preview)
+        self.history_remote.toggled.connect(self._update_context_budget_preview)
         self.set_config(config)
 
     def set_config(self, config: dict) -> None:
+        config = normalize_config(config)
         self._config = dict(config)
         self.auto_save.setChecked(bool(config.get("auto_save", True)))
         self.auto_save_interval.setValue(int(config.get("auto_save_interval", 30)))
@@ -1066,10 +1119,29 @@ class SettingsPage(QWidget):
         self.ai_context_history_chapters.setValue(
             int(config.get("ai_context_history_chapters", 5))
         )
+        self.ai_history_mode.setCurrentIndex(
+            self.ai_history_mode.findData(config["ai_history_mode"])
+        )
+        self.history_remote.setChecked(config["ai_history_remote_enabled"])
         self.command.setText(str(config.get("dsh_command", "dsh")))
         self.launcher_args.setText(shlex.join(config.get("dsh_launcher_args") or []))
         self.extra_args.setText(shlex.join(config.get("dsh_extra_args") or []))
         self.timeout.setValue(int(config.get("dsh_timeout", 600)))
+        model_window = int(config.get("ai_model_context_window_tokens", 0) or 0)
+        context_index = self.model_context_window.findData(model_window)
+        if context_index < 0:
+            context_index = self.model_context_window.findData(-1)
+            self.custom_context_window.setValue(
+                max(
+                    MODEL_CONTEXT_WINDOW_MIN // 1000,
+                    min(MODEL_CONTEXT_WINDOW_MAX // 1000, model_window // 1000),
+                )
+            )
+        self.model_context_window.setCurrentIndex(max(0, context_index))
+        strategy_index = self.context_strategy.findData(
+            str(config.get("ai_context_strategy") or CONTEXT_STRATEGY_BALANCED)
+        )
+        self.context_strategy.setCurrentIndex(max(0, strategy_index))
         self.theme.setCurrentIndex(0 if config.get("theme", "light") == "light" else 1)
         self.ui_font_size.setValue(int(config.get("ui_font_size", 14)))
         self.auto_check_updates.setChecked(
@@ -1080,6 +1152,46 @@ class SettingsPage(QWidget):
         )
         self.update_channel.setCurrentIndex(max(0, channel_index))
         self.auto_save_interval.setEnabled(self.auto_save.isChecked())
+        self._update_context_budget_preview()
+
+    def _selected_model_context_window(self) -> int:
+        selected = int(self.model_context_window.currentData() or 0)
+        if selected == -1:
+            return self.custom_context_window.value() * 1000
+        return selected
+
+    def _update_context_budget_preview(self) -> None:
+        is_custom = self.model_context_window.currentData() == -1
+        self.custom_context_window.setEnabled(is_custom)
+        capacity = derive_context_capacity(
+            self._selected_model_context_window(),
+            self.context_strategy.currentData(),
+        )
+        if capacity.verified:
+            prefix = "已声明模型窗口"
+        else:
+            prefix = "模型窗口未确认，使用安全预算"
+        self.context_budget_preview.setText(
+            f"{prefix}；业务输入 {capacity.input_token_budget:,} token，"
+            f"约 {capacity.prompt_char_budget:,} 字符，运行预留 "
+            f"{capacity.runtime_reserve_tokens:,} token，任务文件上限 "
+            f"{capacity.task_file_max_bytes / 1024:.0f} KiB。"
+        )
+        mode = self.ai_history_mode.currentData()
+        self.ai_context_history_chapters.setEnabled(mode == "custom")
+        count = resolve_history_count(
+            mode, self.ai_context_history_chapters.value(), capacity.strategy,
+        )
+        self.history_remote.setEnabled(count > 0)
+        self.history_preview.setText(
+            "本次扩写不携带历史章节摘要；本章规划与故事状态按原任务规则使用。"
+            if count == 0 else
+            f"扩写优先参考最近 {count} 章已有摘要；历史预算上限 "
+            f"{history_token_budget(capacity.input_token_budget, capacity.strategy):,} token。"
+            "实际纳入数量取决于摘要是否齐全及剩余空间，可在上下文报告中查看。"
+            + ("另从此前全部章节的已采用记忆中检索相关事实，与近期摘要共用预算。"
+               if count and self.history_remote.isChecked() else "")
+        )
 
     def synchronize_update_metadata(self, config: dict) -> None:
         """Keep background-check metadata without resetting edited controls."""
@@ -1100,10 +1212,14 @@ class SettingsPage(QWidget):
                 "editor_font_size": self.editor_font_size.value(),
                 "expand_target_chars": self.expand_target_chars.value(),
                 "ai_context_history_chapters": self.ai_context_history_chapters.value(),
+                "ai_history_mode": self.ai_history_mode.currentData(),
+                "ai_history_remote_enabled": self.history_remote.isChecked(),
                 "dsh_command": self.command.text().strip() or "dsh",
                 "dsh_launcher_args": launcher_args,
                 "dsh_profile": "headless",
                 "dsh_extra_args": extra_args,
+                "ai_model_context_window_tokens": self._selected_model_context_window(),
+                "ai_context_strategy": self.context_strategy.currentData(),
                 "dsh_timeout": self.timeout.value(),
                 "theme": self.theme.currentData(),
                 "ui_font_size": self.ui_font_size.value(),

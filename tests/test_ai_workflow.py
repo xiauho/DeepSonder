@@ -1,10 +1,8 @@
-import json
 import tempfile
 from pathlib import Path
 from unittest import TestCase
 from unittest.mock import patch
 
-from core import ai_workflow
 from core.ai_workflow import AIWorkflowService
 from core.project import NovelProject
 
@@ -17,7 +15,7 @@ class FakeDSH:
         self.json_calls: list[tuple[str, str]] = []
         self.context_reports = []
 
-    def resolve_prompt_budget(self, **_kwargs):
+    def prompt_build_budget(self):
         return 24_000
 
     def generate(self, system_prompt: str, user_prompt: str, *args, **kwargs) -> str:
@@ -32,46 +30,25 @@ class FakeDSH:
 
 
 class AIWorkflowTests(TestCase):
-    def test_memory_workflow_keeps_prompt_sequence_and_parses_results(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            project = NovelProject.create(Path(tmp) / "proj", "测试")
-            dsh = FakeDSH(
-                json.dumps(
-                    {
-                        "type": "chapter_summary",
-                        "summary": "主角抵达旧站。",
-                        "completion_message": "摘要完成",
-                    },
-                    ensure_ascii=False,
-                ),
-                {
-                    "type": "story_state_update",
-                    "current_chapter": 1,
-                    "current_location": "旧站",
-                    "characters": {},
-                    "foreshadowing": [],
-                    "completion_message": "状态完成",
-                },
-            )
+    def test_consistency_check_forwards_remote_history_setting(self) -> None:
+        project = object()
+        service = AIWorkflowService(FakeDSH("unused", {}))
+        with patch("core.ai_workflow.consistency.run_consistency_check", return_value="ok") as run:
+            result = service.check(project, "chapter_01", history_remote_enabled=False)
+        self.assertEqual(result, "ok")
+        run.assert_called_once_with(
+            project,
+            "chapter_01",
+            service.dsh,
+            cancel_event=None,
+            history_remote_enabled=False,
+        )
 
-            with patch(
-                "core.ai_workflow.build_ai_context",
-                wraps=ai_workflow.build_ai_context,
-            ) as build_context:
-                result = AIWorkflowService(dsh).update_memory(project, "chapter_01")
-
-            self.assertEqual(result[0], "主角抵达旧站。")
-            self.assertEqual(result[1]["current_location"], "旧站")
-            self.assertEqual(result[2], "摘要完成；状态完成")
-            self.assertEqual(len(dsh.generate_calls), 1)
-            self.assertEqual(len(dsh.json_calls), 1)
-            self.assertEqual(build_context.call_count, 1)
-            self.assertIn("chapter_summary", dsh.generate_calls[0][1])
-            self.assertIn("story_state_update", dsh.json_calls[0][1])
-            self.assertEqual(
-                [report.task_kind for report in dsh.context_reports],
-                ["chapter_summary", "story_state_update"],
-            )
+    def test_memory_workflow_exposes_only_fact_patch_entry(self) -> None:
+        service = AIWorkflowService(FakeDSH("unused", {}))
+        self.assertTrue(callable(service.update_memory))
+        self.assertFalse(hasattr(service, "update_memory_v2"))
+        self.assertFalse(hasattr(service, "update_memory_for_pipeline"))
 
     def test_consistency_repair_uses_json_protocol(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -31,18 +31,17 @@ from .context_selection import (
     WORLD_ENTRY_CHARS,
     WORLD_SELECTION_CHARS,
     CanonSelectionStat,
-    normalize_selection_mode,
     required_stat,
     select_ranked_documents,
 )
 from .models import Chapter, RelatedCanon
+from .project_schema import PROJECT_MANIFEST_RELATIVE_PATH, project_manifest
 from .storage import atomic_write_text
 
 DEFAULT_STORY_STATE = {
     "current_chapter": 1,
     "current_location": "",
     "characters": {},
-    "foreshadowing": [],
 }
 
 DEFAULT_CHAPTER_SUMMARIES = {}
@@ -225,6 +224,12 @@ class NovelProject:
                 "# 第一章 初始\n\n## 大纲\n- 在这里写本章剧情目标\n\n## 正文\n在这里开始写作。\n",
                 encoding="utf-8",
             )
+
+        atomic_write_text(
+            root / PROJECT_MANIFEST_RELATIVE_PATH,
+            json.dumps(project_manifest(), ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
 
         return cls(root)
 
@@ -476,16 +481,8 @@ class NovelProject:
         selected_power: list[str | Path] | tuple[str | Path, ...] | None = None,
         core_power_paths: list[str | Path] | tuple[str | Path, ...] | None = None,
         relevance_query: str | None = None,
-        selection_mode: str = "legacy_all",
     ) -> RelatedCanon:
-        """Load canon relevant to one task without forcing every canon file in.
-
-        The default remains backward-compatible and loads the same project-wide
-        canon as before.  Task-specific context builders can narrow the query
-        and omit expensive low-signal sections such as the full world/power
-        directories.
-        """
-        selection_mode = normalize_selection_mode(selection_mode)
+        """Load task-relevant canon with deterministic, bounded selection."""
         cache_key = (
             str(chapter_id),
             character_query,
@@ -495,7 +492,6 @@ class NovelProject:
             tuple(self._selected_power_keys(selected_power)),
             tuple(self._selected_power_keys(core_power_paths)),
             str(relevance_query or ""),
-            selection_mode,
         )
         signature = self._related_canon_signature(
             chapter_id,
@@ -523,7 +519,6 @@ class NovelProject:
         selection_stats.append(
             CanonSelectionStat(
                 category="characters",
-                mode=selection_mode,
                 candidates=len(character_paths),
                 included=len(characters_parts),
                 matched=len(characters_parts),
@@ -539,11 +534,10 @@ class NovelProject:
                 self.list_world(),
                 query=relevance_query,
                 category="world",
-                mode=selection_mode,
                 reader=self.read_file,
                 total_chars=WORLD_SELECTION_CHARS,
                 entry_chars=WORLD_ENTRY_CHARS,
-                add_heading=selection_mode == "safe",
+                add_heading=True,
             )
             world = ranked_world.text
             selection_stats.append(ranked_world.stat)
@@ -582,7 +576,6 @@ class NovelProject:
                 other_power_paths,
                 query=relevance_query,
                 category="power",
-                mode=selection_mode,
                 reader=self.read_file,
                 total_chars=POWER_SELECTION_CHARS,
                 entry_chars=POWER_ENTRY_CHARS,
@@ -594,19 +587,16 @@ class NovelProject:
                         "core_power",
                         1 if core_power else 0,
                         "global_core",
-                        selection_mode,
                     ),
                     required_stat(
                         "core_systems",
                         len(core_system_parts),
                         "author_core",
-                        selection_mode,
                     ),
                     required_stat(
                         "selected_power",
                         len(selected_power_parts),
                         "manual_selection",
-                        selection_mode,
                     ),
                     ranked_power.stat,
                 )
@@ -620,7 +610,6 @@ class NovelProject:
             selection_stats.append(
                 CanonSelectionStat(
                     category="timeline",
-                    mode=selection_mode,
                     candidates=1 if timeline_path.exists() else 0,
                     included=1 if timeline else 0,
                     matched=1 if timeline else 0,
@@ -763,9 +752,3 @@ class NovelProject:
             if name not in {"大纲", "剧情简写", "正文"} and body(name)
         ]
         return body("大纲"), body("剧情简写"), body("正文"), extras
-
-    @staticmethod
-    def _split_chapter(raw: str) -> tuple[str, str]:
-        """Backward-compatible outline/content view of a chapter document."""
-        outline, _plot_brief, content, _extra_sections = NovelProject._parse_chapter(raw)
-        return outline, content

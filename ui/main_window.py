@@ -687,6 +687,20 @@ class MainWindow(QMainWindow):
         if chapters:
             self.left_panel.select_path(chapters[0])
             self._show_route("dashboard")
+        migration = self.project_session.last_migration_result
+        if migration is not None and migration.migrated:
+            backup = str(migration.backup_path or "")
+            message = (
+                f"项目数据已从格式 {migration.from_schema} 迁移到 "
+                f"{migration.to_schema}；更新 {len(migration.changed_files)} 个文件。"
+            )
+            self.status_message.setText(message)
+            if not quiet:
+                QMessageBox.information(
+                    self,
+                    "项目数据迁移完成",
+                    f"{message}\n\n迁移前备份：\n{backup}",
+                )
         return True
 
     def _on_project_changed(self, project: NovelProject | None) -> None:
@@ -1658,10 +1672,6 @@ class MainWindow(QMainWindow):
 
     def expand_chapter(self) -> None:
         self.ai_workflow_controller.expand()
-
-    def continue_writing(self) -> None:
-        """Backward-compatible entry point for older shortcuts or callers."""
-        self.expand_chapter()
 
     def check_consistency(self) -> None:
         self.ai_workflow_controller.check()

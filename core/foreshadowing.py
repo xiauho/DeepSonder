@@ -31,6 +31,37 @@ NOTE_FIELDS = {
 }
 
 
+def legacy_notes_from_story_state(state: object) -> list[dict]:
+    """Convert the retired story-state string list to structured notes."""
+    legacy = state.get("foreshadowing", []) if isinstance(state, dict) else []
+    notes: list[dict] = []
+    timestamp = _now()
+    for item in legacy if isinstance(legacy, list) else []:
+        title = str(item or "").strip()
+        if not title:
+            continue
+        stable_id = f"legacy-{hashlib.sha256(title.encode('utf-8')).hexdigest()[:12]}"
+        notes.append(
+            {
+                "id": stable_id,
+                "title": title,
+                "note": "由旧版故事状态迁移，首次出现章节待作者补充。",
+                "first_seen_chapter": "",
+                "planned_resolution_chapter": "",
+                "recent_seen_chapter": "",
+                "resolved_chapter": "",
+                "status": "open",
+                "priority": "medium",
+                "related_characters": [],
+                "tags": ["legacy"],
+                "appearances": [],
+                "created_at": timestamp,
+                "updated_at": timestamp,
+            }
+        )
+    return notes
+
+
 @dataclass(frozen=True)
 class ForeshadowingTrashEntry:
     """Metadata for one deleted foreshadowing note."""
@@ -62,11 +93,9 @@ class ForeshadowingStore:
         return self.project.root / ".novalist" / "trash" / "foreshadowing"
 
     def load_notes(self) -> list[dict]:
-        """Load notes, migrating the legacy story-state list once if needed."""
+        """Load structured notes; project migration owns legacy conversion."""
         if not self.path.exists():
-            notes = self._migrate_legacy_notes()
-            self.save_notes(notes)
-            return notes
+            raise ValueError(f"伏笔笔记文件缺失，请重新打开项目完成迁移：{self.path}")
 
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
@@ -74,6 +103,8 @@ class ForeshadowingStore:
             raise ValueError(f"伏笔笔记文件无法读取：{self.path}") from exc
         if not isinstance(data, dict) or not isinstance(data.get("items"), list):
             raise ValueError("伏笔笔记文件格式无效，缺少 items 数组。")
+        if data.get("version") != FORESHADOWING_VERSION:
+            raise ValueError("伏笔笔记文件版本不受支持。")
         return self._normalize_notes(data["items"])
 
     def save_notes(self, notes: list[dict]) -> None:
@@ -287,35 +318,6 @@ class ForeshadowingStore:
         entry_path = self._trash_entry_path(trash_id)
         self._read_trash_entry(entry_path)
         self._remove_trash_path(entry_path)
-
-    def _migrate_legacy_notes(self) -> list[dict]:
-        state = self.project.load_story_state()
-        legacy = state.get("foreshadowing", []) if isinstance(state, dict) else []
-        notes: list[dict] = []
-        for item in legacy if isinstance(legacy, list) else []:
-            title = str(item or "").strip()
-            if not title:
-                continue
-            stable_id = f"legacy-{hashlib.sha256(title.encode('utf-8')).hexdigest()[:12]}"
-            notes.append(
-                {
-                    "id": stable_id,
-                    "title": title,
-                    "note": "由旧版故事状态迁移，首次出现章节待作者补充。",
-                    "first_seen_chapter": "",
-                    "planned_resolution_chapter": "",
-                    "recent_seen_chapter": "",
-                    "resolved_chapter": "",
-                    "status": "open",
-                    "priority": "medium",
-                    "related_characters": [],
-                    "tags": ["legacy"],
-                    "appearances": [],
-                    "created_at": _now(),
-                    "updated_at": _now(),
-                }
-            )
-        return self._normalize_notes(notes)
 
     def _normalize_notes(self, notes: object) -> list[dict]:
         if not isinstance(notes, list):

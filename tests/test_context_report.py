@@ -1,7 +1,6 @@
 import json
 import tempfile
 from pathlib import Path
-from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import patch
 
@@ -26,6 +25,23 @@ def empty_report(task_kind: str = "consistency_check") -> PromptContextReport:
         user_prompt_chars=1_500,
         total_prompt_chars=2_000,
     )
+
+
+def acknowledged(client: DSHClient, output: str = "完成"):
+    def response(_prompt, **_kwargs):
+        client._last_command_chars = 256
+        task_path = next(client.working_directory.glob(".novalist-task-*.md"))
+        lines = task_path.read_text(encoding="utf-8").splitlines()
+        nonce_head = next(line.split(": ", 1)[1] for line in lines if line.startswith("task_nonce_head: "))
+        nonce_middle = next(
+            line.split("=", 1)[1]
+            for line in lines
+            if line.startswith("NOVALIST_TRANSPORT_CHECKPOINT: task_nonce_middle=")
+        )
+        nonce_tail = next(line.split(": ", 1)[1] for line in lines if line.startswith("task_nonce_tail: "))
+        return f"NOVALIST_FILE_ACK:{nonce_head}:{nonce_middle}:{nonce_tail}\n{output}"
+
+    return response
 
 
 class ContextAllocationReportTests(TestCase):
@@ -55,7 +71,6 @@ class ContextAllocationReportTests(TestCase):
             transport="argv",
             submitted_prompt_chars=300,
             command_chars=350,
-            fallback_used=False,
             outcome="success",
             task_file_cleaned=True,
         )
@@ -87,7 +102,10 @@ class PromptConstructionReportTests(TestCase):
                 prompt_budget=48_000,
             )
 
-        self.assertEqual(tuple(bundle), (bundle.system_prompt, bundle.user_prompt))
+        self.assertTrue(bundle.system_prompt)
+        self.assertTrue(bundle.user_prompt)
+        with self.assertRaises(TypeError):
+            iter(bundle)
         self.assertEqual(bundle.report.task_kind, "chapter_expansion")
         self.assertEqual(bundle.report.history_requested, 20)
         self.assertEqual(bundle.report.history_available, 2)
@@ -98,51 +116,65 @@ class PromptConstructionReportTests(TestCase):
 class DSHInvocationReportTests(TestCase):
     def test_success_report_contains_actual_argv_metrics(self) -> None:
         reports = []
-        completed = SimpleNamespace(returncode=0, stdout="完成", stderr="")
-        client = DSHClient("dsh", report_callback=reports.append)
+        client = DSHClient(
+            "dsh",
+            report_callback=reports.append,
+            model_context_window_tokens=128_000,
+            context_strategy="compatible",
+        )
+        client.use_isolated_workspace()
+        client._file_transport_supported = True
 
-        with patch("core.dsh_client.subprocess.run", return_value=completed):
+        with patch.object(client, "_execute_prompt", side_effect=acknowledged(client)):
             client.generate("系统", "任务", context_report=empty_report())
 
         self.assertEqual(len(reports), 1)
-        self.assertEqual(reports[0].transport, "argv")
+        self.assertEqual(reports[0].transport, "file")
         self.assertEqual(reports[0].outcome, "success")
         self.assertGreater(reports[0].command_chars, 0)
+        self.assertEqual(reports[0].input_token_budget, 24_000)
+        self.assertEqual(reports[0].runtime_reserve_tokens, 6_000)
+        self.assertEqual(reports[0].model_context_window_tokens, 128_000)
+        self.assertEqual(reports[0].context_strategy, "compatible")
+        self.assertGreater(reports[0].estimated_input_tokens, 0)
+        self.assertEqual(reports[0].token_estimator, "conservative_v1")
+        client.cleanup()
 
     def test_file_report_confirms_task_file_cleanup(self) -> None:
         reports = []
-        completed = SimpleNamespace(returncode=0, stdout="完成", stderr="")
         client = DSHClient(
             "dsh",
-            prompt_transport="file",
             report_callback=reports.append,
+            input_token_budget=120_000,
         )
         client.use_isolated_workspace()
         client._file_transport_supported = True
         workspace = client.working_directory
 
-        with patch("core.dsh_client.subprocess.run", return_value=completed):
+        with patch.object(client, "_execute_prompt", side_effect=acknowledged(client)):
             client.generate("系统", "长任务", context_report=empty_report())
 
         self.assertEqual(reports[0].transport, "file")
         self.assertTrue(reports[0].task_file_cleaned)
+        self.assertTrue(reports[0].file_ack_verified)
+        self.assertGreater(reports[0].task_file_bytes, 0)
         self.assertEqual(list(workspace.iterdir()), [])
         client.cleanup()
 
-    def test_auto_fallback_is_visible_without_prompt_content(self) -> None:
+    def test_unavailable_long_file_transport_fails_without_prompt_content(self) -> None:
         reports = []
         client = DSHClient(
             "dsh",
-            prompt_transport="auto",
             report_callback=reports.append,
+            input_token_budget=120_000,
         )
-        client._file_transport_supported = False
         secret = "秘密正文" * 6_000
-        with patch.object(client, "_execute_prompt", return_value="完成"):
-            client.generate("系统", secret, context_report=empty_report())
+        with patch.object(client, "_ensure_file_transport_support", return_value=False):
+            with self.assertRaisesRegex(RuntimeError, "本次任务已停止"):
+                client.generate("系统", secret, context_report=empty_report())
 
-        self.assertTrue(reports[0].fallback_used)
-        self.assertEqual(reports[0].transport, "argv")
+        self.assertEqual(reports[0].transport, "file_unavailable")
+        self.assertEqual(reports[0].outcome, "failed")
         self.assertNotIn(secret, json.dumps(reports[0].to_dict(), ensure_ascii=False))
 
     def test_timeout_and_cancellation_are_reported_after_file_cleanup(self) -> None:
@@ -154,7 +186,6 @@ class DSHInvocationReportTests(TestCase):
                 reports = []
                 client = DSHClient(
                     "dsh",
-                    prompt_transport="file",
                     report_callback=reports.append,
                 )
                 client.use_isolated_workspace()
@@ -180,7 +211,6 @@ class ContextReportRenderingTests(TestCase):
             transport="file",
             submitted_prompt_chars=2_100,
             command_chars=300,
-            fallback_used=False,
             outcome="success",
             task_file_cleaned=True,
         )
@@ -189,3 +219,20 @@ class ContextReportRenderingTests(TestCase):
         self.assertIn("临时文件传输", rendered)
         self.assertIn("2,000", rendered)
         self.assertIn("复制脱敏诊断信息", rendered)
+
+    def test_rendering_shows_redacted_token_estimate(self) -> None:
+        report = empty_report().complete_invocation(
+            transport="argv",
+            submitted_prompt_chars=2_000,
+            command_chars=2_100,
+            outcome="success",
+            task_file_cleaned=True,
+            input_token_budget=24_000,
+            runtime_reserve_tokens=6_000,
+            estimated_input_tokens=1_234,
+            token_estimator="conservative_v1",
+        )
+        rendered = render_context_reports([report])
+        self.assertIn("1,234 / 24,000 token", rendered)
+        self.assertIn("运行预留 6,000 token", rendered)
+        self.assertIn("conservative_v1", rendered)

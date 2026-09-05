@@ -13,7 +13,7 @@ class FakeDSH:
         self.json_outputs = list(json_outputs or [])
         self.json_calls: list[dict] = []
 
-    def resolve_prompt_budget(self, **_kwargs):
+    def prompt_build_budget(self):
         return 24_000
 
     def generate(
@@ -58,13 +58,32 @@ class ExpansionTests(TestCase):
 
     def test_valid_first_output_returns_without_retry(self) -> None:
         dsh = FakeDSH([self.valid_output])
-        raw, first_raw = expansion.run_expansion(self.project, "chapter_01", dsh, target_chars=300)
+        result = expansion.run_expansion(
+            self.project, "chapter_01", dsh, target_chars=300
+        )
         self.assertEqual(
-            expansion.ai_protocol.parse_expansion(raw, min_chars=1).text,
+            expansion.ai_protocol.parse_expansion(result.raw_output, min_chars=1).text,
             "字" * 300,
         )
-        self.assertIsNone(first_raw)
+        self.assertIsNone(result.first_raw_output)
+        self.assertEqual(result.plain_text_fallback_count, 0)
         self.assertEqual(len(dsh.calls), 1)
+
+    def test_plain_text_fallback_is_counted_before_canonicalization(self) -> None:
+        plain_text = "风吹过长街。" * 50
+        dsh = FakeDSH([plain_text])
+
+        result = expansion.run_expansion(
+            self.project, "chapter_01", dsh, target_chars=300
+        )
+
+        self.assertIsNone(result.first_raw_output)
+        self.assertEqual(result.plain_text_fallback_count, 1)
+        self.assertIn("<NOVEL_TEXT>", result.raw_output)
+        self.assertEqual(
+            expansion.ai_protocol.parse_expansion(result.raw_output, min_chars=1).text,
+            plain_text,
+        )
 
     def test_retry_keeps_full_timeout_budget(self) -> None:
         dsh = FakeDSH([self.onboarding_output, self.valid_output])
@@ -72,14 +91,15 @@ class ExpansionTests(TestCase):
             "core.expansion.build_ai_context",
             wraps=expansion.build_ai_context,
         ) as build_context:
-            raw, first_raw = expansion.run_expansion(
+            result = expansion.run_expansion(
                 self.project, "chapter_01", dsh, target_chars=300
             )
         self.assertEqual(
-            expansion.ai_protocol.parse_expansion(raw, min_chars=1).text,
+            expansion.ai_protocol.parse_expansion(result.raw_output, min_chars=1).text,
             "字" * 300,
         )
-        self.assertEqual(first_raw, self.onboarding_output)
+        self.assertEqual(result.first_raw_output, self.onboarding_output)
+        self.assertEqual(result.plain_text_fallback_count, 0)
         self.assertEqual(len(dsh.calls), 2)
         self.assertIn("纠偏重试", dsh.calls[1]["system"])
         # Regression: the retry regenerates the whole chapter and must not run
@@ -149,7 +169,7 @@ class ExpansionTests(TestCase):
             ],
         )
 
-        raw, first_raw = expansion.run_expansion(
+        result = expansion.run_expansion(
             self.project,
             "chapter_01",
             dsh,
@@ -157,10 +177,11 @@ class ExpansionTests(TestCase):
             selected_foreshadowing=selected,
         )
 
-        self.assertIsNone(first_raw)
-        self.assertIn("<FORESHADOWING_FEEDBACK>", raw)
+        self.assertIsNone(result.first_raw_output)
+        self.assertEqual(result.plain_text_fallback_count, 0)
+        self.assertIn("<FORESHADOWING_FEEDBACK>", result.raw_output)
         parsed = expansion.ai_protocol.parse_expansion(
-            raw,
+            result.raw_output,
             min_chars=1,
             expected_chapter_id="chapter_01",
             allowed_foreshadowing_ids={"f-selected"},
@@ -174,7 +195,7 @@ class ExpansionTests(TestCase):
         selected = [{"id": "f-selected", "title": "古剑来历", "status": "open"}]
         dsh = FakeDSH([self.valid_output], json_outputs=[RuntimeError("复核失败")])
 
-        raw, _first_raw = expansion.run_expansion(
+        result = expansion.run_expansion(
             self.project,
             "chapter_01",
             dsh,
@@ -183,7 +204,7 @@ class ExpansionTests(TestCase):
         )
 
         parsed = expansion.ai_protocol.parse_expansion(
-            raw,
+            result.raw_output,
             min_chars=1,
             expected_chapter_id="chapter_01",
             allowed_foreshadowing_ids={"f-selected"},
@@ -211,7 +232,7 @@ class ExpansionTests(TestCase):
             ],
         )
 
-        raw, first_raw = expansion.run_expansion(
+        result = expansion.run_expansion(
             self.project,
             "chapter_01",
             dsh,
@@ -219,17 +240,18 @@ class ExpansionTests(TestCase):
             selected_foreshadowing=selected,
         )
         parsed = expansion.ai_protocol.parse_expansion(
-            raw,
+            result.raw_output,
             min_chars=1,
             expected_chapter_id="chapter_01",
             allowed_foreshadowing_ids={"f-selected"},
         )
 
-        self.assertIsNone(first_raw)
+        self.assertIsNone(result.first_raw_output)
+        self.assertEqual(result.plain_text_fallback_count, 0)
         self.assertEqual(parsed.text, cleaned_text)
         self.assertNotIn("NOVEL_TEXT", parsed.text)
         self.assertNotIn("NOVALIST_TASK_DONE", parsed.text)
-        self.assertEqual(raw.count("<NOVEL_TEXT>"), 1)
+        self.assertEqual(result.raw_output.count("<NOVEL_TEXT>"), 1)
         self.assertEqual(len(parsed.foreshadowing_feedback), 1)
 
     def test_selected_power_is_forwarded_as_high_priority_context(self) -> None:

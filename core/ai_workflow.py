@@ -3,13 +3,31 @@
 from __future__ import annotations
 
 import threading
+from pathlib import Path
 
-from . import ai_protocol, consistency, expansion
+from . import consistency, expansion
+from .expansion import ExpansionRunResult
+from .chapter_facts import (
+    ChapterFactLedger,
+    FactLedgerCache,
+    extract_chapter_fact_ledger,
+)
+from .chapter_memory import (
+    ChapterMemoryCache,
+    ChapterMemoryProposal,
+    generate_chapter_memory_proposal,
+)
 from .context_budget import build_ai_context
 from .context_profiles import SUMMARY_CONTEXT_PROFILE
 from .dsh_client import DSHClient
 from .project import NovelProject
-from .prompt_builder import build_state_update_prompt, build_summary_prompt
+from .token_budget import (
+    DEFAULT_CHUNK_OVERLAP_TOKENS,
+    DEFAULT_CHUNK_TOKEN_BUDGET,
+    DEFAULT_INPUT_TOKEN_BUDGET,
+    DEFAULT_TOKEN_ESTIMATOR,
+)
+from .text_chunking import chapter_content_hash
 
 
 class AIWorkflowService:
@@ -19,9 +37,26 @@ class AIWorkflowService:
     on Qt. The caller remains responsible for threading and user confirmation.
     """
 
-    def __init__(self, dsh: DSHClient, *, selection_mode: str = "safe"):
+    def __init__(
+        self,
+        dsh: DSHClient,
+        *,
+        input_token_budget: int | None = None,
+        chunk_token_budget: int = DEFAULT_CHUNK_TOKEN_BUDGET,
+        chunk_overlap_tokens: int = DEFAULT_CHUNK_OVERLAP_TOKENS,
+        fact_cache_root: Path | None = None,
+        memory_cache_root: Path | None = None,
+    ):
         self.dsh = dsh
-        self.selection_mode = selection_mode
+        self.input_token_budget = int(
+            input_token_budget
+            if input_token_budget is not None
+            else getattr(dsh, "input_token_budget", DEFAULT_INPUT_TOKEN_BUDGET)
+        )
+        self.chunk_token_budget = max(1_000, int(chunk_token_budget))
+        self.chunk_overlap_tokens = max(0, int(chunk_overlap_tokens))
+        self.fact_cache_root = Path(fact_cache_root) if fact_cache_root else None
+        self.memory_cache_root = Path(memory_cache_root) if memory_cache_root else None
 
     def expand(
         self,
@@ -32,16 +67,19 @@ class AIWorkflowService:
         selected_foreshadowing: list[dict] | tuple[dict, ...] | None = None,
         selected_power: list[str] | tuple[str, ...] | None = None,
         cancel_event: threading.Event | None = None,
-    ) -> tuple[str, str | None]:
+        history_mode: str = "custom",
+        history_remote_enabled: bool = True,
+    ) -> ExpansionRunResult:
         return expansion.run_expansion(
             project,
             chapter_id,
             self.dsh,
             target_chars=target_chars,
             history_chapters=history_chapters,
+            history_mode=history_mode,
+            history_remote_enabled=history_remote_enabled,
             selected_foreshadowing=selected_foreshadowing,
             selected_power=selected_power,
-            selection_mode=self.selection_mode,
             cancel_event=cancel_event,
         )
 
@@ -50,13 +88,15 @@ class AIWorkflowService:
         project: NovelProject,
         chapter_id: str,
         cancel_event: threading.Event | None = None,
+        *,
+        history_remote_enabled: bool = True,
     ) -> str:
         return consistency.run_consistency_check(
             project,
             chapter_id,
             self.dsh,
-            selection_mode=self.selection_mode,
             cancel_event=cancel_event,
+            history_remote_enabled=history_remote_enabled,
         )
 
     def repair_consistency(
@@ -71,7 +111,27 @@ class AIWorkflowService:
             chapter_id,
             issue,
             self.dsh,
-            selection_mode=self.selection_mode,
+            cancel_event=cancel_event,
+        )
+
+    def build_chapter_fact_ledger(
+        self,
+        project: NovelProject,
+        chapter_id: str,
+        cancel_event: threading.Event | None = None,
+    ) -> ChapterFactLedger:
+        """Build the new validated fact layer without changing project memory."""
+        cache = FactLedgerCache(project, self.fact_cache_root)
+        estimator = getattr(self.dsh, "token_estimator", DEFAULT_TOKEN_ESTIMATOR)
+        return extract_chapter_fact_ledger(
+            project,
+            chapter_id,
+            self.dsh,
+            input_token_budget=self.input_token_budget,
+            chunk_token_budget=self.chunk_token_budget,
+            overlap_tokens=self.chunk_overlap_tokens,
+            estimator=estimator,
+            cache=cache,
             cancel_event=cancel_event,
         )
 
@@ -80,45 +140,32 @@ class AIWorkflowService:
         project: NovelProject,
         chapter_id: str,
         cancel_event: threading.Event | None = None,
-    ) -> tuple[str, dict, str]:
-        prompt_budget = self.dsh.resolve_prompt_budget(cancel_event=cancel_event)
+    ) -> ChapterMemoryProposal:
+        """Build an evidence-bound summary and locally applied memory patch."""
+        ledger = self.build_chapter_fact_ledger(
+            project,
+            chapter_id,
+            cancel_event=cancel_event,
+        )
         context = build_ai_context(
             project,
             chapter_id,
             profile=SUMMARY_CONTEXT_PROFILE,
-            selection_mode=self.selection_mode,
+            relevance_query="\n".join(
+                item.subject for item in ledger.facts if item.subject.strip()
+            ),
         )
-        summary_prompt = build_summary_prompt(
+        if chapter_content_hash(context.chapter.content) != ledger.chapter_hash:
+            raise RuntimeError("章节正文在事实提取期间发生变化，请重新运行记忆更新。")
+        estimator = getattr(self.dsh, "token_estimator", DEFAULT_TOKEN_ESTIMATOR)
+        return generate_chapter_memory_proposal(
             project,
-            chapter_id,
-            context=context,
-            prompt_budget=prompt_budget,
+            ledger,
+            self.dsh,
+            base_state=context.story_state,
+            canon_context=context.related.to_block(),
+            input_token_budget=self.input_token_budget,
+            estimator=estimator,
+            cache=ChapterMemoryCache(project, self.memory_cache_root),
+            cancel_event=cancel_event,
         )
-        generate_options = {"cancel_event": cancel_event} if cancel_event is not None else {}
-        summary_raw = self.dsh.generate(
-            summary_prompt.system_prompt,
-            summary_prompt.user_prompt,
-            context_report=summary_prompt.report,
-            **generate_options,
-        )
-        summary_result = ai_protocol.parse_summary_result(summary_raw)
-
-        state_prompt = build_state_update_prompt(
-            project,
-            chapter_id,
-            context=context,
-            prompt_budget=prompt_budget,
-        )
-        state_raw = self.dsh.generate_json(
-            state_prompt.system_prompt,
-            state_prompt.user_prompt,
-            context_report=state_prompt.report,
-            **generate_options,
-        )
-        state_result = ai_protocol.parse_story_state_result(state_raw)
-
-        completion = (
-            f"{summary_result.completion_message}；"
-            f"{state_result.completion_message}"
-        )
-        return summary_result.text, state_result.state, completion

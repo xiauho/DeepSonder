@@ -163,6 +163,7 @@ class ContinuationResult:
     used_marker: bool = False
     completion_message: str = "续写任务已完成"
     protocol_warning: str = ""
+    plain_text_fallback: bool = False
 
 
 @dataclass(frozen=True)
@@ -182,18 +183,7 @@ class ExpansionResult:
     foreshadowing_feedback: tuple[ForeshadowingSuggestion, ...] = ()
     feedback_warning: str = ""
     protocol_warning: str = ""
-
-
-@dataclass(frozen=True)
-class SummaryResult:
-    text: str
-    completion_message: str
-
-
-@dataclass(frozen=True)
-class StoryStateResult:
-    state: dict[str, Any]
-    completion_message: str
+    plain_text_fallback: bool = False
 
 
 @dataclass(frozen=True)
@@ -257,6 +247,7 @@ def parse_expansion(
         foreshadowing_feedback=suggestions,
         feedback_warning=warning,
         protocol_warning=base.protocol_warning,
+        plain_text_fallback=base.plain_text_fallback,
     )
 
 
@@ -273,6 +264,7 @@ def _parse_novel_text(
     content = ""
     used_marker = False
     protocol_warning = ""
+    plain_text_fallback = False
     completion_message = default_completion
 
     done_match = re.search(
@@ -308,6 +300,8 @@ def _parse_novel_text(
             # prose even when the task asks for a marker. Keep this safe
             # fallback, but reject obvious Agent onboarding responses below.
             content = text
+            plain_text_fallback = True
+            protocol_warning = "AI 未按正文协议返回标记，系统已使用纯正文兼容回退。"
 
     if not content:
         raise AIProtocolError(f"DSh 返回内容不符合{task_label}协议，未识别出小说正文。")
@@ -323,6 +317,7 @@ def _parse_novel_text(
         used_marker=used_marker,
         completion_message=completion_message,
         protocol_warning=protocol_warning,
+        plain_text_fallback=plain_text_fallback,
     )
 
 
@@ -501,46 +496,6 @@ def parse_consistency_repair(
             value.get("completion_message") or "一致性修复方案已生成"
         ).strip(),
     )
-
-
-def parse_summary_result(raw: str | dict[str, Any]) -> SummaryResult:
-    value = _as_object(raw, "章节摘要")
-    if value.get("type") != "chapter_summary":
-        raise AIProtocolError("DSh 返回内容不是章节摘要。")
-    summary = str(value.get("summary") or "").strip()
-    if not summary:
-        raise AIProtocolError("章节摘要为空。")
-    return SummaryResult(
-        summary,
-        str(value.get("completion_message") or "章节摘要任务已完成").strip(),
-    )
-
-
-def parse_summary(raw: str | dict[str, Any]) -> str:
-    return parse_summary_result(raw).text
-
-
-def parse_story_state_result(raw: str | dict[str, Any]) -> StoryStateResult:
-    value = _as_object(raw, "故事状态")
-    if value.get("type") != "story_state_update":
-        raise AIProtocolError("DSh 返回内容不是故事状态更新。")
-    if not isinstance(value.get("characters"), dict):
-        raise AIProtocolError("故事状态缺少 characters 对象。")
-    if not isinstance(value.get("foreshadowing"), list):
-        raise AIProtocolError("故事状态缺少 foreshadowing 数组。")
-    if not isinstance(value.get("current_chapter"), (int, float)):
-        raise AIProtocolError("故事状态缺少有效的 current_chapter。")
-    result = dict(value)
-    result.pop("type", None)
-    completion_message = str(
-        result.pop("completion_message", None) or "故事状态更新任务已完成"
-    ).strip()
-    result["current_chapter"] = int(result["current_chapter"])
-    return StoryStateResult(result, completion_message)
-
-
-def parse_story_state(raw: str | dict[str, Any]) -> dict[str, Any]:
-    return parse_story_state_result(raw).state
 
 
 def format_consistency_report(report: dict[str, Any]) -> str:

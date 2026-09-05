@@ -22,7 +22,7 @@ class ContextProfile:
     include_style: bool = True
 
 
-LEGACY_CONTEXT_PROFILE = ContextProfile("legacy_all")
+DEFAULT_CONTEXT_PROFILE = ContextProfile("default")
 
 EXPANSION_CONTEXT_PROFILE = ContextProfile(
     "chapter_expansion",
@@ -51,19 +51,6 @@ REPAIR_CONTEXT_PROFILE = ContextProfile(
 SUMMARY_CONTEXT_PROFILE = ContextProfile(
     "chapter_summary",
     relevance_scope="chapter",
-    include_summaries=False,
-    include_main_arc=False,
-    include_future_plan=False,
-    include_style=False,
-)
-
-STATE_UPDATE_CONTEXT_PROFILE = ContextProfile(
-    "story_state_update",
-    character_scope="none",
-    relevance_scope="none",
-    include_world=False,
-    include_power=False,
-    include_timeline=False,
     include_summaries=False,
     include_main_arc=False,
     include_future_plan=False,

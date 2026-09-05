@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+from dataclasses import dataclass, replace
 
 from . import ai_protocol
 from .context_budget import EXPANSION_SUMMARY_COUNT, build_ai_context
@@ -16,6 +17,17 @@ from .prompt_builder import (
     build_foreshadowing_review_prompt,
 )
 from .task_controller import AITaskCancelled
+from .history_context import history_token_budget, resolve_history_count
+from .token_budget import DEFAULT_INPUT_TOKEN_BUDGET
+
+
+@dataclass(frozen=True)
+class ExpansionRunResult:
+    """Named expansion outputs that can grow without tuple breakage."""
+
+    raw_output: str
+    first_raw_output: str | None
+    plain_text_fallback_count: int
 
 
 def run_expansion(
@@ -26,20 +38,25 @@ def run_expansion(
     history_chapters: int = EXPANSION_SUMMARY_COUNT,
     selected_foreshadowing: list[dict] | tuple[dict, ...] | None = None,
     selected_power: list[str] | tuple[str, ...] | None = None,
-    selection_mode: str = "safe",
     cancel_event: threading.Event | None = None,
-) -> tuple[str, str | None]:
+    history_mode: str = "custom",
+    history_remote_enabled: bool = True,
+) -> ExpansionRunResult:
     """Generate a chapter draft, retrying once when the output breaks protocol.
 
-    Returns ``(raw_output, first_raw)``.  ``first_raw`` is only set when the
-    first attempt failed the protocol check and a retry ran; the UI keeps it
-    in the task log so a near-miss can still be salvaged by hand.
+    ``first_raw_output`` is only set when the first attempt failed validation
+    and a retry ran. The fallback count survives canonicalization so the UI
+    can report protocol degradation explicitly.
     """
     target_chars = max(300, int(target_chars))
-    history_chapters = max(0, int(history_chapters))
+    strategy = getattr(dsh, "context_strategy", "balanced")
+    history_chapters = resolve_history_count(history_mode, history_chapters, strategy)
+    history_limit = history_token_budget(
+        getattr(dsh, "input_token_budget", DEFAULT_INPUT_TOKEN_BUDGET), strategy,
+    )
     min_chars = round(target_chars * 0.85)
     max_chars = round(target_chars * 1.15)
-    prompt_budget = dsh.resolve_prompt_budget(cancel_event=cancel_event)
+    prompt_budget = dsh.prompt_build_budget()
 
     context = build_ai_context(
         project,
@@ -55,8 +72,8 @@ def run_expansion(
             ensure_ascii=False,
             default=str,
         ),
-        selection_mode=selection_mode,
     )
+    context = replace(context, history_remote_enabled=history_remote_enabled)
     prompt = build_expansion_prompt(
         project,
         chapter_id,
@@ -66,6 +83,7 @@ def run_expansion(
         selected_power=selected_power,
         context=context,
         prompt_budget=prompt_budget,
+        history_token_limit=history_limit,
     )
     generate_options = {"cancel_event": cancel_event} if cancel_event is not None else {}
     raw = dsh.generate(
@@ -75,6 +93,7 @@ def run_expansion(
         **generate_options,
     )
     first_raw: str | None = None
+    plain_text_fallbacks = 0
     try:
         parsed = ai_protocol.parse_expansion(
             raw,
@@ -87,6 +106,7 @@ def run_expansion(
                 if isinstance(note, dict) and str(note.get("id") or "").strip()
             },
         )
+        plain_text_fallbacks += int(parsed.plain_text_fallback)
     except ai_protocol.AIProtocolError:
         first_raw = raw
         retry_prompt = build_expansion_retry_prompt(
@@ -98,6 +118,7 @@ def run_expansion(
             selected_power=selected_power,
             context=context,
             prompt_budget=prompt_budget,
+            history_token_limit=history_limit,
         )
         # The retry regenerates the full chapter, so it keeps the same timeout
         # budget as the first attempt instead of a shortened one.
@@ -113,8 +134,9 @@ def run_expansion(
                 min_chars=min_chars,
                 max_chars=max_chars,
             )
+            plain_text_fallbacks += int(parsed.plain_text_fallback)
         except ai_protocol.AIProtocolError:
-            return raw, first_raw
+            return ExpansionRunResult(raw, first_raw, plain_text_fallbacks)
 
     selected = tuple(
         note
@@ -131,7 +153,7 @@ def run_expansion(
         )
     else:
         raw = _canonical_expansion_output(parsed)
-    return raw, first_raw
+    return ExpansionRunResult(raw, first_raw, plain_text_fallbacks)
 
 
 def _attach_foreshadowing_review(

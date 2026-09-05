@@ -1,11 +1,9 @@
-"""Priority-based context budgets for dsh prompts.
+"""Priority-based context budgets for file-bridged dsh business prompts.
 
-The headless CLI accepts its task as a positional argument.  Novalist keeps a
-24K compatibility budget for argv and can select a larger budget after its
-isolated task-file bridge has been verified.  In both modes, context sections
-are ranked by importance: the least important ones are capped or dropped
-first, and every truncation is marked in place so the model can tell trimmed
-data apart from missing data.
+The headless CLI receives only a short loader as a positional argument. The
+business prompt is compiled into a verified isolated task file. Context
+sections are ranked by importance: the least important ones are capped or
+dropped first, and every truncation is marked in place.
 """
 
 from __future__ import annotations
@@ -14,24 +12,23 @@ import json
 import hashlib
 from dataclasses import dataclass
 
-from .context_profiles import ContextProfile, LEGACY_CONTEXT_PROFILE
+from .context_profiles import ContextProfile, DEFAULT_CONTEXT_PROFILE
 from .context_report import SectionUsage
 from .models import Chapter, RelatedCanon
 from .project import NovelProject, chapter_number_from_id
 from .project_data import ProjectDataStore
+from .history_context import HistoryWindow, HistoryAllocation, select_history_window, allocate_history
+from .accepted_memory import AcceptedMemoryView
 
 # Sections share this pool; instruction text and section labels live outside
-# it.  The argv value leaves headroom below DSHClient's 30K hard limit.  A
-# verified task-file transport can use the larger configurable budget without
-# placing the prompt itself on the Windows command line.
-ARGV_PROMPT_BUDGET = 24000
-DEFAULT_PROMPT_BUDGET = ARGV_PROMPT_BUDGET
+# it. DSHClient may lower this default further to keep the compiled prompt
+# below its configured token hard limit.
+DEFAULT_PROMPT_BUDGET = 24000
 
 # Task-specific history windows.  The current chapter's own planning text is
 # more useful for expansion than increasingly old raw prose.
 EXPANSION_SUMMARY_COUNT = 5
 CONTINUATION_SUMMARY_COUNT = 2
-SUMMARY_PER_CHAPTER_CAP = 400
 
 # A section trimmed below this many chars carries no useful signal; drop it.
 MIN_SECTION_CHARS = 160
@@ -42,24 +39,24 @@ TAIL_MARK = "（前文过长，已截断）\n"
 
 # key: (cap, keep, priority).  Lower priority number is allocated first.
 SECTION_RULES: dict[str, tuple[int, str, int]] = {
-    "outline": (3000, "head", 0),
-    "plot_brief": (2500, "head", 0),
-    "style": (1800, "head", 0),
+    "outline": (4000, "head", 0),
+    "plot_brief": (3000, "head", 0),
+    "style": (2500, "head", 0),
     "content": (12000, "tail", 1),
-    "selected_foreshadowing": (3500, "head", 1),
-    "core_power": (1800, "head", 1),
-    "core_systems": (3500, "head", 1),
-    "selected_power": (3500, "head", 1),
-    "state": (4000, "head", 2),
+    "selected_foreshadowing": (5000, "head", 1),
+    "core_power": (2500, "head", 1),
+    "core_systems": (5000, "head", 1),
+    "selected_power": (5000, "head", 1),
+    "state": (6000, "head", 2),
     # Summaries are rendered chronologically, so trimming must keep the tail:
     # the chapters nearest to the current one carry the strongest continuity.
-    "summaries": (2000, "tail", 3),
-    "characters": (3000, "head", 4),
-    "future_plan": (1500, "head", 5),
-    "main_arc": (1500, "head", 5),
-    "timeline": (1500, "head", 6),
-    "world": (2000, "head", 7),
-    "power": (1500, "head", 7),
+    "summaries": (6000, "tail", 3),
+    "characters": (6000, "head", 4),
+    "future_plan": (2500, "head", 5),
+    "main_arc": (2500, "head", 5),
+    "timeline": (4000, "head", 6),
+    "world": (8000, "head", 7),
+    "power": (6000, "head", 7),
 }
 
 
@@ -70,6 +67,7 @@ class Section:
     cap: int
     keep: str  # "head" | "tail"
     priority: int
+    history: HistoryWindow | None = None
 
 
 @dataclass(frozen=True)
@@ -79,6 +77,7 @@ class AllocationResult:
     values: dict[str, str]
     sections: tuple[SectionUsage, ...]
     budget: int
+    history: HistoryAllocation | None = None
 
 
 @dataclass(frozen=True)
@@ -94,6 +93,10 @@ class AIContext:
     main_arc: str
     future_plan: str
     style_guide: str
+    history_view: AcceptedMemoryView | None = None
+    history_query: str = ""
+    history_remote_enabled: bool = True
+    state_scope: str = ""
 
     def fingerprint(self, editor_text: str | None = None) -> str:
         payload = {
@@ -121,6 +124,9 @@ class AIContext:
             "future_plan": self.future_plan,
             "style_guide": self.style_guide,
             "editor_text": editor_text,
+            "accepted_memory": self.history_view.records if self.history_view else {},
+            "history_remote_enabled": self.history_remote_enabled,
+            "state_scope": self.state_scope,
         }
         canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
@@ -137,13 +143,11 @@ def build_ai_context(
     selected_power: list[str] | tuple[str, ...] | None = None,
     profile: ContextProfile | None = None,
     relevance_query: str | None = None,
-    selection_mode: str | None = None,
 ) -> AIContext:
     """Load prompt sources through one project data facade.
 
-    The default keeps the complete canon for compatibility.  Prompt builders
-    can narrow canon loading for a task so long projects do not pay the cost of
-    reading every world/power file before budgeting even begins.
+    Prompt builders can narrow canon loading for a task so long projects do not
+    pay the cost of reading every world/power file before budgeting even begins.
     """
     return build_task_context(
         project,
@@ -155,7 +159,6 @@ def build_ai_context(
         selected_power=selected_power,
         profile=profile,
         relevance_query=relevance_query,
-        selection_mode=selection_mode,
     )
 
 
@@ -170,18 +173,21 @@ def build_task_context(
     selected_power: list[str] | tuple[str, ...] | None = None,
     profile: ContextProfile | None = None,
     relevance_query: str | None = None,
-    selection_mode: str | None = None,
 ) -> AIContext:
     """Build an AI context with an explicit canon loading profile."""
-    profile = profile or LEGACY_CONTEXT_PROFILE
-    if profile is not LEGACY_CONTEXT_PROFILE:
-        character_scope = profile.character_scope
-        include_world = profile.include_world
-        include_power = profile.include_power
-        include_timeline = profile.include_timeline
+    profile = profile or DEFAULT_CONTEXT_PROFILE
+    character_scope = profile.character_scope
+    include_world = profile.include_world
+    include_power = profile.include_power
+    include_timeline = profile.include_timeline
     store = ProjectDataStore(project)
     chapter = store.load_chapter(chapter_id)
     story_state = store.load_story_state() if profile.include_story_state else {}
+    summaries = store.load_chapter_summaries() if profile.include_summaries else {}
+    history_view = AcceptedMemoryView(project, summaries) if profile.include_summaries else None
+    state_scope = ""
+    if history_view is not None and profile.include_story_state:
+        story_state, state_scope = history_view.state_for(chapter_id, story_state)
     character_query = None
     if character_scope == "planning":
         character_query = "\n".join(
@@ -212,8 +218,6 @@ def build_task_context(
             character_query = f"{character_query}\n{extra_relevance}".strip()
     if character_scope == "relevance":
         character_query = relevance_query
-    if selection_mode is None:
-        selection_mode = "legacy_all" if profile is LEGACY_CONTEXT_PROFILE else "safe"
     core_systems = store.list_core_systems() if include_power else []
     selected_systems = tuple(core_systems) + tuple(selected_power or ())
     return AIContext(
@@ -229,15 +233,15 @@ def build_task_context(
             selected_power=selected_systems,
             core_power_paths=core_systems,
             relevance_query=relevance_query,
-            selection_mode=selection_mode,
         ),
         story_state=story_state,
-        chapter_summaries=(
-            store.load_chapter_summaries() if profile.include_summaries else {}
-        ),
+        chapter_summaries=summaries,
         main_arc=store.load_main_arc() if profile.include_main_arc else "",
         future_plan=store.load_future_plan() if profile.include_future_plan else "",
         style_guide=store.load_style_guide() if profile.include_style else "",
+        history_view=history_view,
+        history_query=relevance_query,
+        state_scope=state_scope,
     )
 
 
@@ -251,13 +255,38 @@ def allocate(sections: list[Section], budget: int) -> dict[str, str]:
     return allocate_with_report(sections, budget).values
 
 
-def allocate_with_report(sections: list[Section], budget: int) -> AllocationResult:
+def allocate_with_report(
+    sections: list[Section], budget: int, *, history_token_limit: int | None = None,
+) -> AllocationResult:
     """Allocate sections and record counts without retaining their text."""
     result: dict[str, str] = {}
     usage: list[SectionUsage] = []
     normalized_budget = max(0, int(budget))
     remaining = normalized_budget
-    for section in sorted(sections, key=lambda item: item.priority):
+    history_result = None
+    # Reserve task text, core rules, characters and state before history.
+    # Lower-priority background can use the space left by the history pool.
+    for section in sorted(sections, key=lambda item: 4.5 if item.history is not None else item.priority):
+        if section.history is not None:
+            history_result = allocate_history(
+                section.history, remaining,
+                history_token_limit if history_token_limit is not None else int(budget * 0.2),
+            )
+            rendered = history_result.text
+            if rendered:
+                result[section.key] = rendered
+            elif section.history.entries or section.history.remote:
+                result[section.key] = DROPPED_PLACEHOLDER
+            remaining -= len(rendered)
+            status = (
+                "dropped" if (section.history.entries or section.history.remote) and not rendered
+                else "trimmed" if history_result.excluded_budget else "full"
+            )
+            usage.append(SectionUsage(
+                section.key, len(section.text), len(rendered), status,
+                section.priority, "whole_entries",
+            ))
+            continue
         text = str(section.text).strip()
         if not text:
             continue
@@ -288,7 +317,7 @@ def allocate_with_report(sections: list[Section], budget: int) -> AllocationResu
                 keep=section.keep,
             )
         )
-    return AllocationResult(result, tuple(usage), normalized_budget)
+    return AllocationResult(result, tuple(usage), normalized_budget, history_result)
 
 
 def gather_sections(
@@ -312,6 +341,13 @@ def gather_sections(
     chapter = context.chapter
     related = context.related
     summary_count = max(0, int(summary_count))
+    keys = set(keys)
+    history = select_history_window(
+        context.chapter_summaries, [path.stem for path in project.list_chapters()],
+        chapter_id, summary_count,
+        view=context.history_view, query=context.history_query,
+        remote_enabled=context.history_remote_enabled,
+    ) if "summaries" in keys else None
     raw = {
         "outline": chapter.outline,
         "plot_brief": chapter.plot_brief,
@@ -326,13 +362,7 @@ def gather_sections(
             ensure_ascii=False,
             separators=(",", ":"),
         ),
-        "summaries": prior_chapter_summaries(
-            project,
-            chapter_id,
-            count=summary_count,
-            per_summary_cap=SUMMARY_PER_CHAPTER_CAP,
-            summaries=context.chapter_summaries,
-        ),
+        "summaries": "\n\n".join(entry.rendered for entry in (*history.entries, *history.remote)) if history else "",
         "characters": related.characters,
         "future_plan": context.future_plan,
         "main_arc": context.main_arc,
@@ -340,26 +370,36 @@ def gather_sections(
         "world": related.world,
         "power": related.power,
     }
+    if context.state_scope:
+        raw["state"] = f"记忆适用范围：{state_scope_label(context.state_scope)}\n" + raw["state"]
     sections: list[Section] = []
     wanted = set(keys)
     for key in SECTION_RULES:
         if key not in wanted:
             continue
         text = str(raw.get(key) or "").strip()
-        if not text:
+        if not text and key != "summaries":
             continue
         cap, keep, priority = SECTION_RULES[key]
         if key == "summaries":
-            # The setting controls the number of summaries, so let this
-            # section grow with that choice. The global prompt budget still
-            # trims it after higher-priority sections are allocated.
-            cap = max(cap, summary_count * SUMMARY_PER_CHAPTER_CAP)
+            # History is allocated as whole entries under its own token pool.
+            cap = len(text)
         if key == "content":
             keep = content_keep
             if content_cap is not None:
                 cap = max(1, int(content_cap))
-        sections.append(Section(key, text, cap, keep, priority))
+        sections.append(Section(key, text, cap, keep, priority, history if key == "summaries" else None))
     return sections
+
+
+def state_scope_label(scope: str) -> str:
+    if scope.startswith("snapshot:"):
+        return f"使用 {scope.split(':', 1)[1]} 的已采用历史状态快照"
+    return {
+        "legacy_unverified": "旧状态的版本未确认，仅供参考",
+        "unknown_position": "章节顺序无法确认，未提供全局故事状态",
+        "future_or_unverified_state_omitted": "缺少适用于本章的有效状态快照，已省略全局故事状态",
+    }.get(scope, "版本未确认")
 
 
 def render_selected_foreshadowing(notes: object) -> str:
@@ -427,6 +467,8 @@ def prior_chapter_summaries(
     later chapters are excluded so regenerating an early chapter does not
     feed the model future plot.
     """
+    if count <= 0:
+        return ""
     current = chapter_number_from_id(chapter_id)
     entries: list[tuple[int, int, str, str]] = []
     source = summaries if summaries is not None else project.load_chapter_summaries()
@@ -448,6 +490,12 @@ def prior_chapter_summaries(
 def _trim(text: str, allowance: int, keep: str) -> str:
     if keep == "tail":
         return TAIL_MARK + text[-(allowance - len(TAIL_MARK)) :]
+    if keep == "head_tail":
+        marker = "\n…（正文中段已截断，保留章节开头与最近结尾）\n"
+        available = max(2, allowance - len(marker))
+        head_chars = max(1, available // 7)
+        tail_chars = max(1, available - head_chars)
+        return text[:head_chars] + marker + text[-tail_chars:]
     return text[: allowance - len(HEAD_MARK)] + HEAD_MARK
 
 

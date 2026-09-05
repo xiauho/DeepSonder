@@ -5,15 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from . import ai_protocol, memory
+from . import ai_protocol
+from .chapter_memory import ChapterMemoryProposal, canonical_hash
 from .project import NovelProject, chapter_number_from_id
 from .project_data import ProjectDataStore
-
-
-@dataclass(frozen=True)
-class MemoryDraft:
-    summary: str
-    state: dict[str, Any]
+from .text_chunking import chapter_content_hash
+from .accepted_memory import make_accepted_record
 
 
 @dataclass(frozen=True)
@@ -83,36 +80,36 @@ class AIResultService:
         )
 
     @staticmethod
-    def prepare_memory(summary: str, new_state: object) -> MemoryDraft:
-        if not isinstance(new_state, dict):
-            raise ValueError("AI 返回的故事状态不是有效对象。")
-        summary = str(summary or "").strip()
-        if not summary:
-            raise ValueError("AI 返回的章节摘要为空。")
-        return MemoryDraft(summary=summary, state=dict(new_state))
-
-    @staticmethod
-    def commit_memory(
+    def commit_memory_proposal(
         project: NovelProject,
         chapter_id: str,
-        draft: MemoryDraft,
+        proposal: ChapterMemoryProposal,
     ) -> MemoryCommitResult:
+        """Commit a validated V2 proposal only while its sources are current."""
+        if proposal.chapter_id != chapter_id:
+            raise ValueError("记忆提案不属于当前章节。")
+        if proposal.has_blockers:
+            raise ValueError("记忆提案仍包含阻断冲突，不能写入故事状态。")
+        chapter = project.load_chapter(chapter_id)
+        if chapter_content_hash(chapter.content) != proposal.chapter_hash:
+            raise ValueError("章节正文在记忆提案生成后已发生变化。")
         store = ProjectDataStore(project)
+        current_state = store.load_story_state()
+        if canonical_hash(current_state) != proposal.base_state_hash:
+            raise ValueError("故事状态在记忆提案生成后已发生变化。")
+
+        resulting_state = dict(proposal.resulting_state)
+        if "foreshadowing" in current_state:
+            resulting_state["foreshadowing"] = current_state["foreshadowing"]
         expected_chapter = chapter_number_from_id(chapter_id)
-        received_chapter = draft.state.get("current_chapter")
-        # Foreshadowing is now author-owned data in memory/foreshadowing.json.
-        # Keep the legacy field in the generated state for protocol
-        # compatibility, but never let the old AI memory task overwrite it.
-        state_without_legacy_hooks = dict(draft.state)
-        state_without_legacy_hooks.pop("foreshadowing", None)
-        merged_state = memory.merge_state_update(
-            store.load_story_state(),
-            state_without_legacy_hooks,
-            chapter_id,
+        if expected_chapter is not None:
+            resulting_state["current_chapter"] = expected_chapter
+        accepted_record = make_accepted_record(project, proposal, resulting_state, current_state)
+        store.commit_memory_update(
+            chapter_id, proposal.summary, resulting_state, accepted_record=accepted_record,
         )
-        store.commit_memory_update(chapter_id, draft.summary, merged_state)
         return MemoryCommitResult(
-            merged_state=merged_state,
+            merged_state=resulting_state,
             expected_chapter=expected_chapter,
-            received_chapter=received_chapter,
+            received_chapter=expected_chapter,
         )

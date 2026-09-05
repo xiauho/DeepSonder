@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Callable, Iterable
 
 
-CONTEXT_SELECTION_MODES = {"safe", "legacy_all"}
 WORLD_SELECTION_CHARS = 6_000
 POWER_SELECTION_CHARS = 5_000
 WORLD_ENTRY_CHARS = 1_600
@@ -21,7 +20,6 @@ class CanonSelectionStat:
     """Redacted selection counts for one canon category."""
 
     category: str
-    mode: str
     candidates: int
     included: int
     matched: int
@@ -46,24 +44,17 @@ class _Candidate:
     reason: str
 
 
-def normalize_selection_mode(value: object) -> str:
-    mode = str(value or "safe").strip().lower()
-    return mode if mode in CONTEXT_SELECTION_MODES else "safe"
-
-
 def select_ranked_documents(
     paths: Iterable[Path],
     *,
     query: str,
     category: str,
-    mode: str,
     reader: Callable[[Path], str],
     total_chars: int,
     entry_chars: int,
     add_heading: bool = True,
 ) -> RankedCanon:
     """Rank and bound documents without networking or model inference."""
-    mode = normalize_selection_mode(mode)
     candidates: list[_Candidate] = []
     for path in sorted({Path(item) for item in paths}, key=lambda item: item.name.casefold()):
         text = str(reader(path) or "").strip()
@@ -72,23 +63,25 @@ def select_ranked_documents(
         score, reason = relevance_score(path, text, query)
         candidates.append(_Candidate(path, text, score, reason))
 
-    if mode == "legacy_all":
-        rendered = [_render_candidate(item, None, add_heading) for item in candidates]
-        return RankedCanon(
-            "\n\n".join(rendered),
-            _selection_stat(category, mode, candidates, len(candidates), (), ()),
-        )
-
     ordered = sorted(
         candidates,
         key=lambda item: (-item.score, item.path.name.casefold()),
     )
+    matched = [item for item in ordered if item.score > 0]
+    # Do not use a larger model window as permission to fill it with unrelated
+    # canon. If lexical matching finds nothing, retain one deterministic
+    # background entry as a conservative fallback for sparse projects.
+    eligible = matched if matched else ordered[:2]
+    eligible_paths = {item.path for item in eligible}
     remaining = max(0, int(total_chars))
     rendered: list[str] = []
     included: list[_Candidate] = []
     excluded_unmatched: list[_Candidate] = []
     excluded_capacity: list[_Candidate] = []
     for item in ordered:
+        if item.path not in eligible_paths:
+            excluded_unmatched.append(item)
+            continue
         if remaining <= 0:
             target = excluded_capacity if item.score > 0 else excluded_unmatched
             target.append(item)
@@ -109,7 +102,6 @@ def select_ranked_documents(
         "\n\n".join(rendered),
         _selection_stat(
             category,
-            mode,
             candidates,
             len(included),
             excluded_unmatched,
@@ -144,12 +136,11 @@ def relevance_score(path: Path, text: str, query: str) -> tuple[int, str]:
     return 0, "background"
 
 
-def required_stat(category: str, count: int, reason: str, mode: str) -> CanonSelectionStat:
+def required_stat(category: str, count: int, reason: str) -> CanonSelectionStat:
     count = max(0, int(count))
     reasons = ((reason, count),) if count else ()
     return CanonSelectionStat(
         category=category,
-        mode=normalize_selection_mode(mode),
         candidates=count,
         included=count,
         matched=count,
@@ -160,7 +151,6 @@ def required_stat(category: str, count: int, reason: str, mode: str) -> CanonSel
 
 def _selection_stat(
     category: str,
-    mode: str,
     candidates: list[_Candidate],
     included: int,
     excluded_unmatched: Iterable[_Candidate],
@@ -171,7 +161,6 @@ def _selection_stat(
         reasons[item.reason] = reasons.get(item.reason, 0) + 1
     return CanonSelectionStat(
         category=category,
-        mode=mode,
         candidates=len(candidates),
         included=included,
         matched=sum(1 for item in candidates if item.score > 0),

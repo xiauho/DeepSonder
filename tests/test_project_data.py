@@ -4,6 +4,8 @@ from unittest import TestCase
 from unittest.mock import patch
 
 from core.project import NovelProject
+from core.project_migrations import migrate_project
+from core.project_schema import PROJECT_MANIFEST_RELATIVE_PATH
 from core.project_data import (
     CanonEntryConflictError,
     CharacterIdConflictError,
@@ -34,18 +36,6 @@ class ProjectDataStoreTests(TestCase):
             loaded = store.load_style_guide()
             self.assertIn("冷峻克制", loaded)
             self.assertNotIn("填写提示", loaded)
-
-    def test_ensure_style_guide_migrates_legacy_project_without_overwrite(self) -> None:
-        with TemporaryDirectory() as tmp:
-            project = NovelProject.create(Path(tmp) / "proj", "测试")
-            store = ProjectDataStore(project)
-            store.style_guide_path.unlink()
-
-            created = store.ensure_style_guide()
-            self.assertTrue(created.is_file())
-            created.write_text("# 写作风格指南\n\n保留我的规则。\n", encoding="utf-8")
-            store.ensure_style_guide()
-            self.assertIn("保留我的规则", created.read_text(encoding="utf-8"))
 
     def test_next_chapter_id_uses_maximum_number_and_skips_conflicts(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -136,22 +126,6 @@ class ProjectDataStoreTests(TestCase):
             )
             self.assertIn("能力体系设定", related.core_systems)
             self.assertNotIn("能力体系设定", related.power)
-
-    def test_legacy_system_registry_keys_are_migrated(self) -> None:
-        with TemporaryDirectory() as tmp:
-            project = NovelProject.create(Path(tmp) / "proj", "测试")
-            store = ProjectDataStore(project)
-            ability = project.canon_dir / "power" / "能力体系设定.md"
-            project.system_registry_path.write_text(
-                '{"version": 1, "entries": {"power/能力体系设定.md": '
-                '{"type": "ability", "importance": "core"}}}',
-                encoding="utf-8",
-            )
-
-            self.assertEqual(store.system_metadata(ability)["importance"], "core")
-            store.ensure_system_registry()
-            migrated = project.system_registry_path.read_text(encoding="utf-8")
-            self.assertIn("canon/power/能力体系设定.md", migrated)
 
     def test_related_canon_separates_core_selected_and_background_power(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -496,7 +470,9 @@ class ProjectDataStoreTests(TestCase):
             # Simulate a project created before the independent note file
             # existed. New projects intentionally start with an empty file.
             (project.memory_dir / "foreshadowing.json").unlink()
+            (project.root / PROJECT_MANIFEST_RELATIVE_PATH).unlink()
 
+            result = migrate_project(project.root)
             store = ForeshadowingStore(project)
             notes = store.load_notes()
 
@@ -504,6 +480,8 @@ class ProjectDataStoreTests(TestCase):
             self.assertTrue(all(note["id"].startswith("legacy-") for note in notes))
             self.assertTrue((project.memory_dir / "foreshadowing.json").exists())
             self.assertEqual(store.load_notes(), notes)
+            self.assertNotIn("foreshadowing", project.load_story_state())
+            self.assertTrue(result.backup_path.is_dir())
 
     def test_foreshadowing_can_be_updated_and_recycled_independently(self) -> None:
         with TemporaryDirectory() as tmp:

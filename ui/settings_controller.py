@@ -70,8 +70,12 @@ class SettingsController(QObject):
             profile="headless",
             timeout=min(15, int(test_config["dsh_timeout"])),
             extra_args=test_config["dsh_extra_args"],
-            prompt_transport=test_config["dsh_prompt_transport"],
             file_prompt_budget=test_config["dsh_file_prompt_budget"],
+            task_file_max_bytes=test_config["dsh_task_file_max_bytes"],
+            input_token_budget=test_config["ai_input_token_budget"],
+            runtime_reserve_tokens=test_config["ai_runtime_reserve_tokens"],
+            model_context_window_tokens=test_config["ai_model_context_window_tokens"],
+            context_strategy=test_config["ai_context_strategy"],
         )
         client.use_isolated_workspace()
         self._connection_client = client

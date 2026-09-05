@@ -5,9 +5,17 @@ from core.config import (
     DEFAULT_CONFIG,
     DSH_FILE_PROMPT_BUDGET_DEFAULT,
     DSH_FILE_PROMPT_BUDGET_MAX,
+    DSH_TASK_FILE_MAX_BYTES_DEFAULT,
+    DSH_TASK_FILE_MAX_BYTES_MAX,
     _normalize_config,
 )
 from ui.theme import DARK_COLORS, LIGHT_COLORS, build_qss, document_css
+from core.token_budget import (
+    DEFAULT_CHUNK_OVERLAP_TOKENS,
+    DEFAULT_CHUNK_TOKEN_BUDGET,
+    DEFAULT_INPUT_TOKEN_BUDGET,
+    DEFAULT_RUNTIME_RESERVE_TOKENS,
+)
 
 
 class ThemeConfigTests(TestCase):
@@ -68,29 +76,72 @@ class ThemeConfigTests(TestCase):
 
     def test_history_chapter_setting_is_bounded(self) -> None:
         self.assertEqual(DEFAULT_CONFIG["ai_context_history_chapters"], 5)
-        config = {"ai_context_history_chapters": 99}
+        config = {"ai_context_history_chapters": 999}
         _normalize_config(config)
-        self.assertEqual(AI_CONTEXT_HISTORY_CHAPTERS_MAX, 20)
-        self.assertEqual(config["ai_context_history_chapters"], 20)
+        self.assertEqual(AI_CONTEXT_HISTORY_CHAPTERS_MAX, 200)
+        self.assertEqual(config["ai_context_history_chapters"], 200)
 
         config = {"ai_context_history_chapters": -3}
         _normalize_config(config)
         self.assertEqual(config["ai_context_history_chapters"], 0)
 
-    def test_prompt_transport_settings_are_normalized(self) -> None:
-        self.assertEqual(DEFAULT_CONFIG["dsh_prompt_transport"], "auto")
+    def test_file_business_transport_limits_are_normalized(self) -> None:
+        self.assertNotIn("dsh_prompt_transport", DEFAULT_CONFIG)
         self.assertEqual(
             DEFAULT_CONFIG["dsh_file_prompt_budget"],
             DSH_FILE_PROMPT_BUDGET_DEFAULT,
+        )
+        self.assertEqual(
+            DEFAULT_CONFIG["dsh_task_file_max_bytes"],
+            DSH_TASK_FILE_MAX_BYTES_DEFAULT,
         )
 
         config = {
             "dsh_prompt_transport": "invalid",
             "dsh_file_prompt_budget": 999_999,
+            "dsh_task_file_max_bytes": 9_999_999,
         }
         _normalize_config(config)
-        self.assertEqual(config["dsh_prompt_transport"], "auto")
+        self.assertNotIn("dsh_prompt_transport", config)
+        self.assertEqual(config["dsh_file_prompt_budget"], 20_424)
+        self.assertEqual(config["dsh_task_file_max_bytes"], 512_000)
+
+        migrated = {"dsh_prompt_transport": "auto"}
+        _normalize_config(migrated)
+        self.assertNotIn("dsh_prompt_transport", migrated)
+
+    def test_token_budget_settings_are_normalized(self) -> None:
+        self.assertEqual(DEFAULT_CONFIG["ai_input_token_budget"], DEFAULT_INPUT_TOKEN_BUDGET)
         self.assertEqual(
-            config["dsh_file_prompt_budget"],
-            DSH_FILE_PROMPT_BUDGET_MAX,
+            DEFAULT_CONFIG["ai_runtime_reserve_tokens"],
+            DEFAULT_RUNTIME_RESERVE_TOKENS,
         )
+        self.assertEqual(DEFAULT_CONFIG["ai_chunk_token_budget"], DEFAULT_CHUNK_TOKEN_BUDGET)
+        self.assertEqual(
+            DEFAULT_CONFIG["ai_chunk_overlap_tokens"],
+            DEFAULT_CHUNK_OVERLAP_TOKENS,
+        )
+        config = {
+            "ai_input_token_budget": 999_999,
+            "ai_runtime_reserve_tokens": -1,
+            "ai_chunk_token_budget": 900,
+            "ai_chunk_overlap_tokens": 999,
+            "ai_memory_pipeline": "unsafe",
+        }
+        _normalize_config(config)
+        self.assertEqual(config["ai_input_token_budget"], 24_000)
+        self.assertEqual(config["ai_runtime_reserve_tokens"], 6_000)
+        self.assertEqual(config["ai_chunk_token_budget"], 1_000)
+        self.assertEqual(config["ai_chunk_overlap_tokens"], 333)
+        self.assertNotIn("ai_memory_pipeline", config)
+
+        configured = {
+            "ai_model_context_window_tokens": 1_000_000,
+            "ai_context_strategy": "balanced",
+            "ai_input_token_budget": 4_000,
+            "dsh_file_prompt_budget": 20_000,
+        }
+        _normalize_config(configured)
+        self.assertEqual(configured["ai_input_token_budget"], 128_000)
+        self.assertEqual(configured["dsh_file_prompt_budget"], 110_859)
+        self.assertEqual(configured["ai_runtime_reserve_tokens"], 64_000)

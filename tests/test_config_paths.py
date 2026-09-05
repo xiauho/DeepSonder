@@ -90,6 +90,8 @@ class ConfigMigrationTests(TestCase):
                 loaded = load_config()
 
             self.assertEqual(loaded["theme"], "light")
+            persisted = json.loads(target.read_text(encoding="utf-8"))
+            self.assertEqual(persisted["config_schema_version"], 5)
 
     def test_invalid_legacy_config_is_not_migrated(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -130,10 +132,9 @@ class ConfigMigrationTests(TestCase):
             with patch("core.config.get_config_path", return_value=target):
                 save_config({"theme": "dark"})
 
-            self.assertEqual(
-                json.loads(target.read_text(encoding="utf-8")),
-                {"theme": "dark"},
-            )
+            saved = json.loads(target.read_text(encoding="utf-8"))
+            self.assertEqual(saved["theme"], "dark")
+            self.assertEqual(saved["config_schema_version"], 5)
 
     def test_update_preferences_are_normalized(self) -> None:
         config = normalize_config(
@@ -148,3 +149,20 @@ class ConfigMigrationTests(TestCase):
         self.assertTrue(config["auto_check_updates"])
         self.assertEqual(config["last_update_check_at"], "")
         self.assertEqual(config["skipped_update_version"], "")
+
+    def test_future_config_schema_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "高于当前程序支持"):
+            normalize_config({"config_schema_version": 999})
+
+    def test_config_schema_migration_is_idempotent(self) -> None:
+        first = normalize_config(
+            {
+                "continue_target_chars": 2600,
+                "dsh_prompt_transport": "auto",
+                "ai_memory_pipeline": "legacy",
+            }
+        )
+        self.assertEqual(normalize_config(first), first)
+        self.assertEqual(first["expand_target_chars"], 2600)
+        self.assertNotIn("dsh_prompt_transport", first)
+        self.assertNotIn("ai_memory_pipeline", first)
