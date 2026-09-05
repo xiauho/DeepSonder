@@ -56,6 +56,7 @@ SECTION_LABELS = {
 
 TASK_LABELS = {
     "expand": "章节扩写",
+    "continuation": "章节续写",
     "check": "一致性检查",
     "repair": "一致性修复",
     "memory": "同步上下文",
@@ -161,9 +162,22 @@ def render_context_reports(reports: list[PromptContextReport]) -> str:
             )
         if report.transport == "file":
             verification = "回执已验证" if report.file_ack_verified else "回执未验证"
+            retry = (
+                f" · 自动重试 {report.file_ack_retry_count} 次"
+                if report.file_ack_retry_count
+                else ""
+            )
+            receipt_issue = {
+                "file_read_failed": "文件读取失败",
+                "missing_ack": "未找到回执",
+                "wrong_nonce": "nonce 不匹配",
+                "duplicate_ack": "回执重复",
+                "late_ack": "回执位置过晚",
+            }.get(report.file_ack_error, "")
+            issue = f" · 首次异常：{receipt_issue}" if receipt_issue else ""
             blocks.append(
                 f"<p class='muted'>任务文件 {report.task_file_bytes:,} 字节"
-                f" · {verification}</p>"
+                f" · {verification}{retry}{issue}</p>"
             )
         if report.history_requested is not None:
             blocks.append(

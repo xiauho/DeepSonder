@@ -71,7 +71,9 @@ class AcceptedMemoryTests(TestCase):
         self.assertNotIn("未来秘密标记", allocated.text)
         self.assertIn("fact_1", allocated.text)
         self.assertEqual(allocated, allocate_history(self.window(), 10000, 5000))
-        report = build_expansion_prompt(self.project, "chapter_500", summary_count=1).report
+        report = build_expansion_prompt(
+            self.project, "chapter_500", 3000, summary_count=1
+        ).report
         self.assertEqual(report.history_remote_included, 1)
         self.assertNotIn("藏入旧井", json.dumps(report.to_dict(), ensure_ascii=False))
 
@@ -144,7 +146,9 @@ class AcceptedMemoryTests(TestCase):
         from dataclasses import replace
         context = build_ai_context(self.project, "chapter_500", profile=EXPANSION_CONTEXT_PROFILE)
         context = replace(context, history_remote_enabled=False)
-        prompt = build_expansion_prompt(self.project, "chapter_500", summary_count=1, context=context)
+        prompt = build_expansion_prompt(
+            self.project, "chapter_500", 3000, summary_count=1, context=context
+        )
         self.assertEqual(prompt.report.history_remote_included, 0)
 
     def test_legacy_summary_is_recent_only_and_marked_unverified(self):

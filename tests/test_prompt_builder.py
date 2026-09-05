@@ -11,6 +11,22 @@ def prompt_texts(bundle):
 
 
 class PromptBuilderTests(TestCase):
+    def test_expansion_prompt_uses_each_explicit_target(self) -> None:
+        for target in (1000, 2000, 3000, 5000):
+            with self.subTest(target=target):
+                system, _user = prompt_texts(
+                    prompt_builder.build_expansion_prompt(
+                        self.project,
+                        "chapter_01",
+                        target,
+                    )
+                )
+                self.assertIn(f"目标长度约为 {target} 个中文字符", system)
+                self.assertIn(
+                    f"允许范围为 {round(target * 0.85)}～{round(target * 1.15)}",
+                    system,
+                )
+
     def setUp(self) -> None:
         self.project = NovelProject(Path(__file__).parents[1] / "projects" / "demo_novel")
 
@@ -43,7 +59,7 @@ class PromptBuilderTests(TestCase):
             )
 
             _system, expansion_user = prompt_texts(
-                prompt_builder.build_expansion_prompt(project, "chapter_01")
+                prompt_builder.build_expansion_prompt(project, "chapter_01", 3000)
             )
             _system, continuation_user = prompt_texts(
                 prompt_builder.build_write_prompt(project, "chapter_01")
@@ -63,7 +79,7 @@ class PromptBuilderTests(TestCase):
         with TemporaryDirectory() as tmp:
             project = NovelProject.create(Path(tmp) / "novel", "测试作品")
             _system, user = prompt_texts(
-                prompt_builder.build_expansion_prompt(project, "chapter_01")
+                prompt_builder.build_expansion_prompt(project, "chapter_01", 3000)
             )
 
         self.assertNotIn("【写作风格约束】", user)
@@ -88,7 +104,7 @@ class PromptBuilderTests(TestCase):
                 "# 能力体系\n能力使用会消耗记忆。\n", encoding="utf-8"
             )
             _system, user = prompt_texts(
-                prompt_builder.build_expansion_prompt(project, "chapter_01")
+                prompt_builder.build_expansion_prompt(project, "chapter_01", 3000)
             )
 
         self.assertIn("【本次上下文范围】", user)
@@ -155,7 +171,7 @@ class PromptBuilderTests(TestCase):
     def test_prompt_history_window_is_configurable(self) -> None:
         _system, expansion_user = prompt_texts(
             prompt_builder.build_expansion_prompt(
-                self.project, "chapter_01", summary_count=7
+                self.project, "chapter_01", 3000, summary_count=7
             )
         )
         _system, continuation_user = prompt_texts(

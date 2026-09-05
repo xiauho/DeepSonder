@@ -44,6 +44,13 @@ def context_paths(
         )
         paths.extend(project.list_world())
         paths.extend(project.list_power())
+    elif task_kind == "continuation":
+        # Continuation relevance includes the existing正文, so any character
+        # card can affect selection even when the planning fields do not name it.
+        paths.append(project.style_guide_path)
+        paths.extend(project.list_characters())
+        paths.extend(project.list_world())
+        paths.extend(project.list_power())
     else:
         paths.extend(project.list_characters())
         paths.extend(project.list_world())

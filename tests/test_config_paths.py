@@ -6,7 +6,13 @@ from unittest import TestCase
 from unittest.mock import patch
 
 from core.app_paths import app_cache_dir, app_config_dir, update_cache_dir
-from core.config import get_update_cache_path, load_config, normalize_config, save_config
+from core.config import (
+    get_chapter_target_chars,
+    get_update_cache_path,
+    load_config,
+    normalize_config,
+    save_config,
+)
 
 
 class ApplicationPathTests(TestCase):
@@ -44,6 +50,34 @@ class ApplicationPathTests(TestCase):
 
 
 class ConfigMigrationTests(TestCase):
+    def test_chapter_target_accessor_is_the_only_runtime_fallback(self) -> None:
+        self.assertEqual(get_chapter_target_chars({"chapter_target_chars": 4200}), 4200)
+        self.assertEqual(get_chapter_target_chars({}), 3000)
+        self.assertEqual(get_chapter_target_chars({"chapter_target_chars": "bad"}), 3000)
+        self.assertEqual(get_chapter_target_chars({"chapter_target_chars": 99}), 300)
+        self.assertEqual(get_chapter_target_chars({"chapter_target_chars": 50_000}), 10_000)
+
+    def test_schema_five_expansion_target_becomes_chapter_target(self) -> None:
+        with TemporaryDirectory() as tmp:
+            target = Path(tmp) / "profile" / "config.json"
+            target.parent.mkdir()
+            target.write_text(
+                json.dumps(
+                    {
+                        "config_schema_version": 5,
+                        "expand_target_chars": 4200,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with patch("core.config.get_config_path", return_value=target):
+                loaded = load_config()
+
+            self.assertEqual(loaded["chapter_target_chars"], 4200)
+            self.assertNotIn("expand_target_chars", loaded)
+            self.assertEqual(loaded["config_schema_version"], 6)
+
     def test_legacy_config_is_copied_normalized_and_retained(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -67,7 +101,7 @@ class ConfigMigrationTests(TestCase):
                 loaded = load_config()
 
             self.assertEqual(loaded["theme"], "dark")
-            self.assertEqual(loaded["expand_target_chars"], 2600)
+            self.assertEqual(loaded["chapter_target_chars"], 2600)
             self.assertEqual(loaded["auto_save_interval"], 600)
             self.assertTrue(legacy.is_file())
             persisted = json.loads(target.read_text(encoding="utf-8"))
@@ -91,7 +125,7 @@ class ConfigMigrationTests(TestCase):
 
             self.assertEqual(loaded["theme"], "light")
             persisted = json.loads(target.read_text(encoding="utf-8"))
-            self.assertEqual(persisted["config_schema_version"], 5)
+            self.assertEqual(persisted["config_schema_version"], 6)
 
     def test_invalid_legacy_config_is_not_migrated(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -134,7 +168,7 @@ class ConfigMigrationTests(TestCase):
 
             saved = json.loads(target.read_text(encoding="utf-8"))
             self.assertEqual(saved["theme"], "dark")
-            self.assertEqual(saved["config_schema_version"], 5)
+            self.assertEqual(saved["config_schema_version"], 6)
 
     def test_update_preferences_are_normalized(self) -> None:
         config = normalize_config(
@@ -163,6 +197,6 @@ class ConfigMigrationTests(TestCase):
             }
         )
         self.assertEqual(normalize_config(first), first)
-        self.assertEqual(first["expand_target_chars"], 2600)
+        self.assertEqual(first["chapter_target_chars"], 2600)
         self.assertNotIn("dsh_prompt_transport", first)
         self.assertNotIn("ai_memory_pipeline", first)

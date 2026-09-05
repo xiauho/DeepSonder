@@ -27,13 +27,17 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSplitter,
     QStackedWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
-from core.config import load_config
+from core.chapter_sections import chapter_body_text
+from core.config import get_chapter_target_chars, load_config
+from core.continuation import MIN_CONTINUATION_CHARS
 from core.project import NovelProject
 from core.project_data import ChapterIdConflictError, ProjectDataStore
+from core.text_metrics import count_content_chars
 from core.update_download_service import VerifiedUpdate
 from core.update_install_service import (
     UpdateInstallLaunchError,
@@ -95,7 +99,6 @@ class MainWindow(QMainWindow):
         "focus": "center_focus_strong",
         "check": "fact_check",
         "memory": "psychology",
-        "continue": "auto_awesome",
     }
     ACTION_BUTTON_LABELS = {
         "new_chapter": "新建章节",
@@ -105,7 +108,6 @@ class MainWindow(QMainWindow):
         "focus": "专注模式",
         "check": "一致性检查",
         "memory": "更新故事记忆",
-        "continue": "AI 扩写",
     }
 
     def __init__(self, parent=None, config: dict | None = None):
@@ -200,6 +202,7 @@ class MainWindow(QMainWindow):
             settings_page=self.settings_page,
             theme_button=self.theme_button,
             action_icon_buttons=self._action_icon_buttons,
+            ai_creation_button=self.ai_creation_button,
             parent=self,
         )
         self.main_splitter.splitterMoved.connect(
@@ -243,6 +246,7 @@ class MainWindow(QMainWindow):
         )
         self._connect_signals()
         self.project_session.project_changed.connect(self._on_project_changed)
+        self._refresh_ai_actions()
         self._show_route("dashboard")
 
         self.exit_focus_shortcut = QShortcut(QKeySequence("Esc"), self)
@@ -301,7 +305,8 @@ class MainWindow(QMainWindow):
         action("navigation", "显示/隐藏资料面板", self.toggle_navigation_panel, "Ctrl+Shift+L")
         action("inspector", "显示/隐藏故事雷达", self.toggle_inspector, "Ctrl+Shift+I")
         action("output", "显示/隐藏 AI 记录", self.toggle_output, "Ctrl+J")
-        action("continue", "AI 扩写", self.expand_chapter, "Ctrl+Enter")
+        action("expand", "AI 扩写", self.expand_chapter, "Ctrl+Enter")
+        action("continuation", "AI 续写", self.continue_chapter, "Ctrl+Alt+Enter")
         action("check", "一致性检查", self.check_consistency, "Ctrl+Shift+C")
         action("memory", "更新故事记忆", self.update_memory, "Ctrl+Shift+M")
         action("check_updates", "检查更新…", self.check_for_updates)
@@ -375,9 +380,23 @@ class MainWindow(QMainWindow):
         memory_button = self._action_button("memory")
         memory_button.setObjectName("secondaryButton")
         action_layout.addWidget(memory_button)
-        continue_button = self._action_button("continue")
-        continue_button.setObjectName("accentButton")
-        action_layout.addWidget(continue_button)
+        self.ai_creation_button = QToolButton()
+        self.ai_creation_button.setObjectName("accentButton")
+        self.ai_creation_button.setText("AI 创作")
+        self.ai_creation_button.setAccessibleName("AI 创作")
+        self.ai_creation_button.setToolButtonStyle(
+            Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+        )
+        self.ai_creation_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.ai_creation_menu = QMenu(self.ai_creation_button)
+        self.ai_creation_menu.addAction(self.actions["expand"])
+        self.ai_creation_menu.addAction(self.actions["continuation"])
+        self.ai_creation_button.setMenu(self.ai_creation_menu)
+        self.ai_creation_button.setProperty("material_icon", "auto_awesome")
+        self.ai_creation_button.setProperty("material_icon_size", 17)
+        self.actions["expand"].changed.connect(self._sync_ai_creation_button)
+        self.actions["continuation"].changed.connect(self._sync_ai_creation_button)
+        action_layout.addWidget(self.ai_creation_button)
         content_layout.addWidget(self.action_bar)
 
         self.page_stack = QStackedWidget()
@@ -451,7 +470,7 @@ class MainWindow(QMainWindow):
         self.output_panel = QPlainTextEdit()
         self.output_panel.setObjectName("outputPanel")
         self.output_panel.setReadOnly(True)
-        self.output_panel.setPlaceholderText("AI 扩写、设定检查和记忆更新的过程会记录在这里。")
+        self.output_panel.setPlaceholderText("AI 创作、设定检查和记忆更新的过程会记录在这里。")
         output_layout.addWidget(self.output_panel, 1)
         self.output_container.hide()
 
@@ -482,6 +501,14 @@ class MainWindow(QMainWindow):
         button.setEnabled(action.isEnabled())
         button.setToolTip(action.text())
 
+    def _sync_ai_creation_button(self) -> None:
+        if not hasattr(self, "ai_creation_button"):
+            return
+        self.ai_creation_button.setEnabled(
+            self.actions["expand"].isEnabled()
+            or self.actions["continuation"].isEnabled()
+        )
+
     def _build_menus(self) -> None:
         file_menu = self.menuBar().addMenu("文件")
         file_menu.addAction(self.actions["new_project"])
@@ -511,7 +538,8 @@ class MainWindow(QMainWindow):
         create_menu.addAction(self.actions["new_power"])
         create_menu.addAction(self.actions["new_timeline"])
         create_menu.addSeparator()
-        create_menu.addAction(self.actions["continue"])
+        create_menu.addAction(self.actions["expand"])
+        create_menu.addAction(self.actions["continuation"])
         create_menu.addAction(self.actions["check"])
         create_menu.addAction(self.actions["memory"])
 
@@ -605,6 +633,7 @@ class MainWindow(QMainWindow):
             self._on_update_download_finished
         )
         self.editor.dirty_changed.connect(self._on_dirty_changed)
+        self.editor.stats_changed.connect(lambda _text: self._refresh_ai_actions())
         self.ai_controller.started.connect(self._on_ai_started)
         self.ai_controller.finished.connect(self._on_ai_finished)
         self.document_controller.auto_saved.connect(self._on_auto_saved)
@@ -715,6 +744,7 @@ class MainWindow(QMainWindow):
         )
         self._refresh_delete_action()
         self._refresh_trash_access()
+        self._refresh_ai_actions()
         self._update_page_header(self.window_state_controller.current_route)
 
     def _on_ai_started(self, _token) -> None:
@@ -722,11 +752,13 @@ class MainWindow(QMainWindow):
         self._refresh_delete_action()
         self.primary_nav.set_trash_enabled(False)
         self.actions["trash"].setEnabled(False)
+        self._refresh_ai_actions()
 
     def _on_ai_finished(self, _token) -> None:
         self.reports_page.set_check_running(False)
         self._refresh_delete_action()
         self._refresh_trash_access()
+        self._refresh_ai_actions()
 
     def _refresh_trash_access(self) -> None:
         enabled = self.project is not None and not self.ai_controller.is_running()
@@ -1672,6 +1704,41 @@ class MainWindow(QMainWindow):
 
     def expand_chapter(self) -> None:
         self.ai_workflow_controller.expand()
+
+    def continue_chapter(self) -> None:
+        self.ai_workflow_controller.continue_chapter()
+
+    def _refresh_ai_actions(self) -> None:
+        if not hasattr(self, "actions") or not hasattr(self, "editor"):
+            return
+        running = self.ai_controller.is_running()
+        chapter_open = self.project is not None and self.editor.current_chapter_id() is not None
+        self.actions["expand"].setEnabled(chapter_open and not running)
+        continuation_enabled = False
+        continuation_tip = "请先打开一个包含正文的章节。"
+        if chapter_open and not running:
+            body = chapter_body_text(self.editor.text_edit.toPlainText())
+            current = count_content_chars(body)
+            target = get_chapter_target_chars(self.config)
+            remaining = target - current
+            continuation_enabled = current > 0 and remaining >= MIN_CONTINUATION_CHARS
+            if current <= 0:
+                continuation_tip = "当前正文为空，请先使用 AI 扩写或手动写下开头。"
+            elif remaining <= 0:
+                continuation_tip = f"当前正文约 {current} 字，已达到目标章节字数 {target} 字。"
+            elif remaining < MIN_CONTINUATION_CHARS:
+                continuation_tip = f"距离目标章节字数只剩 {remaining} 字，不足最小续写长度。"
+            else:
+                continuation_tip = (
+                    f"从正文末尾续写，本次最多生成 3000 字"
+                    f"（当前约 {current}/{target} 字）。"
+                )
+        elif running:
+            continuation_tip = "当前 AI 任务完成后才能继续创作。"
+        self.actions["continuation"].setEnabled(continuation_enabled)
+        self.actions["continuation"].setToolTip(continuation_tip)
+        self.actions["continuation"].setStatusTip(continuation_tip)
+        self._sync_ai_creation_button()
 
     def check_consistency(self) -> None:
         self.ai_workflow_controller.check()

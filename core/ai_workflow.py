@@ -5,7 +5,8 @@ from __future__ import annotations
 import threading
 from pathlib import Path
 
-from . import consistency, expansion
+from . import consistency, continuation, expansion
+from .continuation import ContinuationRunResult
 from .expansion import ExpansionRunResult
 from .chapter_facts import (
     ChapterFactLedger,
@@ -62,7 +63,7 @@ class AIWorkflowService:
         self,
         project: NovelProject,
         chapter_id: str,
-        target_chars: int = 2000,
+        target_chars: int,
         history_chapters: int = 5,
         selected_foreshadowing: list[dict] | tuple[dict, ...] | None = None,
         selected_power: list[str] | tuple[str, ...] | None = None,
@@ -80,6 +81,27 @@ class AIWorkflowService:
             history_remote_enabled=history_remote_enabled,
             selected_foreshadowing=selected_foreshadowing,
             selected_power=selected_power,
+            cancel_event=cancel_event,
+        )
+
+    def continue_chapter(
+        self,
+        project: NovelProject,
+        chapter_id: str,
+        target_chapter_chars: int = 3000,
+        history_chapters: int = 5,
+        cancel_event: threading.Event | None = None,
+        history_mode: str = "custom",
+        history_remote_enabled: bool = True,
+    ) -> ContinuationRunResult:
+        return continuation.run_continuation(
+            project,
+            chapter_id,
+            self.dsh,
+            target_chapter_chars=target_chapter_chars,
+            history_chapters=history_chapters,
+            history_mode=history_mode,
+            history_remote_enabled=history_remote_enabled,
             cancel_event=cancel_event,
         )
 

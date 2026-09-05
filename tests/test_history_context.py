@@ -25,7 +25,9 @@ class HistoryContextTests(TestCase):
             project.save_chapter_summaries(source)
             project.save_chapter("chapter_02", title="二", outline="本章规划", content="")
             self.assertEqual(prior_chapter_summaries(project, "chapter_02", count=0), "")
-            prompt = build_expansion_prompt(project, "chapter_02", summary_count=0)
+            prompt = build_expansion_prompt(
+                project, "chapter_02", 3000, summary_count=0
+            )
         self.assertNotIn("不应发送", prompt.user_prompt)
         self.assertEqual(prompt.report.history_included, 0)
         self.assertEqual(prompt.report.history_missing, 0)

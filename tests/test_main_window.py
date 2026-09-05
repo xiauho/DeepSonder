@@ -45,7 +45,6 @@ class MainWindowActionButtonTests(unittest.TestCase):
                 "focus": "专注模式",
                 "check": "一致性检查",
                 "memory": "更新故事记忆",
-                "continue": "AI 扩写",
             },
         )
         self.assertEqual(

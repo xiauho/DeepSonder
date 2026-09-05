@@ -13,12 +13,18 @@ from PySide6.QtWidgets import QDialog, QMessageBox
 from core import ai_protocol
 from core.character_cards import create_character_cards, missing_character_cards
 from core.chapter_memory import ChapterMemoryProposal
+from core.continuation import (
+    ContinuationNotAvailable,
+    ContinuationRunResult,
+    continuation_target_chars,
+)
 from core.ai_result_service import AIResultService
 from core.ai_workflow import AIWorkflowService
-from core.config import save_config
+from core.config import get_chapter_target_chars, save_config
 from core.expansion import ExpansionRunResult
 from core.project_data import ProjectDataStore
 from core.text_anchor import enrich_report_anchors, resolve_text_anchor
+from core.text_metrics import count_content_chars
 from core.token_budget import (
     DEFAULT_CHUNK_OVERLAP_TOKENS,
     DEFAULT_CHUNK_TOKEN_BUDGET,
@@ -104,7 +110,7 @@ class AIWorkflowController(QObject):
         selected_foreshadowing, selected_power = selection
         selected_foreshadowing = tuple(deepcopy(selected_foreshadowing))
         selected_power = tuple(str(path) for path in selected_power)
-        target_chars = int(self.config.get("expand_target_chars", 2000))
+        target_chars = get_chapter_target_chars(self.config)
         history_chapters = int(self.config.get("ai_context_history_chapters", 5))
         history_mode = str(self.config.get("ai_history_mode", "custom"))
         history_remote_enabled = bool(self.config.get("ai_history_remote_enabled", True))
@@ -124,8 +130,50 @@ class AIWorkflowController(QObject):
                 cancel_event=cancel_event,
             ),
             task_context={
+                "target_chars": target_chars,
                 "selected_foreshadowing": selected_foreshadowing,
                 "selected_power": selected_power,
+            },
+        )
+
+    def continue_chapter(self) -> None:
+        request = self._prepare_request()
+        if request is None:
+            return
+        project, chapter_id, workflow = request
+        target_chars = get_chapter_target_chars(self.config)
+        try:
+            chapter = project.load_chapter(chapter_id)
+            current_chars = count_content_chars(chapter.content)
+            requested_chars = continuation_target_chars(current_chars, target_chars)
+        except ContinuationNotAvailable as exc:
+            QMessageBox.information(self.parent, "暂不适合续写", str(exc))
+            self._emit_status(str(exc))
+            return
+        except (OSError, UnicodeError, ValueError) as exc:
+            QMessageBox.warning(self.parent, "读取章节失败", str(exc))
+            return
+        history_chapters = int(self.config.get("ai_context_history_chapters", 5))
+        history_mode = str(self.config.get("ai_history_mode", "custom"))
+        history_remote_enabled = bool(self.config.get("ai_history_remote_enabled", True))
+        self._start(
+            "continuation",
+            chapter_id,
+            f"正在续写 · {chapter_id} · 目标约 {requested_chars} 字",
+            lambda cancel_event: workflow.continue_chapter(
+                project,
+                chapter_id,
+                target_chapter_chars=target_chars,
+                history_chapters=history_chapters,
+                history_mode=history_mode,
+                history_remote_enabled=history_remote_enabled,
+                cancel_event=cancel_event,
+            ),
+            task_context={
+                "current_tail": chapter.content[-300:],
+                "current_chars": current_chars,
+                "requested_chars": requested_chars,
+                "target_chapter_chars": target_chars,
             },
         )
 
@@ -475,6 +523,8 @@ class AIWorkflowController(QObject):
         try:
             if token.kind == "expand":
                 self._on_expansion_done(token, result)
+            elif token.kind == "continuation":
+                self._on_continuation_done(token, result)
             elif token.kind == "check":
                 self._on_check_done(token, result)
             elif token.kind == "repair":
@@ -496,9 +546,9 @@ class AIWorkflowController(QObject):
                 "首次返回未通过协议校验，已自动纠偏重试。首次原始返回（可人工挽救）：\n"
                 f"{first_raw}"
             )
-        target = int(self.config.get("expand_target_chars", 2000))
         task_context_getter = getattr(self.ai_controller, "result_context", None)
         task_context = task_context_getter(token) if callable(task_context_getter) else None
+        target = result.target_chars
         selected_foreshadowing = ()
         if isinstance(task_context, dict):
             raw_selected = task_context.get("selected_foreshadowing")
@@ -521,9 +571,12 @@ class AIWorkflowController(QObject):
 
         if parsed.feedback_warning:
             self._emit_output(parsed.feedback_warning)
+        if result.supplement_warning:
+            self._emit_output(result.supplement_warning)
 
         self._emit_output(
-            f"✅ {parsed.completion_message}；扩写结果已通过格式校验（约 {parsed.char_count} 字），等待确认写入"
+            f"✅ {parsed.completion_message}；本次目标 {result.target_chars} 字，"
+            f"最终约 {parsed.char_count} 字，等待确认写入"
         )
         self._emit_status("扩写已完成，等待确认写入")
         chapter_id = token.chapter_id
@@ -541,6 +594,13 @@ class AIWorkflowController(QObject):
             has_existing_content=has_existing_content,
             context_matches=lambda: self._task_context_matches(token),
             replace_body=self.editor.replace_chapter_body,
+            target_chars=result.target_chars,
+            min_chars=result.min_chars,
+            max_chars=result.max_chars,
+            initial_char_count=result.initial_char_count,
+            supplement_attempted=result.supplement_attempted,
+            supplement_added_chars=result.supplement_added_chars,
+            supplement_warning=result.supplement_warning,
             foreshadowing_feedback=parsed.foreshadowing_feedback,
             foreshadowing_titles=foreshadowing_titles,
             foreshadowing_warning=parsed.feedback_warning,
@@ -577,6 +637,58 @@ class AIWorkflowController(QObject):
                 self._pending_foreshadowing_resolutions.pop(path_key, None)
         self._emit_status(f"扩写已{action}当前正文，请审阅后保存")
         self._emit_output(f"已确认{action}扩写结果，尚未自动保存。")
+
+    def _on_continuation_done(
+        self, token, result: ContinuationRunResult
+    ) -> None:
+        self._record_plain_text_fallbacks(result.plain_text_fallback_count)
+        if result.first_raw_output is not None:
+            self._emit_output(
+                "首次返回未通过续写协议校验，已自动纠偏重试。首次原始返回（可人工挽救）：\n"
+                f"{result.first_raw_output}"
+            )
+        try:
+            parsed = self.ai_result_service.parse_continuation(
+                result.raw_output,
+                result.requested_chars,
+            )
+        except ai_protocol.AIProtocolError as exc:
+            self._emit_output(f"续写结果无效\n{exc}\n原始返回：\n{result.raw_output}")
+            self._emit_status("续写结果无效，未追加正文")
+            QMessageBox.warning(self.parent, "续写结果无效", str(exc))
+            return
+        if parsed.protocol_warning:
+            self._emit_output(parsed.protocol_warning)
+        task_context_getter = getattr(self.ai_controller, "result_context", None)
+        task_context = task_context_getter(token) if callable(task_context_getter) else None
+        current_tail = ""
+        if isinstance(task_context, dict):
+            current_tail = str(task_context.get("current_tail") or "")
+        self._emit_output(
+            f"✅ {parsed.completion_message}；续写结果已通过格式校验（约 {parsed.char_count} 字），等待确认追加"
+        )
+        self._emit_status("续写已完成，等待确认追加")
+        outcome = self.ai_result_coordinator.confirm_continuation(
+            text=parsed.text,
+            current_tail=current_tail,
+            current_chars=result.current_chars,
+            requested_chars=result.requested_chars,
+            generated_chars=parsed.char_count,
+            target_chapter_chars=result.target_chapter_chars,
+            length_ok=parsed.length_ok,
+            context_matches=lambda: self._task_context_matches(token),
+            append_body=self.editor.append_chapter_body,
+        )
+        if outcome.status == "cancelled":
+            self._emit_output("续写结果已放弃，未修改正文。")
+            self._emit_status("续写结果已放弃")
+            return
+        if outcome.status == "stale":
+            self._emit_output("续写结果未追加：章节内容或相关资料已经发生变化。")
+            self._emit_status("章节已变化，续写结果仅保留在 AI 记录中")
+            return
+        self._emit_output("已确认追加续写结果，尚未自动保存。")
+        self._emit_status("续写已追加到当前正文，请审阅后保存")
 
     def _on_document_saved(self, saved_path: str) -> None:
         path_key = self._path_key(saved_path)

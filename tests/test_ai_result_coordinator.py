@@ -85,6 +85,50 @@ class AIResultCoordinatorTests(TestCase):
         self.assertEqual(outcome.value, ("f-selected",))
         replace_body.assert_called_once_with("正文")
 
+    def test_continuation_commits_only_after_confirmation_and_fresh_context(self) -> None:
+        append_body = Mock()
+        dialog = SimpleNamespace(confirmed=True, exec=Mock())
+        with patch(
+            "ui.ai_result_coordinator.ContinuationPreviewDialog",
+            return_value=dialog,
+        ):
+            outcome = AIResultCoordinator().confirm_continuation(
+                text="续写正文",
+                current_tail="原文结尾",
+                current_chars=1000,
+                requested_chars=2000,
+                generated_chars=1900,
+                target_chapter_chars=3000,
+                length_ok=True,
+                context_matches=lambda: True,
+                append_body=append_body,
+            )
+
+        self.assertEqual(outcome.status, "committed")
+        append_body.assert_called_once_with("续写正文")
+
+    def test_stale_continuation_is_not_appended(self) -> None:
+        append_body = Mock()
+        dialog = SimpleNamespace(confirmed=True, exec=Mock())
+        with patch(
+            "ui.ai_result_coordinator.ContinuationPreviewDialog",
+            return_value=dialog,
+        ), patch("ui.ai_result_coordinator.QMessageBox.warning"):
+            outcome = AIResultCoordinator().confirm_continuation(
+                text="续写正文",
+                current_tail="原文结尾",
+                current_chars=1000,
+                requested_chars=2000,
+                generated_chars=1900,
+                target_chapter_chars=3000,
+                length_ok=True,
+                context_matches=lambda: False,
+                append_body=append_body,
+            )
+
+        self.assertEqual(outcome.status, "stale")
+        append_body.assert_not_called()
+
     def test_memory_cancel_and_stale_context_do_not_commit(self) -> None:
         commit = Mock()
         coordinator = AIResultCoordinator()

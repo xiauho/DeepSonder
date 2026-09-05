@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from core.project import NovelProject
+from core.chapter_sections import chapter_body_bounds
 from ui.icons import set_button_icon
 from core.storage import atomic_write_text
 
@@ -152,7 +153,7 @@ class Editor(QWidget):
         self.text_edit = QPlainTextEdit()
         self.text_edit.setObjectName("writingEditor")
         self.text_edit.setPlaceholderText(
-            "在这里写下故事。\n\n提示：章节建议保留「## 大纲」「## 剧情简写」和「## 正文」标记，AI 扩写会据此理解你的写作意图。"
+            "在这里写下故事。\n\n提示：章节建议保留「## 大纲」「## 剧情简写」和「## 正文」标记，AI 创作会据此理解你的写作意图。"
         )
         self.text_edit.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
         self.text_edit.setTabStopDistance(32.0)
@@ -288,6 +289,28 @@ class Editor(QWidget):
             cursor.insertText("\n\n" + text.strip() + "\n")
         else:
             cursor.insertText(text.strip() + "\n")
+        self.text_edit.setTextCursor(cursor)
+        self.text_edit.ensureCursorVisible()
+
+    def append_chapter_body(self, text: str) -> None:
+        """Append one continuation inside ``## 正文`` as one undoable edit."""
+        continuation = str(text or "").strip()
+        if not continuation:
+            return
+        raw = self.text_edit.toPlainText()
+        bounds = chapter_body_bounds(raw)
+        cursor = self.text_edit.textCursor()
+        cursor.beginEditBlock()
+        if bounds is None:
+            cursor.movePosition(QTextCursor.MoveOperation.End)
+            prefix = "\n\n" if raw.rstrip() else ""
+            cursor.insertText(f"{prefix}## 正文\n{continuation}")
+        else:
+            start, end = bounds
+            existing = raw[start:end].strip()
+            cursor.setPosition(end)
+            cursor.insertText(("\n\n" if existing else "\n") + continuation)
+        cursor.endEditBlock()
         self.text_edit.setTextCursor(cursor)
         self.text_edit.ensureCursorVisible()
 

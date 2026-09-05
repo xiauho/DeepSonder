@@ -137,6 +137,17 @@ class IconTextButton(QPushButton):
     def set_icon_color(self, color: str) -> None:
         self._icon_label.setStyleSheet(f"color: {color};")
 
+    def refresh_style(self) -> None:
+        """Re-evaluate QSS for the button and its styled child labels."""
+        widgets = (self, self._icon_label, self._text_label)
+        for widget in widgets:
+            widget.style().unpolish(widget)
+        for widget in widgets:
+            widget.style().polish(widget)
+            widget.update()
+        self.updateGeometry()
+        self.sync_geometry()
+
     def set_label(self, text: str) -> None:
         """Update the visible label without disturbing the centered layout."""
         self._text_label.setText(text)

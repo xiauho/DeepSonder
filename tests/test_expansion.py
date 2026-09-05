@@ -67,7 +67,81 @@ class ExpansionTests(TestCase):
         )
         self.assertIsNone(result.first_raw_output)
         self.assertEqual(result.plain_text_fallback_count, 0)
+        self.assertEqual(result.target_chars, 300)
+        self.assertEqual(result.initial_char_count, 300)
+        self.assertEqual(result.final_char_count, 300)
+        self.assertFalse(result.supplement_attempted)
         self.assertEqual(len(dsh.calls), 1)
+
+    def test_under_length_draft_receives_one_safe_difference_supplement(self) -> None:
+        anchor = "山门外的长风卷过青石台阶，林夜握紧了手中的剑柄。"
+        source = anchor + "甲" * (700 - len(anchor))
+        addition = "他没有立刻前行，而是观察四周细微的动静。" + "乙" * 280
+        dsh = FakeDSH(
+            [f"<NOVEL_TEXT>\n{source}\n</NOVEL_TEXT>"],
+            json_outputs=[
+                {
+                    "type": "chapter_expansion_supplement",
+                    "chapter_id": "chapter_01",
+                    "insertions": [
+                        {
+                            "anchor": anchor,
+                            "position": "after",
+                            "text": addition,
+                        }
+                    ],
+                }
+            ],
+        )
+
+        result = expansion.run_expansion(
+            self.project, "chapter_01", dsh, target_chars=1000
+        )
+        parsed = expansion.ai_protocol.parse_expansion(
+            result.raw_output,
+            min_chars=result.min_chars,
+            max_chars=result.max_chars,
+        )
+
+        self.assertTrue(result.supplement_attempted)
+        self.assertTrue(result.supplement_applied)
+        self.assertEqual(result.initial_char_count, 700)
+        self.assertEqual(result.final_char_count, parsed.char_count)
+        self.assertEqual(result.supplement_added_chars, len(addition))
+        self.assertTrue(parsed.length_ok)
+        self.assertIn(anchor + "\n\n" + addition, parsed.text)
+        self.assertEqual(len(dsh.calls), 1)
+        self.assertEqual(len(dsh.json_calls), 1)
+        self.assertIn("目标正文：1000 字", dsh.json_calls[0]["user"])
+
+    def test_unsafe_supplement_keeps_original_draft_with_warning(self) -> None:
+        source = "甲" * 700
+        dsh = FakeDSH(
+            [f"<NOVEL_TEXT>\n{source}\n</NOVEL_TEXT>"],
+            json_outputs=[
+                {
+                    "type": "chapter_expansion_supplement",
+                    "chapter_id": "chapter_01",
+                    "insertions": [
+                        {
+                            "anchor": "不存在于原文中的二十四个字符安全锚点示例文本",
+                            "position": "after",
+                            "text": "乙" * 300,
+                        }
+                    ],
+                }
+            ],
+        )
+
+        result = expansion.run_expansion(
+            self.project, "chapter_01", dsh, target_chars=1000
+        )
+        parsed = expansion.ai_protocol.parse_expansion(result.raw_output, min_chars=1)
+
+        self.assertTrue(result.supplement_attempted)
+        self.assertFalse(result.supplement_applied)
+        self.assertEqual(parsed.text, source)
+        self.assertIn("未能安全应用", result.supplement_warning)
 
     def test_plain_text_fallback_is_counted_before_canonicalization(self) -> None:
         plain_text = "风吹过长街。" * 50

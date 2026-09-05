@@ -24,7 +24,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from core.config import AI_CONTEXT_HISTORY_CHAPTERS_MAX, DEFAULT_CONFIG, normalize_config
+from core.config import (
+    AI_CONTEXT_HISTORY_CHAPTERS_MAX,
+    CHAPTER_TARGET_CHARS_MAX,
+    CHAPTER_TARGET_CHARS_MIN,
+    DEFAULT_CONFIG,
+    normalize_config,
+)
 from core.history_context import resolve_history_count, history_token_budget
 from core.context_capacity import (
     CONTEXT_STRATEGY_BALANCED,
@@ -908,10 +914,13 @@ class SettingsPage(QWidget):
         self.editor_font_size = QSpinBox()
         self.editor_font_size.setRange(12, 36)
         self.editor_font_size.setSuffix(" px")
-        self.expand_target_chars = QSpinBox()
-        self.expand_target_chars.setRange(300, 10000)
-        self.expand_target_chars.setSingleStep(100)
-        self.expand_target_chars.setSuffix(" 字")
+        self.chapter_target_chars = QSpinBox()
+        self.chapter_target_chars.setRange(
+            CHAPTER_TARGET_CHARS_MIN,
+            CHAPTER_TARGET_CHARS_MAX,
+        )
+        self.chapter_target_chars.setSingleStep(100)
+        self.chapter_target_chars.setSuffix(" 字")
         self.ai_history_mode = QComboBox()
         self.ai_history_mode.addItem("自动 · 跟随上下文策略", "auto")
         self.ai_history_mode.addItem("自定义最近章节数", "custom")
@@ -922,7 +931,7 @@ class SettingsPage(QWidget):
         self.ai_context_history_chapters.setSingleStep(1)
         self.ai_context_history_chapters.setSuffix(" 章")
         self.ai_context_history_chapters.setToolTip(
-            "用于 AI 扩写，0 表示不携带历史章节摘要。只参考最近指定范围内已有的摘要；"
+            "用于 AI 扩写与续写，0 表示不携带历史章节摘要。只参考最近指定范围内已有的摘要；"
             "预算不足时优先保留较近章节，不会自动调用 AI 补生成摘要。"
         )
         self.history_preview = QLabel()
@@ -932,11 +941,11 @@ class SettingsPage(QWidget):
         writing_form.addRow("自动保存", self.auto_save)
         writing_form.addRow("保存间隔", self.auto_save_interval)
         writing_form.addRow("正文字号", self.editor_font_size)
-        writing_form.addRow("AI 扩写字数", self.expand_target_chars)
-        writing_form.addRow("AI 扩写前文参考", self.ai_history_mode)
+        writing_form.addRow("目标章节字数", self.chapter_target_chars)
+        writing_form.addRow("AI 创作前文参考", self.ai_history_mode)
         writing_form.addRow("自定义最近章节数", self.ai_context_history_chapters)
         writing_form.addRow("前文参考说明", self.history_preview)
-        writing_form.addRow("远期参考（扩写/检查）", self.history_remote)
+        writing_form.addRow("远期参考（扩写/续写/检查）", self.history_remote)
         writing_layout.addLayout(writing_form)
         content_layout.addWidget(writing)
 
@@ -1113,8 +1122,13 @@ class SettingsPage(QWidget):
         self.auto_save.setChecked(bool(config.get("auto_save", True)))
         self.auto_save_interval.setValue(int(config.get("auto_save_interval", 30)))
         self.editor_font_size.setValue(int(config.get("editor_font_size", 16)))
-        self.expand_target_chars.setValue(
-            int(config.get("expand_target_chars", config.get("continue_target_chars", 2000)))
+        self.chapter_target_chars.setValue(
+            int(
+                config.get(
+                    "chapter_target_chars",
+                    config.get("expand_target_chars", config.get("continue_target_chars", 3000)),
+                )
+            )
         )
         self.ai_context_history_chapters.setValue(
             int(config.get("ai_context_history_chapters", 5))
@@ -1184,9 +1198,9 @@ class SettingsPage(QWidget):
         )
         self.history_remote.setEnabled(count > 0)
         self.history_preview.setText(
-            "本次扩写不携带历史章节摘要；本章规划与故事状态按原任务规则使用。"
+            "本次 AI 创作不携带历史章节摘要；本章规划与故事状态按原任务规则使用。"
             if count == 0 else
-            f"扩写优先参考最近 {count} 章已有摘要；历史预算上限 "
+            f"扩写与续写优先参考最近 {count} 章已有摘要；历史预算上限 "
             f"{history_token_budget(capacity.input_token_budget, capacity.strategy):,} token。"
             "实际纳入数量取决于摘要是否齐全及剩余空间，可在上下文报告中查看。"
             + ("另从此前全部章节的已采用记忆中检索相关事实，与近期摘要共用预算。"
@@ -1210,7 +1224,7 @@ class SettingsPage(QWidget):
                 "auto_save": self.auto_save.isChecked(),
                 "auto_save_interval": self.auto_save_interval.value(),
                 "editor_font_size": self.editor_font_size.value(),
-                "expand_target_chars": self.expand_target_chars.value(),
+                "chapter_target_chars": self.chapter_target_chars.value(),
                 "ai_context_history_chapters": self.ai_context_history_chapters.value(),
                 "ai_history_mode": self.ai_history_mode.currentData(),
                 "ai_history_remote_enabled": self.history_remote.isChecked(),

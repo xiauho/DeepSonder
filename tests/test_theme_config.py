@@ -71,8 +71,12 @@ class ThemeConfigTests(TestCase):
     def test_expansion_length_migrates_from_legacy_setting(self) -> None:
         config = {"continue_target_chars": 2600}
         _normalize_config(config)
-        self.assertEqual(config["expand_target_chars"], 2600)
+        self.assertEqual(config["chapter_target_chars"], 2600)
         self.assertNotIn("continue_target_chars", config)
+        self.assertNotIn("expand_target_chars", config)
+
+    def test_target_chapter_length_defaults_to_three_thousand(self) -> None:
+        self.assertEqual(DEFAULT_CONFIG["chapter_target_chars"], 3000)
 
     def test_history_chapter_setting_is_bounded(self) -> None:
         self.assertEqual(DEFAULT_CONFIG["ai_context_history_chapters"], 5)

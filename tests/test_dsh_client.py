@@ -43,6 +43,20 @@ def acknowledged_result(command, **kwargs):
     return SimpleNamespace(returncode=0, stdout=f"{ack}\n{result}", stderr="")
 
 
+def current_task_ack(client: DSHClient) -> str:
+    task_path = next(client.working_directory.glob(".novalist-task-*.md"))
+    payload = task_path.read_text(encoding="utf-8")
+    nonce_head = re.search(r"^task_nonce_head: ([A-F0-9]+)$", payload, re.MULTILINE)
+    nonce_middle = re.search(
+        r"task_nonce_middle=([A-F0-9]+)", payload, re.MULTILINE
+    )
+    nonce_tail = re.search(r"^task_nonce_tail: ([A-F0-9]+)$", payload, re.MULTILINE)
+    return (
+        f"{DSH_FILE_ACK_PREFIX}{nonce_head.group(1)}:"
+        f"{nonce_middle.group(1)}:{nonce_tail.group(1)}"
+    )
+
+
 class DSHClientTests(TestCase):
     def test_launcher_arguments_precede_dsh_arguments(self) -> None:
         client = DSHClient(
@@ -270,11 +284,82 @@ class DSHClientTests(TestCase):
 
         with patch.object(client, "_execute_prompt", side_effect=valid_response):
             self.assertEqual(client.generate("system", "user"), "最终结果")
-        with patch.object(client, "_execute_prompt", return_value="错误回执\n最终结果"):
+        with patch.object(
+            client, "_execute_prompt", return_value="错误回执\n最终结果"
+        ) as execute:
             with self.assertRaisesRegex(RuntimeError, "回执无效"):
                 client.generate("system", "user")
+        self.assertEqual(execute.call_count, 2)
         self.assertEqual(list(client.working_directory.iterdir()), [])
         client.cleanup()
+
+    def test_file_response_accepts_bom_outer_fence_and_short_preamble(self) -> None:
+        client = DSHClient("dsh")
+        client.use_isolated_workspace()
+        task_file = client._write_task_file("synthetic task")
+        try:
+            response = (
+                "\ufeff```text\n已完成文件读取。\n"
+                f"{task_file.expected_ack}\n最终结果\n```"
+            )
+            self.assertEqual(
+                client._validate_file_response(response, task_file),
+                "最终结果",
+            )
+        finally:
+            client._remove_task_file(task_file)
+            client.cleanup()
+
+    def test_invalid_receipt_retries_same_task_file_once(self) -> None:
+        client = DSHClient("dsh")
+        client.use_isolated_workspace()
+        client._file_transport_supported = True
+        task_names: list[str] = []
+
+        def response(prompt, **_kwargs):
+            task_path = next(client.working_directory.glob(".novalist-task-*.md"))
+            task_names.append(task_path.name)
+            if len(task_names) == 1:
+                return '{"ok": true}'
+            self.assertIn("上一次回复未提供可验证", prompt)
+            return f"{current_task_ack(client)}\n" + '{"ok": true}'
+
+        with patch.object(client, "_execute_prompt", side_effect=response) as execute:
+            self.assertEqual(client.generate("只输出合法 JSON", "返回结果"), '{"ok": true}')
+
+        self.assertEqual(execute.call_count, 2)
+        self.assertEqual(len(set(task_names)), 1)
+        self.assertEqual(list(client.working_directory.iterdir()), [])
+        client.cleanup()
+
+    def test_retry_still_fails_closed_and_cleans_task_file(self) -> None:
+        client = DSHClient("dsh")
+        client.use_isolated_workspace()
+        client._file_transport_supported = True
+        workspace = client.working_directory
+
+        with patch.object(client, "_execute_prompt", return_value="没有回执") as execute:
+            with self.assertRaisesRegex(RuntimeError, "自动重试一次后仍无法确认"):
+                client.generate("system", "user")
+
+        self.assertEqual(execute.call_count, 2)
+        self.assertEqual(list(workspace.iterdir()), [])
+        client.cleanup()
+
+    def test_task_file_explains_ack_precedes_json_only_output(self) -> None:
+        client = DSHClient("dsh")
+        client.use_isolated_workspace()
+        task_file = client._write_task_file(
+            client._combine_prompts("只输出合法 JSON。", "返回结果。")
+        )
+        try:
+            payload = task_file.path.read_text(encoding="utf-8")
+            self.assertIn("只约束回执后的业务结果", payload)
+            self.assertIn("第一行先输出三段 nonce 回执", payload)
+            self.assertTrue(payload.endswith(task_file.nonce_tail))
+        finally:
+            client._remove_task_file(task_file)
+            client.cleanup()
 
     def test_task_file_byte_limit_is_enforced_before_execution(self) -> None:
         client = DSHClient(

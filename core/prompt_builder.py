@@ -28,6 +28,7 @@ from .context_profiles import (
 from .project import NovelProject
 from .text_anchor import render_anchor_context
 from .history_context import history_token_budget
+from .text_metrics import count_content_chars
 from .token_budget import DEFAULT_TOKEN_SAFETY_FACTOR
 
 COMMON_RULES = """
@@ -50,7 +51,7 @@ COMMON_RULES = """
 def build_expansion_prompt(
     project: NovelProject,
     chapter_id: str,
-    target_chars: int = 2000,
+    target_chars: int,
     *,
     summary_count: int = EXPANSION_SUMMARY_COUNT,
     selected_foreshadowing: list[dict] | tuple[dict, ...] | None = None,
@@ -193,7 +194,7 @@ def build_expansion_prompt(
 def build_expansion_retry_prompt(
     project: NovelProject,
     chapter_id: str,
-    target_chars: int = 2000,
+    target_chars: int,
     *,
     summary_count: int = EXPANSION_SUMMARY_COUNT,
     selected_foreshadowing: list[dict] | tuple[dict, ...] | None = None,
@@ -232,6 +233,78 @@ def build_expansion_retry_prompt(
 {user_prompt}
 """.strip()
     return _rebundle(base, retry_system, retry_user, "chapter_expansion_retry")
+
+
+def build_expansion_supplement_prompt(
+    chapter_id: str,
+    novel_text: str,
+    target_chars: int,
+    *,
+    min_chars: int,
+    max_chars: int,
+) -> PromptBundle:
+    """Build a compact insertion-only task for an under-length draft."""
+    source = str(novel_text or "").strip()
+    current_chars = count_content_chars(source)
+    missing_chars = max(1, int(target_chars) - current_chars)
+    system_prompt = f"""
+{COMMON_RULES}
+
+任务类型：chapter_expansion_supplement。
+当前章节正文长度不足。只能通过插入新段落补充细节，不得删除、替换、概括或重写原正文。
+只输出合法 JSON，不要输出 Markdown 代码围栏、小说正文标记或解释。
+""".strip()
+    user_prompt = f"""
+请为下方章节正文生成少量、精确的插入补丁，使最终正文接近用户设置的目标长度。
+
+【本次固定字数目标】
+- 目标正文：{target_chars} 字
+- 允许范围：{min_chars}～{max_chars} 字
+- 当前正文：{current_chars} 字
+- 建议新增：约 {missing_chars} 字
+
+补写要求：
+1. 只能扩充原文已有场景中的动作、环境、感官、心理或对话，不得新增重大事件、角色、设定或支线。
+2. 每个 anchor 必须从原文逐字复制 20～80 个字符，并且在原文中只出现一次。
+3. position 只能是 before 或 after；text 只包含要插入的小说正文。
+4. 返回 1～4 个插入项，新增正文总量应接近“建议新增”字数。
+5. 不得在 text 中重复 anchor，不得包含章节标题、说明、JSON、Markdown 或协议标记。
+
+【当前章节 ID】
+{chapter_id}
+
+【当前正文】
+{source}
+
+返回格式：
+{{
+  "type": "chapter_expansion_supplement",
+  "chapter_id": "{chapter_id}",
+  "insertions": [
+    {{
+      "anchor": "从原文逐字复制的唯一锚点",
+      "position": "after",
+      "text": "需要插入的补写正文"
+    }}
+  ]
+}}
+""".strip()
+    return _direct_bundle(
+        system_prompt,
+        user_prompt,
+        task_kind="chapter_expansion_supplement",
+        chapter_id=chapter_id,
+        sections=(
+            SectionUsage(
+                "generated_content",
+                len(source),
+                len(source),
+                "full",
+                0,
+                "head",
+            ),
+        ),
+    )
 
 
 def build_foreshadowing_review_prompt(
@@ -313,6 +386,7 @@ def build_write_prompt(
     summary_count: int = CONTINUATION_SUMMARY_COUNT,
     context: AIContext | None = None,
     prompt_budget: int = DEFAULT_PROMPT_BUDGET,
+    history_token_limit: int | None = None,
 ) -> PromptBundle:
     summary_count = max(0, int(summary_count))
     context = context or build_ai_context(
@@ -361,7 +435,7 @@ def build_write_prompt(
     def render(ctx: dict[str, str]) -> str:
         related_block = _related_block(ctx) or "【相关设定】\n（暂无）"
         return f"""
-请从当前章节正文的最后一句开始，继续生成后续小说正文。
+请从当前章节正文的最后一句之后开始，继续生成后续小说正文，不要重复最后一句。
 
 续写要求：
 1. 必须直接接续当前正文，不得重新概括前文。
@@ -417,6 +491,7 @@ def build_write_prompt(
         sections,
         prompt_budget,
         task_kind="continuation_current_chapter",
+        history_token_limit=history_token_limit,
         chapter_id=chapter_id,
         history_requested=summary_count,
         state_scope=context.state_scope,
@@ -432,6 +507,7 @@ def build_write_retry_prompt(
     summary_count: int = CONTINUATION_SUMMARY_COUNT,
     context: AIContext | None = None,
     prompt_budget: int = DEFAULT_PROMPT_BUDGET,
+    history_token_limit: int | None = None,
 ) -> PromptBundle:
     """Build an explicit retry after an Agent-style response."""
     base = build_write_prompt(
@@ -441,6 +517,7 @@ def build_write_retry_prompt(
         summary_count=summary_count,
         context=context,
         prompt_budget=prompt_budget,
+        history_token_limit=history_token_limit,
     )
     user_prompt = base.user_prompt
     retry_system = f"""

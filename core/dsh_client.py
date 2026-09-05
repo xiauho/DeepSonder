@@ -46,6 +46,7 @@ DSH_FILE_PROBE_PREFIX = "NOVALIST_FILE_PROBE_"
 DSH_FILE_READ_FAILED = "NOVALIST_FILE_TASK_READ_FAILED"
 DSH_FILE_TASK_SCHEMA = "NOVALIST_TASK_FILE_V1"
 DSH_FILE_ACK_PREFIX = "NOVALIST_FILE_ACK:"
+DSH_FILE_ACK_SEARCH_LINES = 6
 DEFAULT_TASK_FILE_MAX_BYTES = 512_000
 EMPTY_TASK_HINTS = (
     "I don't see an actual task",
@@ -74,6 +75,17 @@ class _TaskFile:
         return (
             f"{DSH_FILE_ACK_PREFIX}{self.nonce_head}:"
             f"{self.nonce_middle}:{self.nonce_tail}"
+        )
+
+
+class _TaskFileReceiptError(RuntimeError):
+    """A redacted, retryable failure to prove that one task file was read."""
+
+    def __init__(self, reason: str):
+        self.reason = str(reason or "unknown")
+        super().__init__(
+            "DeepSeek Harness 的任务文件回执无效，"
+            "无法确认业务提示词已跨段读取。"
         )
 
 
@@ -198,6 +210,8 @@ class DSHClient:
         task_file: _TaskFile | None = None
         transport = "file"
         file_ack_verified = False
+        file_ack_retry_count = 0
+        file_ack_error = ""
         outcome = "failed"
         self._last_command_chars = 0
         try:
@@ -229,7 +243,29 @@ class DSHClient:
                 submitted_prompt_length=len(combined),
             )
             if task_file is not None:
-                result = self._validate_file_response(result, task_file)
+                try:
+                    result = self._validate_file_response(result, task_file)
+                except _TaskFileReceiptError as first_error:
+                    # Headless exposes only model-authored final text, not a
+                    # native transport receipt. Reuse the exact task file and
+                    # nonce challenge for one bounded formatting retry.
+                    file_ack_retry_count = 1
+                    file_ack_error = first_error.reason
+                    result = self._execute_prompt(
+                        self._file_loader_prompt(task_file.path.name, retry=True),
+                        session_id=session_id,
+                        timeout=effective_timeout,
+                        cancel_event=cancel_event,
+                        submitted_prompt_length=len(combined),
+                    )
+                    try:
+                        result = self._validate_file_response(result, task_file)
+                    except _TaskFileReceiptError as retry_error:
+                        file_ack_error = retry_error.reason
+                        raise RuntimeError(
+                            "DeepSeek Harness 的任务文件回执无效，"
+                            "自动重试一次后仍无法确认业务提示词已跨段读取。"
+                        ) from None
                 file_ack_verified = True
             outcome = "success"
             return result
@@ -251,6 +287,8 @@ class DSHClient:
                     task_file_cleaned=task_file_cleaned,
                     task_file_bytes=task_file.byte_count if task_file is not None else 0,
                     file_ack_verified=file_ack_verified,
+                    file_ack_retry_count=file_ack_retry_count,
+                    file_ack_error=file_ack_error,
                     input_token_budget=self.input_token_budget,
                     runtime_reserve_tokens=self.runtime_reserve_tokens,
                     model_context_window_tokens=self.model_context_window_tokens,
@@ -522,11 +560,15 @@ class DSHClient:
             "- 必须完整读取本文件后再执行任务。\n"
             "- 任务正文中部和文件末尾还有随机校验值。最终回复第一行必须严格使用格式：\n"
             f"  {DSH_FILE_ACK_PREFIX}<task_nonce_head>:<task_nonce_middle>:<task_nonce_tail>\n"
+            "- 业务任务中的‘只输出 JSON’、‘只输出正文’或类似要求，只约束回执后的"
+            "业务结果；传输回执始终是第一行，业务结果始终从第二行开始。\n"
             "- NOVALIST_TRANSPORT_CHECKPOINT 仅用于传输校验，不属于任务正文。\n"
             "- 从第二行开始输出任务要求的结果，不要重复或解释传输协议。\n"
             f"- 如果无法完整读取文件，只回复 {DSH_FILE_READ_FAILED}。\n\n"
             f"{challenged_payload}\n"
             "NOVALIST_TASK_FILE_FOOTER\n"
+            "再次确认：无论业务输出格式如何，第一行先输出三段 nonce 回执，"
+            "第二行起再输出业务结果。\n"
             f"task_nonce_tail: {nonce_tail}"
         )
         encoded = envelope.encode("utf-8")
@@ -592,32 +634,64 @@ class DSHClient:
             pass
 
     @staticmethod
-    def _file_loader_prompt(filename: str) -> str:
+    def _file_loader_prompt(filename: str, *, retry: bool = False) -> str:
+        retry_notice = (
+            "上一次回复未提供可验证的三段 nonce 回执。请重新完整读取同一个文件，"
+            "不要复用或猜测上一次结果。\n"
+            if retry
+            else ""
+        )
         return (
             "NOVALIST_FILE_TASK_LOADER\n"
+            f"{retry_notice}"
             f"请完整读取当前工作目录中的 {filename}（UTF-8）。\n"
             "该文件中 NOVALIST_TASK_START 与 NOVALIST_TASK_END 之间的内容"
             "才是本次完整任务。请立即执行该任务，不要仅概括文件内容，也不要"
             "修改或删除任何文件。最终回复必须遵守文件头部的传输协议，并从文件"
-            "头、任务正文中部和文件尾分别取得 nonce；加载指令本身不包含这些值。\n"
+            "头、任务正文中部和文件尾分别取得 nonce；加载指令本身不包含这些值。"
+            "文件内的‘只输出 JSON/正文’仅约束回执后的业务结果，不得省略第一行回执。\n"
             f"如果无法完整读取，只回复 {DSH_FILE_READ_FAILED}。"
         )
 
     @staticmethod
     def _validate_file_response(output: str, task_file: _TaskFile) -> str:
         """Accept output only when it proves the exact task file was read."""
-        normalized = str(output or "").strip()
+        normalized = str(output or "").replace("\r\n", "\n").replace("\r", "\n")
+        normalized = normalized.strip().lstrip("\ufeff")
         if normalized == DSH_FILE_READ_FAILED or normalized.startswith(
             DSH_FILE_READ_FAILED + "\n"
         ):
-            raise RuntimeError("DeepSeek Harness 未能完整读取 Novalist 临时任务文件。")
-        first, separator, remainder = normalized.partition("\n")
+            raise _TaskFileReceiptError("file_read_failed")
+
+        lines = normalized.split("\n") if normalized else []
+        if (
+            len(lines) >= 2
+            and lines[0].strip().startswith("```")
+            and lines[-1].strip() == "```"
+        ):
+            lines = lines[1:-1]
+
         expected = task_file.expected_ack
-        if first.strip() != expected:
-            raise RuntimeError(
-                "DeepSeek Harness 的任务文件回执无效，无法确认业务提示词已跨段读取。"
+        matching_lines = [
+            index for index, line in enumerate(lines) if line.strip() == expected
+        ]
+        if len(matching_lines) > 1:
+            raise _TaskFileReceiptError("duplicate_ack")
+        if not matching_lines:
+            reason = (
+                "wrong_nonce"
+                if any(line.strip().startswith(DSH_FILE_ACK_PREFIX) for line in lines)
+                else "missing_ack"
             )
-        result = remainder.strip() if separator else ""
+            raise _TaskFileReceiptError(reason)
+        ack_index = matching_lines[0]
+        if ack_index >= DSH_FILE_ACK_SEARCH_LINES:
+            raise _TaskFileReceiptError("late_ack")
+
+        # The exact unpredictable nonce triple is the integrity proof. Ignore
+        # a small model-authored preamble instead of confusing line position
+        # with whether the file was read.
+        result = "\n".join(lines[ack_index + 1 :]).strip()
         if not result:
             raise RuntimeError("DeepSeek Harness 已确认任务文件，但返回结果为空。")
         return result
@@ -830,6 +904,9 @@ class DSHClient:
                 "NOVALIST_TASK_START\n"
                 "请立即执行下面这一个任务，并在本次回复中给出最终结果。"
                 "不要停留在准备状态，也不要询问用户下一步。\n\n"
+                "[输出包装说明]\n"
+                "任务中的‘只输出 JSON’、‘只输出正文’或类似限制，只约束传输回执后的"
+                "业务结果；必须先按任务文件传输协议输出第一行 ACK。\n\n"
                 f"[用户任务]\n{user_prompt}\n"
                 "NOVALIST_TASK_END"
             )
@@ -837,6 +914,9 @@ class DSHClient:
             "NOVALIST_TASK_START\n"
             "请立即执行下面这一个任务，并在本次回复中给出最终结果。"
             "不要停留在准备状态，也不要询问用户下一步。\n\n"
+            "[输出包装说明]\n"
+            "任务中的‘只输出 JSON’、‘只输出正文’或类似限制，只约束传输回执后的"
+            "业务结果；必须先按任务文件传输协议输出第一行 ACK。\n\n"
             f"[系统约束]\n{system_prompt}\n\n"
             f"[用户任务]\n{user_prompt}\n"
             "NOVALIST_TASK_END"

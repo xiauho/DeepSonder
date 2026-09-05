@@ -14,10 +14,12 @@ from .project import NovelProject
 from .prompt_builder import (
     build_expansion_prompt,
     build_expansion_retry_prompt,
+    build_expansion_supplement_prompt,
     build_foreshadowing_review_prompt,
 )
 from .task_controller import AITaskCancelled
 from .history_context import history_token_budget, resolve_history_count
+from .text_metrics import count_content_chars
 from .token_budget import DEFAULT_INPUT_TOKEN_BUDGET
 
 
@@ -28,13 +30,22 @@ class ExpansionRunResult:
     raw_output: str
     first_raw_output: str | None
     plain_text_fallback_count: int
+    target_chars: int
+    min_chars: int
+    max_chars: int
+    initial_char_count: int
+    final_char_count: int
+    supplement_attempted: bool = False
+    supplement_applied: bool = False
+    supplement_added_chars: int = 0
+    supplement_warning: str = ""
 
 
 def run_expansion(
     project: NovelProject,
     chapter_id: str,
     dsh: DSHClient,
-    target_chars: int = 2000,
+    target_chars: int,
     history_chapters: int = EXPANSION_SUMMARY_COUNT,
     selected_foreshadowing: list[dict] | tuple[dict, ...] | None = None,
     selected_power: list[str] | tuple[str, ...] | None = None,
@@ -133,10 +144,75 @@ def run_expansion(
                 raw,
                 min_chars=min_chars,
                 max_chars=max_chars,
+                expected_chapter_id=chapter_id,
+                allowed_foreshadowing_ids={
+                    str(note.get("id") or "").strip()
+                    for note in (selected_foreshadowing or ())
+                    if isinstance(note, dict) and str(note.get("id") or "").strip()
+                },
             )
             plain_text_fallbacks += int(parsed.plain_text_fallback)
         except ai_protocol.AIProtocolError:
-            return ExpansionRunResult(raw, first_raw, plain_text_fallbacks)
+            return ExpansionRunResult(
+                raw,
+                first_raw,
+                plain_text_fallbacks,
+                target_chars,
+                min_chars,
+                max_chars,
+                0,
+                0,
+            )
+
+    initial_char_count = parsed.char_count
+    supplement_attempted = False
+    supplement_applied = False
+    supplement_added_chars = 0
+    supplement_warning = ""
+    if parsed.char_count < min_chars:
+        supplement_attempted = True
+        supplement_prompt = build_expansion_supplement_prompt(
+            chapter_id,
+            parsed.text,
+            target_chars,
+            min_chars=min_chars,
+            max_chars=max_chars,
+        )
+        missing_chars = max(1, target_chars - parsed.char_count)
+        try:
+            supplement_raw = dsh.generate_json(
+                supplement_prompt.system_prompt,
+                supplement_prompt.user_prompt,
+                context_report=supplement_prompt.report,
+                **generate_options,
+            )
+            supplement = ai_protocol.parse_expansion_supplement(
+                supplement_raw,
+                expected_chapter_id=chapter_id,
+                source_text=parsed.text,
+                max_added_chars=max(300, round(missing_chars * 1.75)),
+            )
+            supplemented_text = _apply_expansion_insertions(
+                parsed.text,
+                supplement.insertions,
+            )
+            final_count = count_content_chars(supplemented_text)
+            supplement_added_chars = max(0, final_count - parsed.char_count)
+            supplement_applied = supplement_added_chars > 0
+            parsed = replace(
+                parsed,
+                text=supplemented_text,
+                char_count=final_count,
+                length_ok=min_chars <= final_count <= max_chars,
+            )
+            if not parsed.length_ok:
+                supplement_warning = (
+                    "自动差额补写后仍未进入本次目标范围，请在写入前重点审阅。"
+                )
+        except AITaskCancelled:
+            raise
+        except Exception as exc:
+            supplement_warning = f"自动差额补写未能安全应用：{exc}"
 
     selected = tuple(
         note
@@ -153,7 +229,45 @@ def run_expansion(
         )
     else:
         raw = _canonical_expansion_output(parsed)
-    return ExpansionRunResult(raw, first_raw, plain_text_fallbacks)
+    return ExpansionRunResult(
+        raw,
+        first_raw,
+        plain_text_fallbacks,
+        target_chars,
+        min_chars,
+        max_chars,
+        initial_char_count,
+        parsed.char_count,
+        supplement_attempted,
+        supplement_applied,
+        supplement_added_chars,
+        supplement_warning,
+    )
+
+
+def _apply_expansion_insertions(
+    source: str,
+    insertions: tuple[ai_protocol.ExpansionInsertion, ...],
+) -> str:
+    """Apply validated insertions by descending source offset."""
+    operations: list[tuple[int, str]] = []
+    used_offsets: set[int] = set()
+    for insertion in insertions:
+        start = source.index(insertion.anchor)
+        offset = start if insertion.position == "before" else start + len(insertion.anchor)
+        if offset in used_offsets:
+            raise ai_protocol.AIProtocolError("扩写补写包含冲突的插入位置。")
+        used_offsets.add(offset)
+        addition = (
+            insertion.text.rstrip() + "\n\n"
+            if insertion.position == "before"
+            else "\n\n" + insertion.text.lstrip()
+        )
+        operations.append((offset, addition))
+    result = source
+    for offset, addition in sorted(operations, reverse=True):
+        result = result[:offset] + addition + result[offset:]
+    return result
 
 
 def _attach_foreshadowing_review(

@@ -69,8 +69,12 @@ class ContextSelectionTests(TestCase):
         self.assertGreater(world_stat.excluded_unmatched, 0)
 
     def test_selection_is_deterministic_and_prompt_keeps_the_relevant_entry(self) -> None:
-        first = build_expansion_prompt(self.project, "chapter_01", prompt_budget=24_000)
-        second = build_expansion_prompt(self.project, "chapter_01", prompt_budget=24_000)
+        first = build_expansion_prompt(
+            self.project, "chapter_01", 3000, prompt_budget=24_000
+        )
+        second = build_expansion_prompt(
+            self.project, "chapter_01", 3000, prompt_budget=24_000
+        )
 
         self.assertEqual(first.user_prompt, second.user_prompt)
         self.assertIn("星港相关性标记", first.user_prompt)
@@ -117,6 +121,7 @@ class ContextSelectionTests(TestCase):
         prompt = build_expansion_prompt(
             self.project,
             "chapter_01",
+            3000,
             selected_power=[str(selected_system)],
             prompt_budget=24_000,
         )
@@ -152,6 +157,7 @@ class ContextSelectionTests(TestCase):
             build_expansion_prompt(
                 self.project,
                 "chapter_01",
+                3000,
                 prompt_budget=24_000,
             )
 

@@ -58,6 +58,8 @@ class PromptContextReport:
     task_file_cleaned: bool = True
     task_file_bytes: int = 0
     file_ack_verified: bool = False
+    file_ack_retry_count: int = 0
+    file_ack_error: str = ""
     input_token_budget: int = 0
     runtime_reserve_tokens: int = 0
     estimated_input_tokens: int = 0
@@ -100,6 +102,8 @@ class PromptContextReport:
         task_file_cleaned: bool,
         task_file_bytes: int = 0,
         file_ack_verified: bool = False,
+        file_ack_retry_count: int = 0,
+        file_ack_error: str = "",
         input_token_budget: int | None = None,
         runtime_reserve_tokens: int | None = None,
         estimated_input_tokens: int | None = None,
@@ -116,6 +120,8 @@ class PromptContextReport:
             task_file_cleaned=bool(task_file_cleaned),
             task_file_bytes=max(0, int(task_file_bytes)),
             file_ack_verified=bool(file_ack_verified),
+            file_ack_retry_count=max(0, int(file_ack_retry_count)),
+            file_ack_error=str(file_ack_error or ""),
             input_token_budget=(
                 self.input_token_budget
                 if input_token_budget is None

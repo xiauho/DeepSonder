@@ -122,5 +122,4 @@ class PrimaryNavigation(QWidget):
         for key, button in self.buttons.items():
             active = key == route
             button.setObjectName("primaryNavActive" if active else "primaryNavButton")
-            button.style().unpolish(button)
-            button.style().polish(button)
+            button.refresh_style()

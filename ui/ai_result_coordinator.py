@@ -56,6 +56,13 @@ class ExpansionPreviewDialog(QDialog):
         char_count: int,
         length_ok: bool,
         has_existing_content: bool,
+        target_chars: int = 0,
+        min_chars: int = 0,
+        max_chars: int = 0,
+        initial_char_count: int = 0,
+        supplement_attempted: bool = False,
+        supplement_added_chars: int = 0,
+        supplement_warning: str = "",
         foreshadowing_feedback: tuple[ForeshadowingSuggestion, ...] = (),
         foreshadowing_titles: dict[str, str] | None = None,
         foreshadowing_warning: str = "",
@@ -74,11 +81,26 @@ class ExpansionPreviewDialog(QDialog):
         else:
             notice = "当前章节正文为空，确认后将写入生成结果。"
             confirm_label = "确认写入正文"
-        info = QLabel(
-            f"已生成约 {char_count} 字。"
+        details = []
+        if target_chars > 0:
+            details.append(
+                f"本次目标：{target_chars} 字 · 允许范围：{min_chars}～{max_chars} 字"
+            )
+        if supplement_attempted:
+            if supplement_added_chars > 0:
+                details.append(
+                    f"首次生成：{initial_char_count} 字 · 自动补写：{supplement_added_chars} 字"
+                )
+            else:
+                details.append(f"首次生成：{initial_char_count} 字 · 自动补写未应用")
+        details.append(
+            f"最终正文：{char_count} 字 · "
             + ("长度在目标范围内。" if length_ok else "长度超出目标范围，请审阅后决定。")
-            + f"\n{notice}\n未点击确认前，不会修改当前正文。"
         )
+        if supplement_warning:
+            details.append(supplement_warning)
+        details.extend((notice, "未点击确认前，不会修改当前正文。"))
+        info = QLabel("\n".join(details))
         info.setWordWrap(True)
         layout.addWidget(info)
 
@@ -175,6 +197,78 @@ class ExpansionPreviewDialog(QDialog):
         return group
 
 
+class ContinuationPreviewDialog(QDialog):
+    """Preview a continuation together with the seam it will follow."""
+
+    def __init__(
+        self,
+        text: str,
+        current_tail: str,
+        current_chars: int,
+        requested_chars: int,
+        generated_chars: int,
+        target_chapter_chars: int,
+        length_ok: bool,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.confirmed = False
+        self.setWindowTitle("AI 续写结果预览")
+        self.resize(780, 650)
+        projected = current_chars + generated_chars
+        difference = projected - target_chapter_chars
+        if difference > 0:
+            target_note = f"追加后预计超过目标 {difference} 字，仅作为创作参考。"
+        else:
+            target_note = f"追加后距离目标约 {abs(difference)} 字。"
+        info = QLabel(
+            f"目标章节：{target_chapter_chars} 字 · 当前正文：{current_chars} 字\n"
+            f"本次请求：{requested_chars} 字 · AI 实际生成：{generated_chars} 字 · "
+            f"追加后预计：{projected} 字\n"
+            + ("生成长度在参考范围内。" if length_ok else "生成长度超出参考范围，请审阅后决定。")
+            + f"{target_note}\n未点击确认前，不会修改当前正文；确认后也不会自动保存。"
+        )
+        info.setWordWrap(True)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(info)
+        seam_label = QLabel("当前正文结尾")
+        seam_label.setObjectName("sectionTitle")
+        layout.addWidget(seam_label)
+        seam = QPlainTextEdit()
+        seam.setReadOnly(True)
+        seam.setPlainText(current_tail)
+        seam.setMaximumHeight(150)
+        layout.addWidget(seam)
+        generated_label = QLabel("AI 续写内容")
+        generated_label.setObjectName("sectionTitle")
+        layout.addWidget(generated_label)
+        generated = QPlainTextEdit()
+        generated.setReadOnly(True)
+        generated.setPlainText(text)
+        layout.addWidget(generated, 1)
+
+        buttons = QHBoxLayout()
+        confirm = QPushButton("追加到正文")
+        confirm.setObjectName("accentButton")
+        confirm.setAutoDefault(False)
+        copy = QPushButton("复制")
+        cancel = QPushButton("放弃")
+        cancel.setAutoDefault(False)
+        confirm.clicked.connect(self._confirm)
+        copy.clicked.connect(lambda: QApplication.clipboard().setText(text))
+        cancel.clicked.connect(self.reject)
+        buttons.addWidget(confirm)
+        buttons.addWidget(copy)
+        buttons.addStretch(1)
+        buttons.addWidget(cancel)
+        layout.addLayout(buttons)
+
+    def _confirm(self) -> None:
+        self.confirmed = True
+        self.accept()
+
+
 class RepairPreviewDialog(QDialog):
     """Preview one contiguous replacement before it touches the editor."""
 
@@ -255,6 +349,13 @@ class AIResultCoordinator:
         has_existing_content: bool,
         context_matches: Callable[[], bool],
         replace_body: Callable[[str], None],
+        target_chars: int = 0,
+        min_chars: int = 0,
+        max_chars: int = 0,
+        initial_char_count: int = 0,
+        supplement_attempted: bool = False,
+        supplement_added_chars: int = 0,
+        supplement_warning: str = "",
         foreshadowing_feedback: tuple[ForeshadowingSuggestion, ...] = (),
         foreshadowing_titles: dict[str, str] | None = None,
         foreshadowing_warning: str = "",
@@ -264,6 +365,13 @@ class AIResultCoordinator:
             char_count,
             length_ok,
             has_existing_content,
+            target_chars,
+            min_chars,
+            max_chars,
+            initial_char_count,
+            supplement_attempted,
+            supplement_added_chars,
+            supplement_warning,
             foreshadowing_feedback,
             foreshadowing_titles,
             foreshadowing_warning,
@@ -289,6 +397,42 @@ class AIResultCoordinator:
             value=resolution_ids,
             action="替换" if has_existing_content else "写入",
         )
+
+    def confirm_continuation(
+        self,
+        *,
+        text: str,
+        current_tail: str,
+        current_chars: int,
+        requested_chars: int,
+        generated_chars: int,
+        target_chapter_chars: int,
+        length_ok: bool,
+        context_matches: Callable[[], bool],
+        append_body: Callable[[str], None],
+    ) -> CommitOutcome:
+        dialog = ContinuationPreviewDialog(
+            text,
+            current_tail,
+            current_chars,
+            requested_chars,
+            generated_chars,
+            target_chapter_chars,
+            length_ok,
+            self.parent,
+        )
+        dialog.exec()
+        if not dialog.confirmed:
+            return CommitOutcome(status="cancelled")
+        if not context_matches():
+            QMessageBox.warning(
+                self.parent,
+                "章节已发生变化",
+                "生成期间当前章节内容或相关资料发生了变化，续写结果未自动追加。",
+            )
+            return CommitOutcome(status="stale")
+        append_body(text)
+        return CommitOutcome(status="committed", action="追加")
 
     def confirm_memory(
         self,

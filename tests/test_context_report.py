@@ -98,6 +98,7 @@ class PromptConstructionReportTests(TestCase):
             bundle = build_expansion_prompt(
                 project,
                 "chapter_03",
+                3000,
                 summary_count=20,
                 prompt_budget=48_000,
             )
@@ -159,6 +160,39 @@ class DSHInvocationReportTests(TestCase):
         self.assertTrue(reports[0].file_ack_verified)
         self.assertGreater(reports[0].task_file_bytes, 0)
         self.assertEqual(list(workspace.iterdir()), [])
+        client.cleanup()
+
+    def test_report_records_recovered_receipt_without_response_text(self) -> None:
+        reports = []
+        client = DSHClient("dsh", report_callback=reports.append)
+        client.use_isolated_workspace()
+        client._file_transport_supported = True
+        secret_response = "不应进入脱敏报告的模型输出"
+        valid_response = acknowledged(client, output="完成")
+        calls = 0
+
+        def response(prompt, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return secret_response
+            return valid_response(prompt, **kwargs)
+
+        with patch.object(
+            client,
+            "_execute_prompt",
+            side_effect=response,
+        ):
+            client.generate("系统", "任务", context_report=empty_report())
+
+        self.assertEqual(len(reports), 1)
+        self.assertTrue(reports[0].file_ack_verified)
+        self.assertEqual(reports[0].file_ack_retry_count, 1)
+        self.assertEqual(reports[0].file_ack_error, "missing_ack")
+        self.assertNotIn(
+            secret_response,
+            json.dumps(reports[0].to_dict(), ensure_ascii=False),
+        )
         client.cleanup()
 
     def test_unavailable_long_file_transport_fails_without_prompt_content(self) -> None:
@@ -236,3 +270,20 @@ class ContextReportRenderingTests(TestCase):
         self.assertIn("1,234 / 24,000 token", rendered)
         self.assertIn("运行预留 6,000 token", rendered)
         self.assertIn("conservative_v1", rendered)
+
+    def test_rendering_shows_receipt_retry_reason(self) -> None:
+        report = empty_report().complete_invocation(
+            transport="file",
+            submitted_prompt_chars=2_000,
+            command_chars=300,
+            outcome="success",
+            task_file_cleaned=True,
+            task_file_bytes=3_000,
+            file_ack_verified=True,
+            file_ack_retry_count=1,
+            file_ack_error="missing_ack",
+        )
+
+        rendered = render_context_reports([report])
+        self.assertIn("自动重试 1 次", rendered)
+        self.assertIn("首次异常：未找到回执", rendered)

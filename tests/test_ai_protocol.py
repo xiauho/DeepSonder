@@ -8,10 +8,80 @@ from core.ai_protocol import (
     parse_consistency_repair,
     parse_continuation,
     parse_expansion,
+    parse_expansion_supplement,
 )
 
 
 class AIProtocolTests(TestCase):
+    def test_expansion_supplement_requires_unique_source_anchor(self) -> None:
+        source = "这是一个足够长而且只出现一次的原文锚点，用于安全插入后续补写内容。"
+        result = parse_expansion_supplement(
+            {
+                "type": "chapter_expansion_supplement",
+                "chapter_id": "chapter_01",
+                "insertions": [
+                    {
+                        "anchor": source[:24],
+                        "position": "after",
+                        "text": "风从远处吹来，人物停下脚步仔细倾听。",
+                    }
+                ],
+            },
+            expected_chapter_id="chapter_01",
+            source_text=source,
+            max_added_chars=100,
+        )
+        self.assertEqual(len(result.insertions), 1)
+        self.assertGreater(result.added_char_count, 0)
+
+        repeated = source[:24] + "。" + source[:24]
+        with self.assertRaisesRegex(AIProtocolError, "唯一出现"):
+            parse_expansion_supplement(
+                {
+                    "type": "chapter_expansion_supplement",
+                    "chapter_id": "chapter_01",
+                    "insertions": [
+                        {
+                            "anchor": source[:24],
+                            "position": "after",
+                            "text": "补写正文。",
+                        }
+                    ],
+                },
+                expected_chapter_id="chapter_01",
+                source_text=repeated,
+                max_added_chars=100,
+            )
+
+    def test_expansion_supplement_rejects_wrong_chapter_and_oversized_text(self) -> None:
+        source = "这是另一个长度足够的唯一原文锚点，可以用于验证补写协议是否安全。"
+        payload = {
+            "type": "chapter_expansion_supplement",
+            "chapter_id": "chapter_02",
+            "insertions": [
+                {
+                    "anchor": source[:24],
+                    "position": "before",
+                    "text": "补" * 200,
+                }
+            ],
+        }
+        with self.assertRaisesRegex(AIProtocolError, "章节"):
+            parse_expansion_supplement(
+                payload,
+                expected_chapter_id="chapter_01",
+                source_text=source,
+                max_added_chars=100,
+            )
+        payload["chapter_id"] = "chapter_01"
+        with self.assertRaisesRegex(AIProtocolError, "安全范围"):
+            parse_expansion_supplement(
+                payload,
+                expected_chapter_id="chapter_01",
+                source_text=source,
+                max_added_chars=100,
+            )
+
     def test_consistency_repair_requires_exact_anchor(self) -> None:
         result = parse_consistency_repair(
             {

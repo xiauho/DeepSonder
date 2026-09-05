@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .json_utils import JSONExtractionError, extract_json
+from .text_metrics import count_content_chars
 
 
 class AIProtocolError(ValueError):
@@ -187,6 +188,20 @@ class ExpansionResult:
 
 
 @dataclass(frozen=True)
+class ExpansionInsertion:
+    anchor: str
+    position: str
+    text: str
+
+
+@dataclass(frozen=True)
+class ExpansionSupplementResult:
+    chapter_id: str
+    insertions: tuple[ExpansionInsertion, ...]
+    added_char_count: int
+
+
+@dataclass(frozen=True)
 class ConsistencyRepairResult:
     chapter_id: str
     issue_id: str
@@ -251,6 +266,53 @@ def parse_expansion(
     )
 
 
+def parse_expansion_supplement(
+    raw: str | dict[str, Any],
+    *,
+    expected_chapter_id: str,
+    source_text: str,
+    max_added_chars: int,
+) -> ExpansionSupplementResult:
+    """Validate insertion-only patches without allowing source rewrites."""
+    value = _as_object(raw, "扩写补写")
+    if value.get("type") != "chapter_expansion_supplement":
+        raise AIProtocolError("扩写补写缺少正确的 type。")
+    chapter_id = str(value.get("chapter_id") or "").strip()
+    if chapter_id != str(expected_chapter_id):
+        raise AIProtocolError("扩写补写对应的章节与当前章节不一致。")
+    items = value.get("insertions")
+    if not isinstance(items, list) or not 1 <= len(items) <= 4:
+        raise AIProtocolError("扩写补写必须包含 1～4 个 insertion。")
+
+    source = str(source_text or "")
+    insertions: list[ExpansionInsertion] = []
+    seen_anchors: set[str] = set()
+    added_chars = 0
+    for item in items:
+        if not isinstance(item, dict):
+            raise AIProtocolError("扩写补写包含无效的 insertion。")
+        anchor = str(item.get("anchor") or "")
+        position = str(item.get("position") or "").strip().lower()
+        text = str(item.get("text") or "").strip()
+        if not 20 <= len(anchor) <= 80:
+            raise AIProtocolError("扩写补写锚点长度必须为 20～80 个字符。")
+        if anchor in seen_anchors or source.count(anchor) != 1:
+            raise AIProtocolError("扩写补写锚点必须在原文中唯一出现。")
+        if position not in {"before", "after"}:
+            raise AIProtocolError("扩写补写 position 只能是 before 或 after。")
+        if not text or _contains_protocol_artifact(text):
+            raise AIProtocolError("扩写补写正文为空或包含协议标记。")
+        if anchor in text:
+            raise AIProtocolError("扩写补写正文不得重复锚点。")
+        seen_anchors.add(anchor)
+        added_chars += count_content_chars(text)
+        insertions.append(ExpansionInsertion(anchor, position, text))
+
+    if added_chars <= 0 or added_chars > max(1, int(max_added_chars)):
+        raise AIProtocolError("扩写补写新增字数超出安全范围。")
+    return ExpansionSupplementResult(chapter_id, tuple(insertions), added_chars)
+
+
 def _parse_novel_text(
     raw: str,
     *,
@@ -306,7 +368,7 @@ def _parse_novel_text(
     if not content:
         raise AIProtocolError(f"DSh 返回内容不符合{task_label}协议，未识别出小说正文。")
 
-    char_count = _content_length(content)
+    char_count = count_content_chars(content)
     length_ok = char_count >= max(0, int(min_chars)) and (
         max_chars is None or char_count <= int(max_chars)
     )
@@ -629,10 +691,6 @@ def _parse_foreshadowing_feedback(
         suggestions.append(ForeshadowingSuggestion(note_id, evidence, reason))
     warning = "伏笔反馈中有无效或非本次选择的条目，已安全忽略。" if ignored else ""
     return tuple(suggestions), warning
-
-
-def _content_length(text: str) -> int:
-    return len(re.sub(r"\s+", "", text))
 
 
 def _extract_repairable_novel_text(text: str) -> str:

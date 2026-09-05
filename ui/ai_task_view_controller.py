@@ -12,6 +12,7 @@ MAX_OUTPUT_ENTRY_CHARS = 24_000
 MAX_OUTPUT_BLOCKS = 1_200
 TASK_LABELS = {
     "expand": "扩写",
+    "continuation": "续写",
     "check": "设定检查",
     "memory": "记忆更新",
 }
@@ -118,7 +119,7 @@ class AITaskViewController(QObject):
         self._task_started_at = time.monotonic()
         self._task_kind = getattr(_token, "kind", None)
         label = TASK_LABELS.get(self._task_kind, "AI")
-        for key in ("continue", "check", "memory"):
+        for key in ("expand", "continuation", "check", "memory"):
             self.actions[key].setEnabled(False)
         self.task_progress.show()
         self.cancel_button.show()
@@ -139,7 +140,7 @@ class AITaskViewController(QObject):
             elapsed = f" · 用时 {max(0.0, time.monotonic() - self._task_started_at):.1f} 秒"
         self.append_output(f"— {label}后台任务已结束{elapsed}")
         self.ai_engine_controller.cleanup_retired()
-        for key in ("continue", "check", "memory"):
+        for key in ("expand", "continuation", "check", "memory"):
             self.actions[key].setEnabled(True)
         self.task_progress.hide()
         self.cancel_button.hide()

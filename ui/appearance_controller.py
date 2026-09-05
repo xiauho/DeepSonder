@@ -21,6 +21,7 @@ class AppearanceController(QObject):
         settings_page,
         theme_button,
         action_icon_buttons: dict,
+        ai_creation_button=None,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -29,6 +30,7 @@ class AppearanceController(QObject):
         self.left_panel = left_panel
         self.settings_page = settings_page
         self.theme_button = theme_button
+        self.ai_creation_button = ai_creation_button
         self.action_icon_buttons = action_icon_buttons
         self.parent = parent
         self.config: dict = {}
@@ -52,3 +54,5 @@ class AppearanceController(QObject):
             button.set_icon_color(color)
         theme_icon = "dark_mode" if self.config.get("theme") == "light" else "light_mode"
         set_button_icon(self.theme_button, theme_icon, muted, 17)
+        if self.ai_creation_button is not None:
+            set_button_icon(self.ai_creation_button, "auto_awesome", "#FFFFFF", 17)

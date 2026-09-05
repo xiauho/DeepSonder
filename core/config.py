@@ -28,7 +28,10 @@ from .context_capacity import (
 )
 
 AI_CONTEXT_HISTORY_CHAPTERS_MAX = 200
-CONFIG_SCHEMA_VERSION = 5
+CHAPTER_TARGET_CHARS_DEFAULT = 3000
+CHAPTER_TARGET_CHARS_MIN = 300
+CHAPTER_TARGET_CHARS_MAX = 10_000
+CONFIG_SCHEMA_VERSION = 6
 DSH_FILE_PROMPT_BUDGET_MIN = MIN_FILE_PROMPT_CHARS
 DSH_FILE_PROMPT_BUDGET_MAX = 300_000
 _DEFAULT_CONTEXT_CAPACITY = derive_context_capacity(
@@ -64,7 +67,7 @@ DEFAULT_CONFIG = {
     # Writing preferences
     "auto_save": True,
     "auto_save_interval": 30,
-    "expand_target_chars": 2000,
+    "chapter_target_chars": CHAPTER_TARGET_CHARS_DEFAULT,
     "ai_context_history_chapters": 5,
     "ai_history_mode": "auto",
     "ai_history_remote_enabled": True,
@@ -130,6 +133,27 @@ def normalize_config(config: dict) -> dict:
     return normalized
 
 
+def get_chapter_target_chars(config: dict | None) -> int:
+    """Return the validated chapter target from the application settings.
+
+    This is the only runtime accessor for the writing target.  Business
+    workflows receive its returned value explicitly instead of carrying their
+    own fallback defaults.
+    """
+    value = (
+        config.get("chapter_target_chars", CHAPTER_TARGET_CHARS_DEFAULT)
+        if isinstance(config, dict)
+        else CHAPTER_TARGET_CHARS_DEFAULT
+    )
+    try:
+        return max(
+            CHAPTER_TARGET_CHARS_MIN,
+            min(CHAPTER_TARGET_CHARS_MAX, int(value)),
+        )
+    except (TypeError, ValueError):
+        return CHAPTER_TARGET_CHARS_DEFAULT
+
+
 def _merge_config(config: dict, path: Path) -> bool:
     if not path.is_file():
         return False
@@ -145,8 +169,11 @@ def _merge_config(config: dict, path: Path) -> bool:
                 config["config_schema_version"] = 0
             # Defaults are merged before persisted values. Preserve the raw
             # key-presence rule needed by the v0 -> v1 rename.
-            if "expand_target_chars" not in data and "continue_target_chars" in data:
-                config["expand_target_chars"] = data["continue_target_chars"]
+            if "chapter_target_chars" not in data:
+                if "expand_target_chars" in data:
+                    config["chapter_target_chars"] = data["expand_target_chars"]
+                elif "continue_target_chars" in data:
+                    config["chapter_target_chars"] = data["continue_target_chars"]
             return True
     except (json.JSONDecodeError, OSError):
         pass
@@ -241,15 +268,13 @@ def _normalize_config(config: dict[str, Any]) -> None:
         config["auto_save_interval"] = max(5, min(600, int(config.get("auto_save_interval", 30))))
     except (TypeError, ValueError):
         config["auto_save_interval"] = 30
-    # Migrate the old setting name without requiring users to edit config.json.
-    if "expand_target_chars" not in config and "continue_target_chars" in config:
-        config["expand_target_chars"] = config["continue_target_chars"]
-    try:
-        config["expand_target_chars"] = max(
-            300, min(10000, int(config.get("expand_target_chars", 2000)))
-        )
-    except (TypeError, ValueError):
-        config["expand_target_chars"] = 2000
+    # Migrate both historical names without requiring users to edit config.json.
+    if "chapter_target_chars" not in config:
+        if "expand_target_chars" in config:
+            config["chapter_target_chars"] = config["expand_target_chars"]
+        elif "continue_target_chars" in config:
+            config["chapter_target_chars"] = config["continue_target_chars"]
+    config["chapter_target_chars"] = get_chapter_target_chars(config)
     try:
         config["ai_context_history_chapters"] = max(
             0,
@@ -265,6 +290,7 @@ def _normalize_config(config: dict[str, Any]) -> None:
     config["ai_history_remote_enabled"] = config.get("ai_history_remote_enabled", True) is not False
     config.pop("ai_context_selection_mode", None)
     config.pop("continue_target_chars", None)
+    config.pop("expand_target_chars", None)
     config["auto_save"] = bool(config.get("auto_save", True))
     config["ai_notice_acknowledged"] = bool(config.get("ai_notice_acknowledged", False))
     update_channel = str(config.get("update_channel") or "beta").strip().lower()
@@ -322,6 +348,18 @@ def _migrate_config_schema(config: dict[str, Any], schema: int) -> int:
         if schema == 4:
             config.setdefault("ai_history_remote_enabled", True)
             schema = 5
+            continue
+        if schema == 5:
+            config.setdefault(
+                "chapter_target_chars",
+                config.get(
+                    "expand_target_chars",
+                    config.get("continue_target_chars", CHAPTER_TARGET_CHARS_DEFAULT),
+                ),
+            )
+            config.pop("expand_target_chars", None)
+            config.pop("continue_target_chars", None)
+            schema = 6
             continue
         raise ValueError(
             f"缺少从配置格式 {schema} 到 {schema + 1} 的迁移步骤。"

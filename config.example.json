@@ -1,5 +1,5 @@
 {
-  "config_schema_version": 5,
+  "config_schema_version": 6,
   "dsh_command": "dsh",
   "dsh_launcher_args": [],
   "dsh_profile": "headless",
@@ -13,7 +13,7 @@
   "ai_runtime_reserve_tokens": 64000,
   "ai_chunk_token_budget": 5000,
   "ai_chunk_overlap_tokens": 300,
-  "expand_target_chars": 2000,
+  "chapter_target_chars": 3000,
   "ai_context_history_chapters": 5,
   "ai_history_mode": "auto",
   "ai_history_remote_enabled": true,

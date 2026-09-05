@@ -53,6 +53,18 @@ class AIResultService:
         )
 
     @staticmethod
+    def parse_continuation(
+        raw: str,
+        requested_chars: int,
+    ) -> ai_protocol.ContinuationResult:
+        requested_chars = max(300, int(requested_chars))
+        return ai_protocol.parse_continuation(
+            raw,
+            min_chars=round(requested_chars * 0.85),
+            max_chars=round(requested_chars * 1.15),
+        )
+
+    @staticmethod
     def parse_consistency(
         raw: str,
         *,
