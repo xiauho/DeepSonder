@@ -10,8 +10,10 @@ from core.chapter_facts import ChapterFactLedger, ChunkFacts, FactRecord
 from core.chapter_memory import (
     ChapterMemoryCache,
     MemoryProposalError,
+    build_memory_proposal_prompt,
     canonical_hash,
     generate_chapter_memory_proposal,
+    memory_request_id,
     parse_memory_proposal,
 )
 from core.project import NovelProject
@@ -65,13 +67,14 @@ def base_state():
 
 def valid_proposal(ledger, state, context_hash="context-hash"):
     return {
-        "type": "chapter_memory_proposal",
-        "schema_version": 1,
-        "chapter_id": ledger.chapter_id,
-        "chapter_hash": ledger.chapter_hash,
-        "base_state_hash": canonical_hash(state),
-        "context_hash": context_hash,
-        "summary": "林舟离开旧站并抵达北港。",
+        "type": "chapter_memory_suggestion",
+        "schema_version": 2,
+        "request_id": memory_request_id(
+            ledger.chapter_id,
+            ledger.chapter_hash,
+            canonical_hash(state),
+            context_hash,
+        ),
         "digest": {
             "summary": "林舟离开旧站并抵达北港。",
             "key_events": [
@@ -85,23 +88,123 @@ def valid_proposal(ledger, state, context_hash="context-hash"):
             "relationship_changes": [],
             "timeline_changes": [],
         },
-        "patches": [
+        "changes": [
             {
                 "kind": "set_character_field",
                 "subject": "林舟",
                 "field": "location",
-                "expected_before": "旧站",
                 "value": "北港",
                 "evidence_fact_ids": ["fact_location"],
                 "certainty": "explicit",
             }
         ],
         "conflicts": [],
-        "completion_message": "章节记忆提案已生成",
     }
 
 
 class ChapterMemoryProtocolTests(TestCase):
+    def test_memory_prompt_requests_only_one_authoritative_summary(self):
+        ledger = make_ledger()
+        state = base_state()
+        prompt = build_memory_proposal_prompt(
+            ledger,
+            {
+                "mode": "fact_ledger",
+                "base_state_hash": canonical_hash(state),
+            },
+            state,
+            "",
+            context_hash="context-hash",
+        )
+
+        response_contract = prompt.user_prompt.split("返回格式：", 1)[1]
+        self.assertIn("唯一权威字段是 digest.summary", prompt.user_prompt)
+        self.assertEqual(response_contract.count('"summary": "章节摘要"'), 1)
+        self.assertIn('"type": "chapter_memory_suggestion"', response_contract)
+        self.assertNotIn('"chapter_hash"', response_contract)
+        self.assertNotIn('"base_state_hash"', response_contract)
+        self.assertNotIn('"context_hash"', response_contract)
+        self.assertNotIn('"expected_before"', response_contract)
+        self.assertNotIn('"completion_message"', response_contract)
+        self.assertNotIn(ledger.chapter_hash, prompt.user_prompt)
+        self.assertNotIn(canonical_hash(state), prompt.user_prompt)
+
+    def test_v2_response_must_match_compact_request_id(self):
+        ledger = make_ledger()
+        state = base_state()
+        value = valid_proposal(ledger, state)
+        value["request_id"] = "memory_wrong"
+
+        with self.assertRaisesRegex(MemoryProposalError, "request_id"):
+            parse_memory_proposal(
+                value,
+                ledger,
+                state,
+                expected_context_hash="context-hash",
+            )
+
+    def test_v2_ignores_duplicate_summary_and_completion_extras(self):
+        ledger = make_ledger()
+        state = base_state()
+        value = valid_proposal(ledger, state)
+        value["summary"] = "模型额外返回的另一种摘要措辞。"
+        value["completion_message"] = "模型自定义完成文案"
+
+        proposal = parse_memory_proposal(
+            value,
+            ledger,
+            state,
+            expected_context_hash="context-hash",
+        )
+
+        self.assertEqual(proposal.summary, "林舟离开旧站并抵达北港。")
+        self.assertEqual(proposal.completion_message, "章节记忆提案已生成")
+        self.assertNotIn("summary", proposal.to_cache_dict())
+
+    def test_v1_model_response_is_rejected(self):
+        ledger = make_ledger()
+        state = base_state()
+        value = {
+            "type": "chapter_memory_proposal",
+            "schema_version": 1,
+        }
+
+        with self.assertRaisesRegex(MemoryProposalError, "已停用"):
+            parse_memory_proposal(
+                value,
+                ledger,
+                state,
+                expected_context_hash="context-hash",
+            )
+
+    def test_old_response_type_is_rejected_even_with_v2_version(self):
+        ledger = make_ledger()
+        state = base_state()
+        value = valid_proposal(ledger, state)
+        value["type"] = "chapter_memory_proposal"
+
+        with self.assertRaisesRegex(MemoryProposalError, "不是章节记忆建议"):
+            parse_memory_proposal(
+                value,
+                ledger,
+                state,
+                expected_context_hash="context-hash",
+            )
+
+    def test_memory_proposal_still_requires_one_summary(self):
+        ledger = make_ledger()
+        state = base_state()
+        value = valid_proposal(ledger, state)
+        del value["digest"]["summary"]
+
+        with self.assertRaisesRegex(MemoryProposalError, "digest.summary"):
+            parse_memory_proposal(
+                value,
+                ledger,
+                state,
+                expected_context_hash="context-hash",
+            )
+
     def test_valid_patch_is_applied_locally_and_protected_fields_survive(self):
         ledger = make_ledger()
         state = base_state()
@@ -127,7 +230,7 @@ class ChapterMemoryProtocolTests(TestCase):
         ledger = make_ledger()
         state = base_state()
         value = valid_proposal(ledger, state)
-        value["patches"][0]["evidence_fact_ids"] = ["fact_missing"]
+        value["changes"][0]["evidence_fact_ids"] = ["fact_missing"]
 
         with self.assertRaisesRegex(MemoryProposalError, "不存在"):
             parse_memory_proposal(
@@ -141,10 +244,9 @@ class ChapterMemoryProtocolTests(TestCase):
         ledger = make_ledger()
         state = base_state()
         value = valid_proposal(ledger, state)
-        value["patches"][0]["kind"] = "set_character_relation"
-        value["patches"][0]["field"] = "顾青"
-        value["patches"][0]["expected_before"] = None
-        value["patches"][0]["value"] = "盟友"
+        value["changes"][0]["kind"] = "set_character_relation"
+        value["changes"][0]["field"] = "顾青"
+        value["changes"][0]["value"] = "盟友"
 
         proposal = parse_memory_proposal(
             value,
@@ -156,11 +258,11 @@ class ChapterMemoryProtocolTests(TestCase):
         self.assertTrue(proposal.has_blockers)
         self.assertIn("unsupported_patch", {item.kind for item in proposal.conflicts})
 
-    def test_wrong_precondition_creates_blocker_and_does_not_apply_patch(self):
+    def test_model_precondition_is_ignored_and_local_value_is_authoritative(self):
         ledger = make_ledger()
         state = base_state()
         value = valid_proposal(ledger, state)
-        value["patches"][0]["expected_before"] = "错误地点"
+        value["changes"][0]["expected_before"] = "错误地点"
 
         proposal = parse_memory_proposal(
             value,
@@ -169,20 +271,20 @@ class ChapterMemoryProtocolTests(TestCase):
             expected_context_hash="context-hash",
         )
 
-        self.assertTrue(proposal.has_blockers)
+        self.assertFalse(proposal.has_blockers)
+        self.assertEqual(proposal.patches[0].expected_before, "旧站")
         self.assertEqual(
             proposal.resulting_state["characters"]["林舟"]["location"],
-            "旧站",
+            "北港",
         )
-        self.assertIn("state_precondition", {item.kind for item in proposal.conflicts})
 
     def test_colliding_patch_targets_create_blocker(self):
         ledger = make_ledger()
         state = base_state()
         value = valid_proposal(ledger, state)
-        second = dict(value["patches"][0])
+        second = dict(value["changes"][0])
         second["value"] = "南城"
-        value["patches"].append(second)
+        value["changes"].append(second)
 
         proposal = parse_memory_proposal(
             value,
@@ -198,7 +300,7 @@ class ChapterMemoryProtocolTests(TestCase):
         ledger = make_ledger()
         state = base_state()
         value = valid_proposal(ledger, state)
-        value["patches"][0]["certainty"] = "inferred"
+        value["changes"][0]["certainty"] = "inferred"
 
         proposal = parse_memory_proposal(
             value,
@@ -295,7 +397,9 @@ class ChapterMemoryCommitTests(TestCase):
             project.save_story_state(state)
             ledger = make_ledger(chapter_content_hash(content))
             value = valid_proposal(ledger, state)
-            value["patches"][0]["expected_before"] = "错误地点"
+            second = dict(value["changes"][0])
+            second["value"] = "南城"
+            value["changes"].append(second)
             proposal = parse_memory_proposal(
                 value,
                 ledger,
@@ -343,27 +447,13 @@ class _MemoryV2DSH:
                 ],
                 "unknowns": [],
             }
-        if "任务类型：chapter_memory_proposal" in user_prompt:
+        if "任务类型：chapter_memory_suggestion" in user_prompt:
             fact_id = re.search(r'"fact_id":"(fact_[a-f0-9]+)"', user_prompt).group(1)
-            chapter_id = re.search(r"^章节 ID：(.*)$", user_prompt, re.MULTILINE).group(1)
-            chapter_hash = re.search(r"^章节正文哈希：(.*)$", user_prompt, re.MULTILINE).group(1)
-            state_hash = re.search(r"^旧状态哈希：(.*)$", user_prompt, re.MULTILINE).group(1)
-            context_hash = re.search(r"^相关设定哈希：(.*)$", user_prompt, re.MULTILINE).group(1)
-            state_json = re.search(
-                r"【相关旧故事状态】\n(.*?)\n\n【相关角色卡",
-                user_prompt,
-                re.DOTALL,
-            ).group(1)
-            old_state = json.loads(state_json)
-            old_location = old_state.get("characters", {}).get("林舟", {}).get("location")
+            request_id = re.search(r"^请求 ID：(.*)$", user_prompt, re.MULTILINE).group(1)
             return {
-                "type": "chapter_memory_proposal",
-                "schema_version": 1,
-                "chapter_id": chapter_id,
-                "chapter_hash": chapter_hash,
-                "base_state_hash": state_hash,
-                "context_hash": context_hash,
-                "summary": "林舟抵达北港。",
+                "type": "chapter_memory_suggestion",
+                "schema_version": 2,
+                "request_id": request_id,
                 "digest": {
                     "summary": "林舟抵达北港。",
                     "key_events": [{"text": "抵达北港", "fact_ids": [fact_id]}],
@@ -373,12 +463,11 @@ class _MemoryV2DSH:
                     "relationship_changes": [],
                     "timeline_changes": [],
                 },
-                "patches": [
+                "changes": [
                     {
                         "kind": "set_character_field",
                         "subject": "林舟",
                         "field": "location",
-                        "expected_before": old_location,
                         "value": "北港",
                         "evidence_fact_ids": [fact_id],
                         "certainty": "explicit",
@@ -418,6 +507,17 @@ class ChapterMemoryWorkflowTests(TestCase):
                 for path in (root / "memory").rglob("*.json")
             )
             self.assertNotIn("林舟抵达北港。林舟抵达北港。", cache_text)
+            cache_values = [
+                json.loads(path.read_text(encoding="utf-8"))
+                for path in (root / "memory").rglob("*.json")
+            ]
+            proposal_cache = next(
+                item
+                for item in cache_values
+                if item.get("type") == "chapter_memory_proposal_cache"
+            )
+            self.assertNotIn("summary", proposal_cache)
+            self.assertNotIn("expected_before", proposal_cache["changes"][0])
 
     def test_oversized_ledger_uses_hierarchical_reduction(self):
         facts = tuple(
@@ -460,18 +560,11 @@ class ChapterMemoryWorkflowTests(TestCase):
                             else []
                         ),
                     }
-                chapter_id = re.search(r"^章节 ID：(.*)$", user, re.MULTILINE).group(1)
-                chapter_hash = re.search(r"^章节正文哈希：(.*)$", user, re.MULTILINE).group(1)
-                state_hash = re.search(r"^旧状态哈希：(.*)$", user, re.MULTILINE).group(1)
-                context_hash = re.search(r"^相关设定哈希：(.*)$", user, re.MULTILINE).group(1)
+                request_id = re.search(r"^请求 ID：(.*)$", user, re.MULTILINE).group(1)
                 return {
-                    "type": "chapter_memory_proposal",
-                    "schema_version": 1,
-                    "chapter_id": chapter_id,
-                    "chapter_hash": chapter_hash,
-                    "base_state_hash": state_hash,
-                    "context_hash": context_hash,
-                    "summary": "多名角色状态发生变化。",
+                    "type": "chapter_memory_suggestion",
+                    "schema_version": 2,
+                    "request_id": request_id,
                     "digest": {
                         "summary": "多名角色状态发生变化。",
                         "key_events": (
@@ -485,7 +578,7 @@ class ChapterMemoryWorkflowTests(TestCase):
                         "relationship_changes": [],
                         "timeline_changes": [],
                     },
-                    "patches": [],
+                    "changes": [],
                     "conflicts": [],
                 }
 

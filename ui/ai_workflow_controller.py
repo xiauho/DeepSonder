@@ -878,6 +878,8 @@ class AIWorkflowController(QObject):
         outcome = self.ai_result_coordinator.confirm_memory(
             summary=proposal.summary,
             details=proposal.preview_text(),
+            patch_count=len(proposal.patches),
+            conflict_count=len(proposal.conflicts),
             context_matches=lambda: self._task_context_matches(token),
             commit=lambda: self.ai_result_service.commit_memory_proposal(
                 project,

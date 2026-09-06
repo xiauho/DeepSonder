@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -326,6 +327,91 @@ class RepairPreviewDialog(QDialog):
         self.accept()
 
 
+class MemoryPreviewDialog(QDialog):
+    """Keep long memory proposals reviewable without growing off screen."""
+
+    def __init__(
+        self,
+        summary: str,
+        details: str = "",
+        patch_count: int = 0,
+        conflict_count: int = 0,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.confirmed = False
+        self.setObjectName("memoryPreviewDialog")
+        self.setWindowTitle("确认更新长期记忆")
+        self.setSizeGripEnabled(True)
+
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            width, height = 780, 650
+        else:
+            available = screen.availableGeometry()
+            width = min(780, max(520, int(available.width() * 0.75)))
+            height = min(650, max(420, int(available.height() * 0.75)))
+        self.setMinimumSize(min(620, width), min(480, height))
+        self.resize(width, height)
+
+        layout = QVBoxLayout(self)
+        heading = QLabel("请审阅本次记忆更新，确认前不会修改项目数据。")
+        heading.setWordWrap(True)
+        layout.addWidget(heading)
+
+        counts = QLabel(
+            f"{max(0, patch_count)} 条状态变更 · "
+            f"{max(0, conflict_count)} 条冲突或警告"
+        )
+        counts.setObjectName("mutedLabel")
+        layout.addWidget(counts)
+
+        self.preview = QPlainTextEdit()
+        self.preview.setObjectName("memoryPreviewText")
+        self.preview.setReadOnly(True)
+        self.preview.setTabChangesFocus(True)
+        self.preview.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
+        self.preview.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.preview.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        summary_text = str(summary or "").strip() or "（无）"
+        details_text = str(details or "").strip()
+        content = f"章节摘要：\n{summary_text}"
+        if details_text:
+            content += f"\n\n{details_text}"
+        else:
+            content += "\n\n状态变更：\n- 无"
+        self.preview.setPlainText(content)
+        layout.addWidget(self.preview, 1)
+
+        hint = QLabel("确认后将写入章节摘要和故事状态。")
+        hint.setObjectName("mutedLabel")
+        layout.addWidget(hint)
+
+        buttons = QHBoxLayout()
+        copy = QPushButton("复制全部")
+        cancel = QPushButton("取消")
+        confirm = QPushButton("确认写入")
+        confirm.setObjectName("accentButton")
+        confirm.setAutoDefault(False)
+        cancel.setAutoDefault(False)
+        copy.clicked.connect(
+            lambda: QApplication.clipboard().setText(self.preview.toPlainText())
+        )
+        cancel.clicked.connect(self.reject)
+        confirm.clicked.connect(self._confirm)
+        buttons.addWidget(copy)
+        buttons.addStretch(1)
+        buttons.addWidget(cancel)
+        buttons.addWidget(confirm)
+        layout.addLayout(buttons)
+
+    def _confirm(self) -> None:
+        self.confirmed = True
+        self.accept()
+
+
 @dataclass(frozen=True)
 class CommitOutcome:
     status: str
@@ -439,18 +525,20 @@ class AIResultCoordinator:
         *,
         summary: str,
         details: str = "",
+        patch_count: int = 0,
+        conflict_count: int = 0,
         context_matches: Callable[[], bool],
         commit: Callable[[], object],
     ) -> CommitOutcome:
-        detail_block = f"\n\n{details}" if str(details or "").strip() else ""
-        answer = QMessageBox.question(
+        dialog = MemoryPreviewDialog(
+            summary,
+            details,
+            patch_count,
+            conflict_count,
             self.parent,
-            "确认更新长期记忆",
-            f"章节摘要：\n{summary}{detail_block}\n\n确认写入章节摘要和故事状态吗？",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes,
         )
-        if answer != QMessageBox.StandardButton.Yes:
+        dialog.exec()
+        if not dialog.confirmed:
             return CommitOutcome(status="cancelled")
         if not context_matches():
             QMessageBox.warning(

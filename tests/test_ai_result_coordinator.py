@@ -2,8 +2,6 @@ from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
-from PySide6.QtWidgets import QMessageBox
-
 from core.ai_protocol import ForeshadowingSuggestion
 from ui.ai_result_coordinator import (
     AIResultCoordinator,
@@ -132,9 +130,10 @@ class AIResultCoordinatorTests(TestCase):
     def test_memory_cancel_and_stale_context_do_not_commit(self) -> None:
         commit = Mock()
         coordinator = AIResultCoordinator()
+        cancelled_dialog = SimpleNamespace(confirmed=False, exec=Mock())
         with patch(
-            "ui.ai_result_coordinator.QMessageBox.question",
-            return_value=QMessageBox.StandardButton.No,
+            "ui.ai_result_coordinator.MemoryPreviewDialog",
+            return_value=cancelled_dialog,
         ):
             cancelled = coordinator.confirm_memory(
                 summary="摘要",
@@ -143,9 +142,10 @@ class AIResultCoordinatorTests(TestCase):
             )
         self.assertEqual(cancelled.status, "cancelled")
 
+        stale_dialog = SimpleNamespace(confirmed=True, exec=Mock())
         with patch(
-            "ui.ai_result_coordinator.QMessageBox.question",
-            return_value=QMessageBox.StandardButton.Yes,
+            "ui.ai_result_coordinator.MemoryPreviewDialog",
+            return_value=stale_dialog,
         ):
             with patch("ui.ai_result_coordinator.QMessageBox.warning"):
                 stale = coordinator.confirm_memory(
@@ -155,6 +155,34 @@ class AIResultCoordinatorTests(TestCase):
                 )
         self.assertEqual(stale.status, "stale")
         commit.assert_not_called()
+
+    def test_memory_confirmation_passes_counts_and_commits(self) -> None:
+        commit = Mock(return_value="已写入")
+        dialog = SimpleNamespace(confirmed=True, exec=Mock())
+        with patch(
+            "ui.ai_result_coordinator.MemoryPreviewDialog",
+            return_value=dialog,
+        ) as dialog_class:
+            outcome = AIResultCoordinator().confirm_memory(
+                summary="章节摘要",
+                details="状态变更：\n- current.location: 山门 → 密林",
+                patch_count=5,
+                conflict_count=2,
+                context_matches=lambda: True,
+                commit=commit,
+            )
+
+        self.assertEqual(outcome.status, "committed")
+        self.assertEqual(outcome.value, "已写入")
+        commit.assert_called_once_with()
+        dialog.exec.assert_called_once_with()
+        dialog_class.assert_called_once_with(
+            "章节摘要",
+            "状态变更：\n- current.location: 山门 → 密林",
+            5,
+            2,
+            None,
+        )
 
     def test_repair_cancel_and_stale_context_do_not_apply(self) -> None:
         apply_replacement = Mock()

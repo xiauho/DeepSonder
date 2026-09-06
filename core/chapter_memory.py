@@ -25,8 +25,10 @@ from .token_budget import (
 )
 
 
-MEMORY_PROPOSAL_SCHEMA_VERSION = 1
-MEMORY_PROPOSAL_PROMPT_VERSION = 1
+MEMORY_SUGGESTION_SCHEMA_VERSION = 2
+MEMORY_PROPOSAL_PROMPT_VERSION = 3
+MEMORY_CACHE_SCHEMA_VERSION = 1
+DIGEST_SHARD_SCHEMA_VERSION = 1
 DEFAULT_REDUCE_BATCH_TOKENS = 8_000
 MAX_REDUCE_ROUNDS = 10
 
@@ -144,6 +146,38 @@ class MemoryConflict:
 
 
 @dataclass(frozen=True)
+class MemoryPatchSuggestion:
+    """Untrusted model suggestion before local preconditions are attached."""
+
+    kind: str
+    subject: str
+    field: str
+    value: Any
+    evidence_fact_ids: tuple[str, ...]
+    certainty: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "subject": self.subject,
+            "field": self.field,
+            "value": self.value,
+            "evidence_fact_ids": list(self.evidence_fact_ids),
+            "certainty": self.certainty,
+        }
+
+
+@dataclass(frozen=True)
+class ChapterMemorySuggestion:
+    """Minimal V2 model payload before local trust boundaries are applied."""
+
+    request_id: str
+    digest: ChapterDigest
+    changes: tuple[MemoryPatchSuggestion, ...]
+    conflicts: tuple[MemoryConflict, ...]
+
+
+@dataclass(frozen=True)
 class ChapterMemoryProposal:
     chapter_id: str
     chapter_hash: str
@@ -166,17 +200,28 @@ class ChapterMemoryProposal:
     def has_blockers(self) -> bool:
         return any(item.severity == "blocker" for item in self.conflicts)
 
-    def to_protocol_dict(self) -> dict[str, Any]:
+    def to_cache_dict(self) -> dict[str, Any]:
+        """Serialize a trusted proposal independently from the model protocol."""
         return {
-            "type": "chapter_memory_proposal",
-            "schema_version": MEMORY_PROPOSAL_SCHEMA_VERSION,
+            "type": "chapter_memory_proposal_cache",
+            "cache_schema_version": MEMORY_CACHE_SCHEMA_VERSION,
+            "source_protocol_version": MEMORY_SUGGESTION_SCHEMA_VERSION,
             "chapter_id": self.chapter_id,
             "chapter_hash": self.chapter_hash,
             "base_state_hash": self.base_state_hash,
             "context_hash": self.context_hash,
-            "summary": self.digest.summary,
             "digest": self.digest.to_dict(),
-            "patches": [item.to_dict() for item in self.patches],
+            "changes": [
+                MemoryPatchSuggestion(
+                    item.kind,
+                    item.subject,
+                    item.field,
+                    item.value,
+                    item.evidence_fact_ids,
+                    item.certainty,
+                ).to_dict()
+                for item in self.patches
+            ],
             "conflicts": [
                 {
                     "kind": item.kind,
@@ -188,7 +233,6 @@ class ChapterMemoryProposal:
                 for item in self.conflicts
                 if item.kind in MODEL_CONFLICT_KINDS
             ],
-            "completion_message": self.completion_message,
         }
 
     def preview_text(self) -> str:
@@ -219,7 +263,7 @@ class DigestShard:
     def to_dict(self) -> dict[str, Any]:
         return {
             "type": "chapter_digest_shard",
-            "schema_version": MEMORY_PROPOSAL_SCHEMA_VERSION,
+            "schema_version": DIGEST_SHARD_SCHEMA_VERSION,
             "summary": self.summary,
             "claims": [item.to_dict() for item in self.claims],
         }
@@ -244,7 +288,7 @@ class ChapterMemoryCache:
         path = self._path(ledger, canonical_hash(base_state), context_hash)
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
-            proposal = parse_memory_proposal(
+            proposal = parse_cached_memory_proposal(
                 value,
                 ledger,
                 base_state,
@@ -263,7 +307,7 @@ class ChapterMemoryCache:
         )
         atomic_write_text(
             path,
-            json.dumps(proposal.to_protocol_dict(), ensure_ascii=False, indent=2) + "\n",
+            json.dumps(proposal.to_cache_dict(), ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
 
@@ -361,6 +405,24 @@ def canonical_hash(value: object) -> str:
         default=str,
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def memory_request_id(
+    chapter_id: str,
+    chapter_hash: str,
+    base_state_hash: str,
+    context_hash: str,
+) -> str:
+    """Bind one compact model response to the complete local source snapshot."""
+    return "memory_" + canonical_hash(
+        {
+            "protocol_version": MEMORY_SUGGESTION_SCHEMA_VERSION,
+            "chapter_id": chapter_id,
+            "chapter_hash": chapter_hash,
+            "base_state_hash": base_state_hash,
+            "context_hash": context_hash,
+        }
+    )[:24]
 
 
 def generate_chapter_memory_proposal(
@@ -506,38 +568,48 @@ def build_memory_proposal_prompt(
     input_token_budget: int = DEFAULT_INPUT_TOKEN_BUDGET,
     estimator: ConservativeTokenEstimator = DEFAULT_TOKEN_ESTIMATOR,
 ) -> PromptBundle:
-    # The protocol carries the full-state hash supplied by the caller in source
-    # metadata, while only a compact relevant projection is sent to the model.
+    # Full source hashes remain local. The model only echoes one compact request
+    # id, which binds its response to the complete local snapshot.
     base_state_hash = str(source.get("base_state_hash") or "")
     if not base_state_hash:
         raise MemoryProposalError("记忆提案缺少完整旧状态哈希。")
+    request_id = memory_request_id(
+        ledger.chapter_id,
+        ledger.chapter_hash,
+        base_state_hash,
+        context_hash,
+    )
     system_prompt = (
         "你是 Novalist 的章节记忆归并器。只能依据给定事实生成摘要、状态 Patch 和冲突候选。"
         "不得补写剧情，不得返回完整故事状态。只输出合法 JSON。"
     )
-    source_json = json.dumps(source, ensure_ascii=False, separators=(",", ":"))
+    model_source = {
+        key: value
+        for key, value in source.items()
+        if key not in {"base_state_hash", "chapter_hash", "chapter_id"}
+    }
+    source_json = json.dumps(model_source, ensure_ascii=False, separators=(",", ":"))
     state_json = json.dumps(relevant_state, ensure_ascii=False, separators=(",", ":"))
     canon_text = canon_context or "（无相关设定）"
     user_prompt = f"""
-任务类型：chapter_memory_proposal
-协议版本：{MEMORY_PROPOSAL_SCHEMA_VERSION}
-章节 ID：{ledger.chapter_id}
-章节正文哈希：{ledger.chapter_hash}
-旧状态哈希：{base_state_hash}
-相关设定哈希：{context_hash}
+任务类型：chapter_memory_suggestion
+协议版本：{MEMORY_SUGGESTION_SCHEMA_VERSION}
+请求 ID：{request_id}
 
-摘要只能概括事实来源，不超过 300 个中文字符。digest 中的每项都必须引用 fact_ids。
-Patch 只能使用以下 kind：{", ".join(sorted(PATCH_KINDS))}。
+只生成一份章节摘要，唯一权威字段是 digest.summary，不超过 300 个中文字符。
+不要在顶层重复输出 summary。digest 中除 summary 外的每项都必须引用 fact_ids。
+changes 只能使用以下 kind：{", ".join(sorted(PATCH_KINDS))}。
 set_character_field 的 field 只能是：{", ".join(sorted(CHARACTER_FIELDS))}。
 不得修改 current_chapter、foreshadowing，不得删除角色，不得创建任意字段。
-每条 Patch 必须带 expected_before、value、evidence_fact_ids 和 certainty；
-certainty 只能是 explicit 或 inferred。缺少依据时不要生成 Patch，应生成冲突候选。
-Patch 参数约束：
-- set_current_location：subject 和 field 为空，expected_before 为旧地点或 null。
-- set_character_field：subject 为角色名，expected_before 为旧字段值或 null。
-- add_character_item：field 为空，expected_before 必须为 false，value 为物品名。
-- remove_character_item：field 为空，expected_before 必须为 true，value 为物品名。
-- set_character_relation：subject 为角色名，field 为对方角色名，expected_before 为旧关系或 null。
+每条 change 只描述目标和新值；旧值及写入前置条件由本地程序从旧状态计算。
+每条 change 必须带 value、evidence_fact_ids 和 certainty；
+certainty 只能是 explicit 或 inferred。缺少依据时不要生成 change，应生成冲突候选。
+change 参数约束：
+- set_current_location：subject 和 field 为空，value 为新地点。
+- set_character_field：subject 为角色名，value 为新字段值。
+- add_character_item：field 为空，value 为新增物品名。
+- remove_character_item：field 为空，value 为移除物品名。
+- set_character_relation：subject 为角色名，field 为对方角色名，value 为新关系。
 旧状态中以“…”结尾的值是截断展示，不要据此生成覆盖 Patch。
 
 【章节事实或归并片段】
@@ -551,13 +623,9 @@ Patch 参数约束：
 
 返回格式：
 {{
-  "type": "chapter_memory_proposal",
-  "schema_version": {MEMORY_PROPOSAL_SCHEMA_VERSION},
-  "chapter_id": "{ledger.chapter_id}",
-  "chapter_hash": "{ledger.chapter_hash}",
-  "base_state_hash": "{base_state_hash}",
-  "context_hash": "{context_hash}",
-  "summary": "章节摘要",
+  "type": "chapter_memory_suggestion",
+  "schema_version": {MEMORY_SUGGESTION_SCHEMA_VERSION},
+  "request_id": "{request_id}",
   "digest": {{
     "summary": "章节摘要",
     "key_events": [{{"text": "事件", "fact_ids": ["fact_xxx"]}}],
@@ -567,11 +635,10 @@ Patch 参数约束：
     "relationship_changes": [],
     "timeline_changes": []
   }},
-  "patches": [{{
+  "changes": [{{
     "kind": "set_character_field",
     "subject": "角色名",
     "field": "location",
-    "expected_before": null,
     "value": "新地点",
     "evidence_fact_ids": ["fact_xxx"],
     "certainty": "explicit"
@@ -582,8 +649,7 @@ Patch 参数约束：
     "target": "characters.角色名.location",
     "description": "冲突说明",
     "evidence_fact_ids": ["fact_xxx"]
-  }}],
-  "completion_message": "章节记忆提案已生成"
+  }}]
 }}
 """.strip()
     estimated = estimator.estimate_pair(system_prompt, user_prompt)
@@ -649,7 +715,7 @@ fact_ids；优先保留人物状态、地点、物品、关系、时间线和世
 返回格式：
 {{
   "type": "chapter_digest_shard",
-  "schema_version": {MEMORY_PROPOSAL_SCHEMA_VERSION},
+  "schema_version": {DIGEST_SHARD_SCHEMA_VERSION},
   "summary": "批次摘要",
   "claims": [{{"text": "关键事实", "fact_ids": ["fact_xxx"]}}]
 }}
@@ -680,7 +746,7 @@ def parse_digest_shard(raw: str | dict[str, Any], allowed_ids: Iterable[str]) ->
     value = _as_object(raw, "章节事实归并")
     if value.get("type") != "chapter_digest_shard":
         raise MemoryProposalError("返回内容不是章节事实归并片段。")
-    if value.get("schema_version") != MEMORY_PROPOSAL_SCHEMA_VERSION:
+    if value.get("schema_version") != DIGEST_SHARD_SCHEMA_VERSION:
         raise MemoryProposalError("章节事实归并协议版本不匹配。")
     allowed = frozenset(str(item) for item in allowed_ids)
     summary = _bounded_text(value.get("summary"), "summary", 2_000)
@@ -699,33 +765,67 @@ def parse_memory_proposal(
     expected_context_hash: str,
 ) -> ChapterMemoryProposal:
     value = _as_object(raw, "章节记忆提案")
-    if value.get("type") != "chapter_memory_proposal":
-        raise MemoryProposalError("返回内容不是章节记忆提案。")
-    if value.get("schema_version") != MEMORY_PROPOSAL_SCHEMA_VERSION:
-        raise MemoryProposalError("章节记忆提案协议版本不匹配。")
-    expected = {
-        "chapter_id": ledger.chapter_id,
-        "chapter_hash": ledger.chapter_hash,
-        "base_state_hash": canonical_hash(base_state),
-        "context_hash": expected_context_hash,
-    }
-    for key, expected_value in expected.items():
-        if str(value.get(key) or "") != expected_value:
-            raise MemoryProposalError(f"章节记忆提案的 {key} 与当前任务不一致。")
-
+    if value.get("schema_version") != MEMORY_SUGGESTION_SCHEMA_VERSION:
+        raise MemoryProposalError(
+            "记忆任务返回了已停用或不受支持的协议版本，请重新运行“更新记忆”。"
+        )
+    base_state_hash = canonical_hash(base_state)
+    request_id = memory_request_id(
+        ledger.chapter_id,
+        ledger.chapter_hash,
+        base_state_hash,
+        expected_context_hash,
+    )
     fact_map = {item.fact_id: item for item in ledger.facts}
     allowed_ids = frozenset(fact_map)
-    summary = _bounded_text(value.get("summary"), "summary", 500)
+    suggestion = parse_memory_suggestion(
+        value,
+        allowed_ids=allowed_ids,
+        expected_request_id=request_id,
+    )
+    patches = _materialize_patches(suggestion.changes, base_state)
+    resulting_state, local_conflicts = apply_memory_patches(
+        base_state,
+        patches,
+        fact_map,
+        ledger.chapter_id,
+    )
+    fact_conflicts = _detect_fact_conflicts(ledger.facts)
+    conflicts = _dedupe_conflicts(
+        [*suggestion.conflicts, *fact_conflicts, *local_conflicts]
+    )
+    return ChapterMemoryProposal(
+        chapter_id=ledger.chapter_id,
+        chapter_hash=ledger.chapter_hash,
+        base_state_hash=base_state_hash,
+        context_hash=expected_context_hash,
+        digest=suggestion.digest,
+        patches=patches,
+        conflicts=conflicts,
+        resulting_state=resulting_state,
+        evidence_facts=ledger.facts,
+    )
+
+
+def parse_memory_suggestion(
+    raw: str | dict[str, Any],
+    *,
+    allowed_ids: frozenset[str],
+    expected_request_id: str,
+) -> ChapterMemorySuggestion:
+    """Parse only the minimal untrusted V2 model response."""
+    value = _as_object(raw, "章节记忆建议")
+    if value.get("type") != "chapter_memory_suggestion":
+        raise MemoryProposalError("返回内容不是章节记忆建议。")
+    if value.get("schema_version") != MEMORY_SUGGESTION_SCHEMA_VERSION:
+        raise MemoryProposalError("章节记忆建议协议版本不匹配。")
+    if str(value.get("request_id") or "") != expected_request_id:
+        raise MemoryProposalError("章节记忆建议的 request_id 与当前任务不一致。")
+
     digest_value = value.get("digest")
     if not isinstance(digest_value, dict):
-        raise MemoryProposalError("章节记忆提案缺少 digest 对象。")
-    digest_summary = _bounded_text(
-        digest_value.get("summary") or summary,
-        "digest.summary",
-        500,
-    )
-    if digest_summary != summary:
-        raise MemoryProposalError("summary 与 digest.summary 不一致。")
+        raise MemoryProposalError("章节记忆建议缺少 digest 对象。")
+    digest_summary = _bounded_text(digest_value.get("summary"), "digest.summary", 500)
     digest_fields = {
         field: _parse_digest_entries(
             digest_value.get(field, []),
@@ -737,41 +837,66 @@ def parse_memory_proposal(
     }
     digest = ChapterDigest(summary=digest_summary, **digest_fields)
 
-    raw_patches = value.get("patches")
-    if not isinstance(raw_patches, list) or len(raw_patches) > 100:
-        raise MemoryProposalError("章节记忆提案的 patches 无效或过多。")
-    patches = _parse_patches(raw_patches, allowed_ids)
+    raw_changes = value.get("changes")
+    if not isinstance(raw_changes, list) or len(raw_changes) > 100:
+        raise MemoryProposalError("章节记忆建议的 changes 无效或过多。")
+    changes = _parse_patch_suggestions(raw_changes, allowed_ids)
 
     raw_conflicts = value.get("conflicts")
     if not isinstance(raw_conflicts, list) or len(raw_conflicts) > 100:
-        raise MemoryProposalError("章节记忆提案的 conflicts 无效或过多。")
+        raise MemoryProposalError("章节记忆建议的 conflicts 无效或过多。")
     model_conflicts = _parse_model_conflicts(raw_conflicts, allowed_ids)
-    resulting_state, local_conflicts = apply_memory_patches(
-        base_state,
-        patches,
-        fact_map,
-        ledger.chapter_id,
-    )
-    fact_conflicts = _detect_fact_conflicts(ledger.facts)
-    conflicts = _dedupe_conflicts(
-        [*model_conflicts, *fact_conflicts, *local_conflicts]
-    )
-    completion = _bounded_text(
-        value.get("completion_message") or "章节记忆提案已生成",
-        "completion_message",
-        500,
-    )
-    return ChapterMemoryProposal(
-        chapter_id=ledger.chapter_id,
-        chapter_hash=ledger.chapter_hash,
-        base_state_hash=expected["base_state_hash"],
-        context_hash=expected_context_hash,
+    return ChapterMemorySuggestion(
+        request_id=expected_request_id,
         digest=digest,
-        patches=patches,
-        conflicts=conflicts,
-        resulting_state=resulting_state,
-        completion_message=completion,
-        evidence_facts=ledger.facts,
+        changes=changes,
+        conflicts=model_conflicts,
+    )
+
+
+def parse_cached_memory_proposal(
+    raw: str | dict[str, Any],
+    ledger: ChapterFactLedger,
+    base_state: dict[str, Any],
+    *,
+    expected_context_hash: str,
+) -> ChapterMemoryProposal:
+    """Load the trusted local cache without treating it as a model response."""
+    value = _as_object(raw, "章节记忆缓存")
+    if value.get("type") != "chapter_memory_proposal_cache":
+        raise MemoryProposalError("返回内容不是章节记忆缓存。")
+    if value.get("cache_schema_version") != MEMORY_CACHE_SCHEMA_VERSION:
+        raise MemoryProposalError("章节记忆缓存版本不匹配。")
+    if value.get("source_protocol_version") != MEMORY_SUGGESTION_SCHEMA_VERSION:
+        raise MemoryProposalError("章节记忆缓存来源协议版本不匹配。")
+    base_state_hash = canonical_hash(base_state)
+    expected = {
+        "chapter_id": ledger.chapter_id,
+        "chapter_hash": ledger.chapter_hash,
+        "base_state_hash": base_state_hash,
+        "context_hash": expected_context_hash,
+    }
+    for key, expected_value in expected.items():
+        if str(value.get(key) or "") != expected_value:
+            raise MemoryProposalError(f"章节记忆缓存的 {key} 与当前任务不一致。")
+    request_id = memory_request_id(
+        ledger.chapter_id,
+        ledger.chapter_hash,
+        base_state_hash,
+        expected_context_hash,
+    )
+    return parse_memory_proposal(
+        {
+            "type": "chapter_memory_suggestion",
+            "schema_version": MEMORY_SUGGESTION_SCHEMA_VERSION,
+            "request_id": request_id,
+            "digest": value.get("digest"),
+            "changes": value.get("changes"),
+            "conflicts": value.get("conflicts"),
+        },
+        ledger,
+        base_state,
+        expected_context_hash=expected_context_hash,
     )
 
 
@@ -1069,23 +1194,20 @@ def _parse_digest_entries(
     return tuple(result)
 
 
-def _parse_patches(
+def _parse_patch_suggestions(
     values: list[object],
     allowed_ids: frozenset[str],
-) -> tuple[MemoryPatch, ...]:
-    result: list[MemoryPatch] = []
-    seen: set[str] = set()
+) -> tuple[MemoryPatchSuggestion, ...]:
+    result: list[MemoryPatchSuggestion] = []
     for item in values:
         if not isinstance(item, dict):
-            raise MemoryProposalError("patches 包含无效条目。")
+            raise MemoryProposalError("changes 包含无效条目。")
         kind = str(item.get("kind") or "").strip()
         if kind not in PATCH_KINDS:
             raise MemoryProposalError(f"不支持的记忆 Patch：{kind}")
         subject = str(item.get("subject") or "").strip()
         field = str(item.get("field") or "").strip()
-        expected_before = item.get("expected_before")
         patch_value = item.get("value")
-        _validate_patch_shape(kind, subject, field, expected_before, patch_value)
         evidence = _parse_fact_ids(
             item.get("evidence_fact_ids"),
             allowed_ids,
@@ -1094,14 +1216,53 @@ def _parse_patches(
         certainty = str(item.get("certainty") or "").strip().casefold()
         if certainty not in {"explicit", "inferred"}:
             raise MemoryProposalError("记忆 Patch 包含无效 certainty。")
+        result.append(
+            MemoryPatchSuggestion(
+                kind,
+                subject,
+                field,
+                patch_value,
+                evidence,
+                certainty,
+            )
+        )
+    return tuple(result)
+
+
+def _materialize_patches(
+    suggestions: tuple[MemoryPatchSuggestion, ...],
+    base_state: dict[str, Any],
+) -> tuple[MemoryPatch, ...]:
+    """Attach local compare-and-set preconditions and stable operation ids."""
+    result: list[MemoryPatch] = []
+    seen: set[str] = set()
+    for item in suggestions:
+        probe = MemoryPatch(
+            "",
+            item.kind,
+            item.subject,
+            item.field,
+            None,
+            item.value,
+            item.evidence_fact_ids,
+            item.certainty,
+        )
+        expected_before = _current_patch_value(base_state, probe)
+        _validate_patch_shape(
+            item.kind,
+            item.subject,
+            item.field,
+            expected_before,
+            item.value,
+        )
         op_id = "op_" + canonical_hash(
             {
-                "kind": kind,
-                "subject": subject,
-                "field": field,
+                "kind": item.kind,
+                "subject": item.subject,
+                "field": item.field,
                 "expected_before": expected_before,
-                "value": patch_value,
-                "evidence": evidence,
+                "value": item.value,
+                "evidence": item.evidence_fact_ids,
             }
         )[:20]
         if op_id in seen:
@@ -1110,13 +1271,13 @@ def _parse_patches(
         result.append(
             MemoryPatch(
                 op_id,
-                kind,
-                subject,
-                field,
+                item.kind,
+                item.subject,
+                item.field,
                 expected_before,
-                patch_value,
-                evidence,
-                certainty,
+                item.value,
+                item.evidence_fact_ids,
+                item.certainty,
             )
         )
     return tuple(result)
