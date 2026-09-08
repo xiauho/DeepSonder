@@ -69,4 +69,4 @@ asset digests, and the local verified-state record.
 
 The published `v2.0.7-beta` has no updater helper and therefore must be upgraded
 to `v2.0.8-beta` manually. The first complete automatic-install release exercise
-is `v2.0.8-beta` to a later compatible beta package.
+is `v2.0.8-beta` to `v2.1.0-beta`.
