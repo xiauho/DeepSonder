@@ -8,6 +8,7 @@ from pathlib import Path
 from . import consistency, continuation, expansion
 from .continuation import ContinuationRunResult
 from .expansion import ExpansionRunResult
+from .prose_supplement import ProseSupplementRunResult, run_prose_supplement
 from .chapter_facts import (
     ChapterFactLedger,
     FactLedgerCache,
@@ -16,8 +17,10 @@ from .chapter_facts import (
 from .chapter_memory import (
     ChapterMemoryCache,
     ChapterMemoryProposal,
+    canonical_hash,
     generate_chapter_memory_proposal,
 )
+from .accepted_memory import memory_base_state_for
 from .context_budget import build_ai_context
 from .context_profiles import SUMMARY_CONTEXT_PROFILE
 from .dsh_client import DSHClient
@@ -105,6 +108,26 @@ class AIWorkflowService:
             cancel_event=cancel_event,
         )
 
+    def supplement_prose(
+        self,
+        chapter_id: str,
+        prose: str,
+        target_chars: int,
+        cancel_event: threading.Event | None = None,
+        *,
+        task_kind: str = "prose_length_supplement",
+        story_constraints: str = "",
+    ) -> ProseSupplementRunResult:
+        return run_prose_supplement(
+            chapter_id,
+            prose,
+            target_chars,
+            self.dsh,
+            cancel_event=cancel_event,
+            task_kind=task_kind,
+            story_constraints=story_constraints,
+        )
+
     def check(
         self,
         project: NovelProject,
@@ -162,6 +185,8 @@ class AIWorkflowService:
         project: NovelProject,
         chapter_id: str,
         cancel_event: threading.Event | None = None,
+        *,
+        force_refresh: bool = False,
     ) -> ChapterMemoryProposal:
         """Build an evidence-bound summary and locally applied memory patch."""
         ledger = self.build_chapter_fact_ledger(
@@ -179,15 +204,24 @@ class AIWorkflowService:
         )
         if chapter_content_hash(context.chapter.content) != ledger.chapter_hash:
             raise RuntimeError("章节正文在事实提取期间发生变化，请重新运行记忆更新。")
+        source_state = project.load_story_state()
+        base_state, base_state_scope = memory_base_state_for(
+            project,
+            chapter_id,
+            source_state,
+        )
         estimator = getattr(self.dsh, "token_estimator", DEFAULT_TOKEN_ESTIMATOR)
         return generate_chapter_memory_proposal(
             project,
             ledger,
             self.dsh,
-            base_state=context.story_state,
+            base_state=base_state,
             canon_context=context.related.to_block(),
             input_token_budget=self.input_token_budget,
             estimator=estimator,
             cache=ChapterMemoryCache(project, self.memory_cache_root),
             cancel_event=cancel_event,
+            base_state_scope=base_state_scope,
+            source_state_hash=canonical_hash(source_state),
+            force_refresh=force_refresh,
         )

@@ -317,7 +317,7 @@ QFrame#findBar {
     border: 1px solid __BORDER__;
     border-radius: 10px;
 }
-QPlainTextEdit#writingEditor {
+QPlainTextEdit#writingEditor, QTextBrowser#markdownPreview {
     background: __FIELD__;
     border: 1px solid __BORDER__;
     border-radius: 8px;
@@ -327,7 +327,20 @@ QPlainTextEdit#writingEditor {
     font-family: "Microsoft YaHei UI", "Source Serif 4", "霞鹜文楷", "LXGW WenKai", sans-serif;
     font-size: __EDITOR_FONT_SIZE__px;
 }
-QPlainTextEdit#writingEditor:focus { border-color: __ACCENT__; }
+QPlainTextEdit#writingEditor:focus, QTextBrowser#markdownPreview:focus { border-color: __ACCENT__; }
+QToolButton#editorModeButton {
+    background: transparent;
+    color: __MUTED__;
+    border: 1px solid __BORDER__;
+    border-radius: 6px;
+    padding: 5px 10px;
+}
+QToolButton#editorModeButton:hover { background: __HOVER__; color: __TEXT__; }
+QToolButton#editorModeButton:checked {
+    background: __SELECTION__;
+    color: __ACCENT__;
+    border-color: __ACCENT__;
+}
 QFrame#outputContainer {
     background: __PANEL__;
     border-top: 1px solid __BORDER__;

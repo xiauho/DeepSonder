@@ -27,7 +27,7 @@ from .token_budget import (
 
 
 FACT_LEDGER_SCHEMA_VERSION = 1
-FACT_PROMPT_VERSION = 1
+FACT_PROMPT_VERSION = 2
 FACT_CATEGORIES = frozenset(
     {
         "event",
@@ -184,6 +184,10 @@ def build_chunk_facts_prompt(
 
 请分析下列章节分块。每条事实必须使用本分块范围内的段落锚点，确定性只能是
 explicit、inferred 或 uncertain；只有正文直接陈述或明确发生的内容才能标为 explicit。
+location 类事实的 value 应优先写正文能够直接支持的简洁规范地点名，环境氛围和
+停留动作写入 predicate，不要把未明确出现的“背风”“扎营”等修饰补入地点名。
+群体移动时，subject 写正文中的群体称谓；若正文同时明确点名成员在场，可另提取
+带角色名的 event 或 character_state 事实，便于安全更新个人位置。
 
 章节：{str(chapter_title or chunk.chapter_id).strip()}
 章节 ID：{chunk.chapter_id}

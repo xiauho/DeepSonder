@@ -26,7 +26,7 @@ from .token_budget import (
 
 
 MEMORY_SUGGESTION_SCHEMA_VERSION = 2
-MEMORY_PROPOSAL_PROMPT_VERSION = 3
+MEMORY_PROPOSAL_PROMPT_VERSION = 4
 MEMORY_CACHE_SCHEMA_VERSION = 1
 DIGEST_SHARD_SCHEMA_VERSION = 1
 DEFAULT_REDUCE_BATCH_TOKENS = 8_000
@@ -191,6 +191,8 @@ class ChapterMemoryProposal:
     cache_hit: bool = False
     reduction_calls: int = 0
     evidence_facts: tuple[FactRecord, ...] = ()
+    base_state_scope: str = ""
+    source_state_hash: str = ""
 
     @property
     def summary(self) -> str:
@@ -253,6 +255,27 @@ class ChapterMemoryProposal:
                     f"- [{conflict.severity}] {conflict.description}"
                 )
         return "\n".join(lines)
+
+    def conflict_evidence_text(self) -> str:
+        """Render cited facts for human review without exposing chapter prose."""
+        fact_map = {item.fact_id: item for item in self.evidence_facts}
+        lines: list[str] = []
+        for conflict in self.conflicts:
+            if not conflict.evidence_fact_ids:
+                continue
+            lines.append(f"[{conflict.severity}] {conflict.target or conflict.kind}")
+            lines.append(conflict.description)
+            for fact_id in conflict.evidence_fact_ids:
+                fact = fact_map.get(fact_id)
+                if fact is None:
+                    lines.append(f"- {fact_id}（引用事实不可用）")
+                    continue
+                lines.append(
+                    f"- {fact.fact_id} · {fact.category} · {fact.anchor}\n"
+                    f"  {fact.subject}｜{fact.predicate}｜{fact.value}"
+                )
+            lines.append("")
+        return "\n".join(lines).strip() or "没有可显示的引用事实。"
 
 
 @dataclass(frozen=True)
@@ -437,15 +460,22 @@ def generate_chapter_memory_proposal(
     estimator: ConservativeTokenEstimator = DEFAULT_TOKEN_ESTIMATOR,
     cache: ChapterMemoryCache | None = None,
     cancel_event: threading.Event | None = None,
+    base_state_scope: str = "",
+    source_state_hash: str = "",
+    force_refresh: bool = False,
 ) -> ChapterMemoryProposal:
     """Reduce a fact ledger and produce one locally validated memory proposal."""
     full_canon_context = str(canon_context or "")
     context_hash = canonical_hash(full_canon_context)
     canon_context = full_canon_context[:12_000]
     proposal_cache = cache or ChapterMemoryCache(project)
-    cached = proposal_cache.load(ledger, base_state, context_hash)
+    cached = None if force_refresh else proposal_cache.load(ledger, base_state, context_hash)
     if cached is not None:
-        return cached
+        return _replace_proposal(
+            cached,
+            base_state_scope=base_state_scope,
+            source_state_hash=source_state_hash,
+        )
 
     relevant_state = _relevant_story_state(base_state, ledger)
     prompt_state = relevant_state
@@ -552,6 +582,8 @@ def generate_chapter_memory_proposal(
         ledger,
         base_state,
         expected_context_hash=context_hash,
+        base_state_scope=base_state_scope,
+        source_state_hash=source_state_hash,
     )
     proposal = _replace_proposal(proposal, reduction_calls=reduction_calls)
     proposal_cache.save(proposal)
@@ -604,12 +636,20 @@ set_character_field 的 field 只能是：{", ".join(sorted(CHARACTER_FIELDS))}�
 每条 change 只描述目标和新值；旧值及写入前置条件由本地程序从旧状态计算。
 每条 change 必须带 value、evidence_fact_ids 和 certainty；
 certainty 只能是 explicit 或 inferred。缺少依据时不要生成 change，应生成冲突候选。
+“相关旧故事状态”严格表示本章开始前的状态；正文明确写出的变化属于正常状态转移，
+不能仅因新旧值不同就报告冲突。只有正文内部互相矛盾，或变化违背给定设定时才报告冲突。
 change 参数约束：
 - set_current_location：subject 和 field 为空，value 为新地点。
 - set_character_field：subject 为角色名，value 为新字段值。
 - add_character_item：field 为空，value 为新增物品名。
 - remove_character_item：field 为空，value 为移除物品名。
 - set_character_relation：subject 为角色名，field 为对方角色名，value 为新关系。
+位置 Patch 还必须遵守：
+- 群体地点事实可直接生成 set_current_location。
+- set_character_field/location 必须同时引用地点事实，以及明确提到该角色在该地点或随队到达的事实；
+  两类依据可以是不同 fact。不能只凭“一行人”“众人”等匿名群体事实批量复制个人位置。
+- value 只写引用事实能够直接支持的简洁地点名，不得加入未被事实支持的“背风”、
+  “歇息”等修饰或动作。
 旧状态中以“…”结尾的值是截断展示，不要据此生成覆盖 Patch。
 
 【章节事实或归并片段】
@@ -763,6 +803,8 @@ def parse_memory_proposal(
     base_state: dict[str, Any],
     *,
     expected_context_hash: str,
+    base_state_scope: str = "",
+    source_state_hash: str = "",
 ) -> ChapterMemoryProposal:
     value = _as_object(raw, "章节记忆提案")
     if value.get("schema_version") != MEMORY_SUGGESTION_SCHEMA_VERSION:
@@ -804,6 +846,8 @@ def parse_memory_proposal(
         conflicts=conflicts,
         resulting_state=resulting_state,
         evidence_facts=ledger.facts,
+        base_state_scope=str(base_state_scope or ""),
+        source_state_hash=str(source_state_hash or ""),
     )
 
 
@@ -1032,17 +1076,35 @@ def _evidence_supports_patch(
         "set_character_relation": {"relationship", "event", "character_state"},
     }
     subject = patch.subject.casefold()
-    candidates = [
+    category_candidates = [
         fact
         for fact in evidence
         if fact.category in category_map[patch.kind]
-        and (
-            patch.kind == "set_current_location"
-            or fact.subject.casefold() == subject
-            or subject in fact.subject.casefold()
-            or subject in fact.value.casefold()
-        )
     ]
+    if patch.kind == "set_current_location":
+        candidates = category_candidates
+    elif patch.kind == "set_character_field" and patch.field == "location":
+        # A destination can be expressed as a group location while a second
+        # fact proves that the named character is part of that scene. Requiring
+        # both properties on one fact rejected legitimate group movements.
+        subject_candidates = [
+            fact for fact in category_candidates if _fact_mentions_subject(fact, subject)
+        ]
+        location_candidates = [
+            fact
+            for fact in category_candidates
+            if fact.category == "location"
+            or _fact_mentions_location_change(fact)
+        ]
+        if not subject_candidates or not location_candidates:
+            return False, False
+        candidates = category_candidates
+    else:
+        candidates = [
+            fact
+            for fact in category_candidates
+            if _fact_mentions_subject(fact, subject)
+        ]
     if not candidates:
         return False, False
     expected_text = str(patch.value or "").strip().casefold()
@@ -1054,6 +1116,40 @@ def _evidence_supports_patch(
         for fact in candidates
     )
     return True, value_supported
+
+
+def _fact_mentions_subject(fact: FactRecord, subject: str) -> bool:
+    if not subject:
+        return False
+    fact_subject = fact.subject.casefold()
+    return bool(
+        fact_subject == subject
+        or subject in fact_subject
+        or subject in fact.predicate.casefold()
+        or subject in fact.value.casefold()
+    )
+
+
+def _fact_mentions_location_change(fact: FactRecord) -> bool:
+    text = f"{fact.predicate} {fact.value}".casefold()
+    return any(
+        marker in text
+        for marker in (
+            "抵达",
+            "到达",
+            "来到",
+            "进入",
+            "深入",
+            "撤至",
+            "退至",
+            "迁往",
+            "移至",
+            "停下",
+            "扎营",
+            "驻扎",
+            "休整",
+        )
+    )
 
 
 def _try_build_memory_prompt(
@@ -1536,6 +1632,8 @@ def _replace_proposal(
     *,
     cache_hit: bool | None = None,
     reduction_calls: int | None = None,
+    base_state_scope: str | None = None,
+    source_state_hash: str | None = None,
 ) -> ChapterMemoryProposal:
     return ChapterMemoryProposal(
         chapter_id=proposal.chapter_id,
@@ -1551,6 +1649,16 @@ def _replace_proposal(
         cache_hit=proposal.cache_hit if cache_hit is None else cache_hit,
         reduction_calls=(
             proposal.reduction_calls if reduction_calls is None else reduction_calls
+        ),
+        base_state_scope=(
+            proposal.base_state_scope
+            if base_state_scope is None
+            else str(base_state_scope or "")
+        ),
+        source_state_hash=(
+            proposal.source_state_hash
+            if source_state_hash is None
+            else str(source_state_hash or "")
         ),
     )
 

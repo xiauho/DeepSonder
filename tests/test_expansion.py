@@ -75,8 +75,8 @@ class ExpansionTests(TestCase):
 
     def test_under_length_draft_receives_one_safe_difference_supplement(self) -> None:
         anchor = "山门外的长风卷过青石台阶，林夜握紧了手中的剑柄。"
-        source = anchor + "甲" * (700 - len(anchor))
-        addition = "他没有立刻前行，而是观察四周细微的动静。" + "乙" * 280
+        source = anchor + "甲" * (920 - len(anchor))
+        addition = "他没有立刻前行，而是观察四周细微的动静。" + "乙" * 60
         dsh = FakeDSH(
             [f"<NOVEL_TEXT>\n{source}\n</NOVEL_TEXT>"],
             json_outputs=[
@@ -105,7 +105,7 @@ class ExpansionTests(TestCase):
 
         self.assertTrue(result.supplement_attempted)
         self.assertTrue(result.supplement_applied)
-        self.assertEqual(result.initial_char_count, 700)
+        self.assertEqual(result.initial_char_count, 920)
         self.assertEqual(result.final_char_count, parsed.char_count)
         self.assertEqual(result.supplement_added_chars, len(addition))
         self.assertTrue(parsed.length_ok)
@@ -113,6 +113,80 @@ class ExpansionTests(TestCase):
         self.assertEqual(len(dsh.calls), 1)
         self.assertEqual(len(dsh.json_calls), 1)
         self.assertIn("目标正文：1000 字", dsh.json_calls[0]["user"])
+
+    def test_severely_short_draft_receives_full_length_retry_first(self) -> None:
+        short = "短" * 600
+        corrected = "长" * 970
+        dsh = FakeDSH(
+            [
+                f"<NOVEL_TEXT>\n{short}\n</NOVEL_TEXT>",
+                f"<NOVEL_TEXT>\n{corrected}\n</NOVEL_TEXT>",
+            ]
+        )
+
+        result = expansion.run_expansion(
+            self.project, "chapter_01", dsh, target_chars=1000
+        )
+
+        self.assertTrue(result.length_retry_attempted)
+        self.assertTrue(result.length_retry_applied)
+        self.assertEqual(result.original_draft_text, short)
+        self.assertEqual(result.original_draft_char_count, 600)
+        self.assertEqual(result.final_char_count, 970)
+        self.assertFalse(result.supplement_attempted)
+        self.assertIn("完整正文目标：1000 字", dsh.calls[1]["system"])
+        self.assertIn("上一版实际长度：600 字", dsh.calls[1]["user"])
+
+    def test_1800_char_regression_can_recover_with_numbered_supplement(self) -> None:
+        short = "原" * 1800
+        dsh = FakeDSH(
+            [
+                f"<NOVEL_TEXT>\n{short}\n</NOVEL_TEXT>",
+                f"<NOVEL_TEXT>\n{short}\n</NOVEL_TEXT>",
+            ],
+            json_outputs=[
+                {
+                    "type": "prose_length_supplement",
+                    "chapter_id": "chapter_01",
+                    "insertions": [
+                        {"anchor_id": "P001", "text": "补" * 1100},
+                    ],
+                }
+            ],
+        )
+
+        result = expansion.run_expansion(
+            self.project, "chapter_01", dsh, target_chars=3000
+        )
+
+        self.assertTrue(result.length_retry_attempted)
+        self.assertFalse(result.length_retry_applied)
+        self.assertTrue(result.supplement_applied)
+        self.assertEqual(result.initial_char_count, 1800)
+        self.assertEqual(result.final_char_count, 2900)
+        self.assertEqual(result.length_status, "qualified")
+        self.assertIn('"anchor_id": "P001"', dsh.json_calls[0]["user"])
+
+    def test_format_and_length_retries_share_the_automatic_budget(self) -> None:
+        short = "短" * 600
+        improved = "长" * 800
+        dsh = FakeDSH(
+            [
+                self.onboarding_output,
+                f"<NOVEL_TEXT>\n{short}\n</NOVEL_TEXT>",
+                f"<NOVEL_TEXT>\n{improved}\n</NOVEL_TEXT>",
+            ]
+        )
+
+        result = expansion.run_expansion(
+            self.project, "chapter_01", dsh, target_chars=1000
+        )
+
+        self.assertEqual(len(dsh.calls), 3)
+        self.assertEqual(len(dsh.json_calls), 0)
+        self.assertTrue(result.length_retry_applied)
+        self.assertFalse(result.supplement_attempted)
+        self.assertIn("自动修正次数上限", result.supplement_warning)
 
     def test_unsafe_supplement_keeps_original_draft_with_warning(self) -> None:
         source = "甲" * 700

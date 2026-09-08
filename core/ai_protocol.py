@@ -192,6 +192,7 @@ class ExpansionInsertion:
     anchor: str
     position: str
     text: str
+    anchor_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -199,6 +200,7 @@ class ExpansionSupplementResult:
     chapter_id: str
     insertions: tuple[ExpansionInsertion, ...]
     added_char_count: int
+    warnings: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -273,44 +275,104 @@ def parse_expansion_supplement(
     source_text: str,
     max_added_chars: int,
 ) -> ExpansionSupplementResult:
-    """Validate insertion-only patches without allowing source rewrites."""
-    value = _as_object(raw, "扩写补写")
-    if value.get("type") != "chapter_expansion_supplement":
-        raise AIProtocolError("扩写补写缺少正确的 type。")
+    """Backward-compatible wrapper for shared prose supplementation."""
+    return parse_prose_supplement(
+        raw,
+        expected_chapter_id=expected_chapter_id,
+        source_text=source_text,
+        max_added_chars=max_added_chars,
+        expected_types={"chapter_expansion_supplement"},
+    )
+
+
+def parse_prose_supplement(
+    raw: str | dict[str, Any],
+    *,
+    expected_chapter_id: str,
+    source_text: str,
+    max_added_chars: int,
+    expected_types: set[str] | None = None,
+    insertion_points: dict[str, int] | None = None,
+) -> ExpansionSupplementResult:
+    """Validate shared insertion-only patches without allowing source rewrites."""
+    value = _as_object(raw, "差额补写")
+    allowed_types = expected_types or {
+        "prose_length_supplement",
+        "chapter_expansion_supplement",
+    }
+    if value.get("type") not in allowed_types:
+        raise AIProtocolError("差额补写缺少正确的 type。")
     chapter_id = str(value.get("chapter_id") or "").strip()
     if chapter_id != str(expected_chapter_id):
-        raise AIProtocolError("扩写补写对应的章节与当前章节不一致。")
+        raise AIProtocolError("差额补写对应的章节与当前章节不一致。")
     items = value.get("insertions")
     if not isinstance(items, list) or not 1 <= len(items) <= 4:
-        raise AIProtocolError("扩写补写必须包含 1～4 个 insertion。")
+        raise AIProtocolError("差额补写必须包含 1～4 个 insertion。")
 
     source = str(source_text or "")
+    point_offsets = {
+        str(key): int(value) for key, value in (insertion_points or {}).items()
+    }
     insertions: list[ExpansionInsertion] = []
     seen_anchors: set[str] = set()
+    seen_point_ids: set[str] = set()
+    warnings: list[str] = []
     added_chars = 0
-    for item in items:
+    limit = max(1, int(max_added_chars))
+    for index, item in enumerate(items, start=1):
         if not isinstance(item, dict):
-            raise AIProtocolError("扩写补写包含无效的 insertion。")
+            warnings.append(f"第 {index} 个插入项不是对象，已忽略。")
+            continue
+        anchor_id = str(item.get("anchor_id") or "").strip()
         anchor = str(item.get("anchor") or "")
         position = str(item.get("position") or "").strip().lower()
         text = str(item.get("text") or "").strip()
-        if not 20 <= len(anchor) <= 80:
-            raise AIProtocolError("扩写补写锚点长度必须为 20～80 个字符。")
-        if anchor in seen_anchors or source.count(anchor) != 1:
-            raise AIProtocolError("扩写补写锚点必须在原文中唯一出现。")
-        if position not in {"before", "after"}:
-            raise AIProtocolError("扩写补写 position 只能是 before 或 after。")
         if not text or _contains_protocol_artifact(text):
-            raise AIProtocolError("扩写补写正文为空或包含协议标记。")
+            warnings.append(f"第 {index} 个插入项正文为空或包含协议标记，已忽略。")
+            continue
+        item_chars = count_content_chars(text)
+        if added_chars + item_chars > limit:
+            warnings.append(f"第 {index} 个插入项会使新增字数超出安全范围，已忽略。")
+            continue
+        if anchor_id:
+            if anchor_id not in point_offsets:
+                warnings.append(f"第 {index} 个插入项使用了未知 anchor_id，已忽略。")
+                continue
+            if anchor_id in seen_point_ids:
+                warnings.append(f"第 {index} 个插入项重复使用 anchor_id，已忽略。")
+                continue
+            seen_point_ids.add(anchor_id)
+            added_chars += item_chars
+            insertions.append(ExpansionInsertion("", "after", text, anchor_id))
+            continue
+
+        # Legacy compatibility for older callers and stored responses. New
+        # prompts only expose application-generated anchor IDs.
+        if not 20 <= len(anchor) <= 80:
+            warnings.append(f"第 {index} 个插入项锚点长度不是 20～80 个字符，已忽略。")
+            continue
+        if anchor in seen_anchors or source.count(anchor) != 1:
+            warnings.append(f"第 {index} 个插入项锚点未在原文中唯一出现，已忽略。")
+            continue
+        if position not in {"before", "after"}:
+            warnings.append(f"第 {index} 个插入项 position 无效，已忽略。")
+            continue
         if anchor in text:
-            raise AIProtocolError("扩写补写正文不得重复锚点。")
+            warnings.append(f"第 {index} 个插入项正文重复锚点，已忽略。")
+            continue
         seen_anchors.add(anchor)
-        added_chars += count_content_chars(text)
+        added_chars += item_chars
         insertions.append(ExpansionInsertion(anchor, position, text))
 
-    if added_chars <= 0 or added_chars > max(1, int(max_added_chars)):
-        raise AIProtocolError("扩写补写新增字数超出安全范围。")
-    return ExpansionSupplementResult(chapter_id, tuple(insertions), added_chars)
+    if not insertions:
+        detail = warnings[0] if warnings else "未返回插入项。"
+        raise AIProtocolError(f"差额补写没有可安全应用的插入项：{detail}")
+    return ExpansionSupplementResult(
+        chapter_id,
+        tuple(insertions),
+        added_chars,
+        tuple(warnings),
+    )
 
 
 def _parse_novel_text(

@@ -22,6 +22,14 @@ from PySide6.QtWidgets import (
 )
 
 from core.ai_protocol import ForeshadowingSuggestion
+from core.length_policy import (
+    LENGTH_SEVERELY_OVER,
+    LENGTH_SEVERELY_UNDER,
+    LENGTH_UNDER,
+    assess_length,
+    length_status_label,
+)
+from core.text_metrics import count_content_chars
 
 
 @dataclass(frozen=True)
@@ -64,6 +72,14 @@ class ExpansionPreviewDialog(QDialog):
         supplement_attempted: bool = False,
         supplement_added_chars: int = 0,
         supplement_warning: str = "",
+        review_min_chars: int = 0,
+        review_max_chars: int = 0,
+        length_status: str = "qualified",
+        supplement_attempt_count: int = 0,
+        can_retry_supplement: bool = True,
+        original_draft_text: str = "",
+        original_draft_char_count: int = 0,
+        correction_history: tuple[str, ...] = (),
         foreshadowing_feedback: tuple[ForeshadowingSuggestion, ...] = (),
         foreshadowing_titles: dict[str, str] | None = None,
         foreshadowing_warning: str = "",
@@ -71,6 +87,7 @@ class ExpansionPreviewDialog(QDialog):
     ):
         super().__init__(parent)
         self.confirmed = False
+        self.retry_requested = False
         self._foreshadowing_selectors: dict[str, QComboBox] = {}
         self.setWindowTitle("扩写结果预览")
         self.resize(780, 680 if foreshadowing_titles else 560)
@@ -85,8 +102,10 @@ class ExpansionPreviewDialog(QDialog):
         details = []
         if target_chars > 0:
             details.append(
-                f"本次目标：{target_chars} 字 · 允许范围：{min_chars}～{max_chars} 字"
+                f"本次目标：{target_chars} 字 · 理想范围：{min_chars}～{max_chars} 字"
             )
+        if review_min_chars > 0 and review_max_chars > 0:
+            details.append(f"审阅范围：{review_min_chars}～{review_max_chars} 字")
         if supplement_attempted:
             if supplement_added_chars > 0:
                 details.append(
@@ -96,19 +115,35 @@ class ExpansionPreviewDialog(QDialog):
                 details.append(f"首次生成：{initial_char_count} 字 · 自动补写未应用")
         details.append(
             f"最终正文：{char_count} 字 · "
-            + ("长度在目标范围内。" if length_ok else "长度超出目标范围，请审阅后决定。")
+            + length_status_label(length_status)
         )
+        if supplement_attempt_count:
+            details.append(f"差额补写已尝试 {supplement_attempt_count} 次。")
         if supplement_warning:
             details.append(supplement_warning)
+        details.extend(correction_history)
         details.extend((notice, "未点击确认前，不会修改当前正文。"))
         info = QLabel("\n".join(details))
         info.setWordWrap(True)
         layout.addWidget(info)
 
-        editor = QPlainTextEdit()
-        editor.setReadOnly(True)
-        editor.setPlainText(text)
-        layout.addWidget(editor, 1)
+        self._recommended_text = text
+        self._candidate_text = text
+        self._candidate_editor = QPlainTextEdit()
+        self._candidate_editor.setReadOnly(True)
+        self._candidate_editor.setPlainText(text)
+        if original_draft_text:
+            selector = QComboBox()
+            selector.addItem(f"篇幅纠偏稿 · {char_count} 字（推荐）", text)
+            selector.addItem(
+                f"首次原稿 · {original_draft_char_count or count_content_chars(original_draft_text)} 字",
+                original_draft_text,
+            )
+            selector.currentIndexChanged.connect(
+                lambda: self._select_candidate(str(selector.currentData() or ""))
+            )
+            layout.addWidget(selector)
+        layout.addWidget(self._candidate_editor, 1)
 
         if foreshadowing_titles:
             layout.addWidget(
@@ -120,15 +155,23 @@ class ExpansionPreviewDialog(QDialog):
             )
 
         buttons = QHBoxLayout()
-        confirm = QPushButton(confirm_label)
+        under_length = length_status in {LENGTH_SEVERELY_UNDER, LENGTH_UNDER}
+        confirm = QPushButton("仍然采用" if under_length else confirm_label)
         confirm.setObjectName("accentButton")
         confirm.setAutoDefault(False)
         copy = QPushButton("复制")
         cancel = QPushButton("放弃")
         cancel.setAutoDefault(False)
         confirm.clicked.connect(self._confirm)
-        copy.clicked.connect(lambda: self._copy(text))
+        copy.clicked.connect(lambda: self._copy(self._candidate_text))
         cancel.clicked.connect(self.reject)
+        if under_length and can_retry_supplement:
+            retry = QPushButton("重新补写")
+            retry.setObjectName("accentButton")
+            retry.setAutoDefault(False)
+            retry.clicked.connect(self._retry)
+            buttons.addWidget(retry)
+            confirm.setObjectName("ghostButton")
         buttons.addWidget(confirm)
         buttons.addWidget(copy)
         buttons.addStretch(1)
@@ -142,7 +185,20 @@ class ExpansionPreviewDialog(QDialog):
         self.confirmed = True
         self.accept()
 
+    def _retry(self) -> None:
+        self.retry_requested = True
+        self.accept()
+
+    def _select_candidate(self, text: str) -> None:
+        self._candidate_text = text
+        self._candidate_editor.setPlainText(text)
+
+    def selected_text(self) -> str:
+        return self._candidate_text
+
     def selected_resolution_ids(self) -> tuple[str, ...]:
+        if self._candidate_text != self._recommended_text:
+            return ()
         return tuple(
             note_id
             for note_id, selector in self._foreshadowing_selectors.items()
@@ -210,25 +266,55 @@ class ContinuationPreviewDialog(QDialog):
         generated_chars: int,
         target_chapter_chars: int,
         length_ok: bool,
+        min_chars: int = 0,
+        max_chars: int = 0,
+        review_min_chars: int = 0,
+        review_max_chars: int = 0,
+        run_target_chars: int = 0,
+        initial_generated_chars: int = 0,
+        supplement_added_chars: int = 0,
+        supplement_warning: str = "",
+        length_status: str = "qualified",
+        supplement_attempt_count: int = 0,
+        can_retry_supplement: bool = True,
+        original_draft_text: str = "",
+        original_draft_char_count: int = 0,
+        correction_history: tuple[str, ...] = (),
         parent=None,
     ):
         super().__init__(parent)
         self.confirmed = False
+        self.retry_requested = False
         self.setWindowTitle("AI 续写结果预览")
         self.resize(780, 650)
         projected = current_chars + generated_chars
-        difference = projected - target_chapter_chars
+        effective_target = run_target_chars or target_chapter_chars
+        difference = projected - effective_target
         if difference > 0:
-            target_note = f"追加后预计超过目标 {difference} 字，仅作为创作参考。"
+            target_note = f"追加后预计超过本轮目标 {difference} 字，仅作为创作参考。"
         else:
-            target_note = f"追加后距离目标约 {abs(difference)} 字。"
-        info = QLabel(
-            f"目标章节：{target_chapter_chars} 字 · 当前正文：{current_chars} 字\n"
+            target_note = f"追加后距离本轮目标约 {abs(difference)} 字。"
+        details = [
+            f"目标章节：{target_chapter_chars} 字 · 本轮目标：{effective_target} 字 · 当前正文：{current_chars} 字",
             f"本次请求：{requested_chars} 字 · AI 实际生成：{generated_chars} 字 · "
-            f"追加后预计：{projected} 字\n"
-            + ("生成长度在参考范围内。" if length_ok else "生成长度超出参考范围，请审阅后决定。")
-            + f"{target_note}\n未点击确认前，不会修改当前正文；确认后也不会自动保存。"
-        )
+            f"追加后预计：{projected} 字",
+        ]
+        if min_chars and max_chars:
+            details.append(f"理想范围：{min_chars}～{max_chars} 字")
+        if review_min_chars and review_max_chars:
+            details.append(f"审阅范围：{review_min_chars}～{review_max_chars} 字")
+        if initial_generated_chars and initial_generated_chars != generated_chars:
+            details.append(
+                f"首次生成：{initial_generated_chars} 字 · 差额补写：+{supplement_added_chars} 字"
+            )
+        if supplement_attempt_count:
+            details.append(f"差额补写已尝试 {supplement_attempt_count} 次。")
+        details.append(f"当前状态：{length_status_label(length_status)}。{target_note}")
+        if supplement_warning:
+            details.append(supplement_warning)
+        details.extend(correction_history)
+        details.append("未点击确认前，不会修改当前正文；确认后也不会自动保存。")
+        info = QLabel("\n".join(details))
         info.setWordWrap(True)
 
         layout = QVBoxLayout(self)
@@ -244,21 +330,43 @@ class ContinuationPreviewDialog(QDialog):
         generated_label = QLabel("AI 续写内容")
         generated_label.setObjectName("sectionTitle")
         layout.addWidget(generated_label)
-        generated = QPlainTextEdit()
-        generated.setReadOnly(True)
-        generated.setPlainText(text)
-        layout.addWidget(generated, 1)
+        self._candidate_text = text
+        self._candidate_editor = QPlainTextEdit()
+        self._candidate_editor.setReadOnly(True)
+        self._candidate_editor.setPlainText(text)
+        if original_draft_text:
+            selector = QComboBox()
+            selector.addItem(f"篇幅纠偏稿 · {generated_chars} 字（推荐）", text)
+            selector.addItem(
+                f"首次续写稿 · {original_draft_char_count or count_content_chars(original_draft_text)} 字",
+                original_draft_text,
+            )
+            selector.currentIndexChanged.connect(
+                lambda: self._select_candidate(str(selector.currentData() or ""))
+            )
+            layout.addWidget(selector)
+        layout.addWidget(self._candidate_editor, 1)
 
         buttons = QHBoxLayout()
-        confirm = QPushButton("追加到正文")
+        under_length = length_status in {LENGTH_SEVERELY_UNDER, LENGTH_UNDER}
+        confirm = QPushButton("仍然采用" if under_length else "追加到正文")
         confirm.setObjectName("accentButton")
         confirm.setAutoDefault(False)
         copy = QPushButton("复制")
         cancel = QPushButton("放弃")
         cancel.setAutoDefault(False)
         confirm.clicked.connect(self._confirm)
-        copy.clicked.connect(lambda: QApplication.clipboard().setText(text))
+        copy.clicked.connect(
+            lambda: QApplication.clipboard().setText(self._candidate_text)
+        )
         cancel.clicked.connect(self.reject)
+        if under_length and can_retry_supplement:
+            retry = QPushButton("重新补写")
+            retry.setObjectName("accentButton")
+            retry.setAutoDefault(False)
+            retry.clicked.connect(self._retry)
+            buttons.addWidget(retry)
+            confirm.setObjectName("ghostButton")
         buttons.addWidget(confirm)
         buttons.addWidget(copy)
         buttons.addStretch(1)
@@ -268,6 +376,17 @@ class ContinuationPreviewDialog(QDialog):
     def _confirm(self) -> None:
         self.confirmed = True
         self.accept()
+
+    def _retry(self) -> None:
+        self.retry_requested = True
+        self.accept()
+
+    def _select_candidate(self, text: str) -> None:
+        self._candidate_text = text
+        self._candidate_editor.setPlainText(text)
+
+    def selected_text(self) -> str:
+        return self._candidate_text
 
 
 class RepairPreviewDialog(QDialog):
@@ -442,29 +561,46 @@ class AIResultCoordinator:
         supplement_attempted: bool = False,
         supplement_added_chars: int = 0,
         supplement_warning: str = "",
+        review_min_chars: int = 0,
+        review_max_chars: int = 0,
+        length_status: str = "qualified",
+        supplement_attempt_count: int = 0,
+        can_retry_supplement: bool = True,
+        original_draft_text: str = "",
+        original_draft_char_count: int = 0,
+        correction_history: tuple[str, ...] = (),
         foreshadowing_feedback: tuple[ForeshadowingSuggestion, ...] = (),
         foreshadowing_titles: dict[str, str] | None = None,
         foreshadowing_warning: str = "",
     ) -> CommitOutcome:
         dialog = ExpansionPreviewDialog(
-            text,
-            char_count,
-            length_ok,
-            has_existing_content,
-            target_chars,
-            min_chars,
-            max_chars,
-            initial_char_count,
-            supplement_attempted,
-            supplement_added_chars,
-            supplement_warning,
-            foreshadowing_feedback,
-            foreshadowing_titles,
-            foreshadowing_warning,
-            self.parent,
+            text=text,
+            char_count=char_count,
+            length_ok=length_ok,
+            has_existing_content=has_existing_content,
+            target_chars=target_chars,
+            min_chars=min_chars,
+            max_chars=max_chars,
+            initial_char_count=initial_char_count,
+            supplement_attempted=supplement_attempted,
+            supplement_added_chars=supplement_added_chars,
+            supplement_warning=supplement_warning,
+            review_min_chars=review_min_chars,
+            review_max_chars=review_max_chars,
+            length_status=length_status,
+            supplement_attempt_count=supplement_attempt_count,
+            can_retry_supplement=can_retry_supplement,
+            original_draft_text=original_draft_text,
+            original_draft_char_count=original_draft_char_count,
+            correction_history=correction_history,
+            foreshadowing_feedback=foreshadowing_feedback,
+            foreshadowing_titles=foreshadowing_titles,
+            foreshadowing_warning=foreshadowing_warning,
+            parent=self.parent,
         )
         dialog.exec()
-        if not dialog.confirmed:
+        retry_requested = bool(getattr(dialog, "retry_requested", False))
+        if not dialog.confirmed and not retry_requested:
             return CommitOutcome(status="cancelled")
         if not context_matches():
             QMessageBox.warning(
@@ -473,7 +609,30 @@ class AIResultCoordinator:
                 "生成期间当前章节内容发生了变化，结果未自动写入。",
             )
             return CommitOutcome(status="stale")
-        replace_body(text)
+        selected_text_getter = getattr(dialog, "selected_text", None)
+        selected_text = (
+            str(selected_text_getter())
+            if callable(selected_text_getter)
+            else text
+        )
+        selected_status = (
+            assess_length(count_content_chars(selected_text), target_chars).status
+            if target_chars > 0
+            else length_status
+        )
+        if retry_requested:
+            return CommitOutcome(status="supplement_requested", value=selected_text)
+        if selected_status in {LENGTH_SEVERELY_UNDER, LENGTH_SEVERELY_OVER}:
+            answer = QMessageBox.question(
+                self.parent,
+                "正文长度明显偏离目标",
+                "当前正文超出审阅范围，是否仍然采用？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return CommitOutcome(status="cancelled")
+        replace_body(selected_text)
         selected_resolutions = getattr(dialog, "selected_resolution_ids", None)
         resolution_ids = (
             tuple(selected_resolutions()) if callable(selected_resolutions) else ()
@@ -496,19 +655,48 @@ class AIResultCoordinator:
         length_ok: bool,
         context_matches: Callable[[], bool],
         append_body: Callable[[str], None],
+        min_chars: int = 0,
+        max_chars: int = 0,
+        review_min_chars: int = 0,
+        review_max_chars: int = 0,
+        run_target_chars: int = 0,
+        initial_generated_chars: int = 0,
+        supplement_added_chars: int = 0,
+        supplement_warning: str = "",
+        length_status: str = "qualified",
+        supplement_attempt_count: int = 0,
+        can_retry_supplement: bool = True,
+        original_draft_text: str = "",
+        original_draft_char_count: int = 0,
+        correction_history: tuple[str, ...] = (),
     ) -> CommitOutcome:
         dialog = ContinuationPreviewDialog(
-            text,
-            current_tail,
-            current_chars,
-            requested_chars,
-            generated_chars,
-            target_chapter_chars,
-            length_ok,
-            self.parent,
+            text=text,
+            current_tail=current_tail,
+            current_chars=current_chars,
+            requested_chars=requested_chars,
+            generated_chars=generated_chars,
+            target_chapter_chars=target_chapter_chars,
+            length_ok=length_ok,
+            min_chars=min_chars,
+            max_chars=max_chars,
+            review_min_chars=review_min_chars,
+            review_max_chars=review_max_chars,
+            run_target_chars=run_target_chars,
+            initial_generated_chars=initial_generated_chars,
+            supplement_added_chars=supplement_added_chars,
+            supplement_warning=supplement_warning,
+            length_status=length_status,
+            supplement_attempt_count=supplement_attempt_count,
+            can_retry_supplement=can_retry_supplement,
+            original_draft_text=original_draft_text,
+            original_draft_char_count=original_draft_char_count,
+            correction_history=correction_history,
+            parent=self.parent,
         )
         dialog.exec()
-        if not dialog.confirmed:
+        retry_requested = bool(getattr(dialog, "retry_requested", False))
+        if not dialog.confirmed and not retry_requested:
             return CommitOutcome(status="cancelled")
         if not context_matches():
             QMessageBox.warning(
@@ -517,7 +705,30 @@ class AIResultCoordinator:
                 "生成期间当前章节内容或相关资料发生了变化，续写结果未自动追加。",
             )
             return CommitOutcome(status="stale")
-        append_body(text)
+        selected_text_getter = getattr(dialog, "selected_text", None)
+        selected_text = (
+            str(selected_text_getter())
+            if callable(selected_text_getter)
+            else text
+        )
+        effective_target = run_target_chars or target_chapter_chars
+        selected_status = assess_length(
+            current_chars + count_content_chars(selected_text),
+            effective_target,
+        ).status
+        if retry_requested:
+            return CommitOutcome(status="supplement_requested", value=selected_text)
+        if selected_status in {LENGTH_SEVERELY_UNDER, LENGTH_SEVERELY_OVER}:
+            answer = QMessageBox.question(
+                self.parent,
+                "正文长度明显偏离目标",
+                "追加后的正文超出审阅范围，是否仍然采用？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return CommitOutcome(status="cancelled")
+        append_body(selected_text)
         return CommitOutcome(status="committed", action="追加")
 
     def confirm_memory(

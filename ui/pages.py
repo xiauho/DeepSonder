@@ -42,18 +42,18 @@ from core.context_capacity import (
     derive_context_capacity,
 )
 from core.ai_protocol import consistency_issue_counts, format_consistency_report
+from core.chapter_sections import chapter_body_text
 from core.export import render_manuscript
 from core.project import NovelProject, chapter_number_from_id
 from core.project_data import ProjectDataStore
+from core.text_metrics import count_content_chars
 from ui.export_controller import ExportController
 from ui.icons import IconTextButton
 from ui.theme import DARK_COLORS, LIGHT_COLORS
 
 
 def _words(text: str) -> int:
-    chinese = len(re.findall(r"[\u3400-\u9fff]", text))
-    latin = len(re.findall(r"[A-Za-z0-9]+(?:['’-][A-Za-z0-9]+)*", text))
-    return chinese + latin
+    return count_content_chars(chapter_body_text(text))
 
 
 class DashboardPage(QWidget):
@@ -921,6 +921,10 @@ class SettingsPage(QWidget):
         )
         self.chapter_target_chars.setSingleStep(100)
         self.chapter_target_chars.setSuffix(" 字")
+        self.chapter_target_chars.setToolTip(
+            "整章正文目标（包含已有正文）；Novalist 按非空白字符统计，包含标点。"
+            "AI 写作以目标的 95%～105% 为理想范围，偏短时会自动差额补写一次。"
+        )
         self.ai_history_mode = QComboBox()
         self.ai_history_mode.addItem("自动 · 跟随上下文策略", "auto")
         self.ai_history_mode.addItem("自定义最近章节数", "custom")

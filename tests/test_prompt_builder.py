@@ -21,9 +21,9 @@ class PromptBuilderTests(TestCase):
                         target,
                     )
                 )
-                self.assertIn(f"目标长度约为 {target} 个中文字符", system)
+                self.assertIn(f"完整正文目标：{target} 字", system)
                 self.assertIn(
-                    f"允许范围为 {round(target * 0.85)}～{round(target * 1.15)}",
+                    f"合格范围：{round(target * 0.95)}～{round(target * 1.05)}",
                     system,
                 )
 
@@ -189,13 +189,35 @@ class PromptBuilderTests(TestCase):
             )
         )
         self.assertIn("章节扩写任务纠偏重试", system)
+        self.assertIn("完整正文目标：2000 字", system)
+        self.assertIn("合格范围：1900～2100 字", system)
         self.assertIn("不要回答“我已就绪”", user)
+
+    def test_supplement_prompt_uses_application_anchor_ids(self) -> None:
+        system, user = prompt_texts(
+            prompt_builder.build_prose_supplement_prompt(
+                "chapter_01",
+                "第一段正文。\n\n第二段正文。",
+                1000,
+                insertion_points=(
+                    {"anchor_id": "P001", "preview": "第一段之后"},
+                    {"anchor_id": "P002", "preview": "第二段之后"},
+                ),
+                story_constraints="不得新增人物。",
+            )
+        )
+        self.assertIn("只能使用", user)
+        self.assertIn('"anchor_id": "P001"', user)
+        self.assertNotIn('"anchor":', user)
+        self.assertIn("不得新增人物", user)
 
     def test_write_retry_prompt_explicitly_corrects_agent_preamble(self) -> None:
         system, user = prompt_texts(
             prompt_builder.build_write_retry_prompt(self.project, "chapter_01", 2000)
         )
         self.assertIn("纠偏重试", system)
+        self.assertIn("本次新增正文目标：2000 字", system)
+        self.assertIn("合格范围：1900～2100 字", system)
         self.assertIn("不要回答“我已就绪”", user)
         self.assertIn("<NOVEL_TEXT>", user)
 

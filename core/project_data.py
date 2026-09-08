@@ -33,13 +33,38 @@ CANON_ENTRY_TYPES = {
         "directory": "characters",
         "template": (
             "# {title}\n\n"
-            "## 身份与定位\n\n"
-            "## 外貌特征\n\n"
-            "## 性格与核心欲望\n\n"
-            "## 当前目标\n\n"
-            "## 能力与弱点\n\n"
+            "<!-- novalist:character-card:v2 -->\n\n"
+            "## 基础档案\n\n"
+            "- 姓名：{title}\n"
+            "- 别名：\n"
+            "- 年龄／出生信息：\n"
+            "- 性别：\n"
+            "- 身份／阵营：\n"
+            "- 首次出场：\n\n"
+            "## 外貌与辨识特征\n\n"
+            "## 性格、动机与核心欲望\n\n"
+            "## 长期目标与人物弧线\n\n"
+            "## 能力档案\n\n"
+            "### 能力名称\n\n"
+            "- 所属体系：\n"
+            "- 能力属性：\n"
+            "- 当前等级：\n"
+            "- 当前数值：\n"
+            "- 使用条件：\n"
+            "- 限制与代价：\n"
+            "- 克制关系：\n\n"
             "## 关键关系\n\n"
-            "## 秘密与人物弧线\n"
+            "## 秘密与人物弧线\n\n"
+            "## 当前剧情状态（Novalist 同步）\n\n"
+            "<!-- novalist:auto-state:v1:start -->\n"
+            "- 本次同步截止章节：未记录\n"
+            "- 当前状态：未记录\n"
+            "- 当前位置：未记录\n"
+            "- 当前战力：未记录\n"
+            "- 持有物：无\n"
+            "- 当前关系：无\n"
+            "<!-- novalist:auto-state:v1:end -->\n\n"
+            "## 作者自由备注\n"
         ),
     },
     "world": {
@@ -1243,12 +1268,20 @@ class ProjectDataStore:
         state: dict,
         *,
         accepted_record: dict | None = None,
+        invalidated_chapter_ids: tuple[str, ...] | list[str] = (),
     ) -> None:
         """Persist summary and state together with best-effort rollback."""
         from .accepted_memory import load_accepted_memory, save_accepted_memory
 
         old_records = load_accepted_memory(self.project)
         new_records = deepcopy(old_records)
+        invalidated = {
+            str(item).strip()
+            for item in invalidated_chapter_ids
+            if str(item).strip() and str(item).strip() != chapter_id
+        }
+        for invalidated_id in invalidated:
+            new_records.pop(invalidated_id, None)
         if accepted_record is not None:
             new_records[chapter_id] = deepcopy(accepted_record)
         else:
@@ -1256,6 +1289,8 @@ class ProjectDataStore:
         old_summaries = deepcopy(self.load_chapter_summaries())
         old_state = deepcopy(self.load_story_state())
         new_summaries = deepcopy(old_summaries)
+        for invalidated_id in invalidated:
+            new_summaries.pop(invalidated_id, None)
         new_summaries[chapter_id] = str(summary or "").strip()
         try:
             self.save_chapter_summaries(new_summaries)

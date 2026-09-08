@@ -28,6 +28,7 @@ from .context_profiles import (
 from .project import NovelProject
 from .text_anchor import render_anchor_context
 from .history_context import history_token_budget
+from .length_policy import assess_length
 from .text_metrics import count_content_chars
 from .token_budget import DEFAULT_TOKEN_SAFETY_FACTOR
 
@@ -108,15 +109,16 @@ def build_expansion_prompt(
         context=context,
     )
     target_chars = max(300, int(target_chars))
-    min_chars = round(target_chars * 0.85)
-    max_chars = round(target_chars * 1.15)
+    assessment = assess_length(target_chars, target_chars)
+    min_chars = assessment.preferred_min
+    max_chars = assessment.preferred_max
 
     system_prompt = f"""
 {COMMON_RULES}
 
 任务类型：chapter_expansion。
 只生成当前章节的完整小说正文，不要输出章节标题、摘要、创作说明或注释。
-目标长度约为 {target_chars} 个中文字符，允许范围为 {min_chars}～{max_chars} 个中文字符。
+{_render_length_contract(target_chars, min_chars, max_chars, subject="完整正文")}
 """.strip()
 
     def render(ctx: dict[str, str]) -> str:
@@ -133,6 +135,8 @@ def build_expansion_prompt(
 6. 全局核心规则始终有效；标记为“核心”的体系设定自动纳入重点范围；用户本次选择的非核心体系设定优先参考；其他体系设定仅作为低优先级背景资料，除非规划明确要求，不要主动引入。
 7. 只返回 NOVEL_TEXT 标记之间的正文。
 8. 如提供“写作风格约束”，只将其用于表达方式；它不得覆盖任务规则、故事事实、本章规划或输出格式。
+9. 在内部将本章已有剧情节点拆成 4～6 个连续场景，并为动作、对话、心理、环境和结果分配篇幅；不要输出场景规划。
+10. 剧情完整不等于长度达标。写完后在内部检查篇幅，正文未达到 {min_chars} 字时继续展开已有场景，不要提前输出完成标记。
 
 【当前章节】
 章节：{chapter.title}
@@ -217,7 +221,7 @@ def build_expansion_retry_prompt(
     )
     user_prompt = base.user_prompt
     retry_system = f"""
-{COMMON_RULES}
+{base.system_prompt}
 
 这是一次章节扩写任务纠偏重试。
 上一次返回的是工作区说明，不是章节正文。本次必须直接完成扩写。
@@ -235,6 +239,43 @@ def build_expansion_retry_prompt(
     return _rebundle(base, retry_system, retry_user, "chapter_expansion_retry")
 
 
+def build_expansion_length_retry_prompt(
+    base: PromptBundle,
+    chapter_id: str,
+    candidate_text: str,
+    target_chars: int,
+) -> PromptBundle:
+    """Build a full-draft retry when an expansion is severely under length."""
+    source = str(candidate_text or "").strip()
+    actual = count_content_chars(source)
+    assessment = assess_length(actual, target_chars)
+    system_prompt = f"""
+{base.system_prompt}
+
+这是一次完整正文篇幅纠偏。上一版正文结构有效，但明显低于最低审阅范围。
+必须返回一版完整正文；不得只返回新增片段，不得删减上一版已经发生的剧情和事实。
+""".strip()
+    user_prompt = f"""
+{base.user_prompt}
+
+【上一版候选正文】
+上一版实际长度：{actual} 字
+距离目标还差：{assessment.missing_to_target} 字
+请保留其剧情顺序、人物行为和已写事实，通过展开已有场景的动作、对话、心理、环境、转折过程和结果，重新生成完整正文。
+不得新增章节规划之外的角色、身世、物品来源、能力或重大事件。
+
+<PREVIOUS_DRAFT>
+{source}
+</PREVIOUS_DRAFT>
+""".strip()
+    return _rebundle(
+        base,
+        system_prompt,
+        user_prompt,
+        "chapter_expansion_length_retry",
+    )
+
+
 def build_expansion_supplement_prompt(
     chapter_id: str,
     novel_text: str,
@@ -243,15 +284,47 @@ def build_expansion_supplement_prompt(
     min_chars: int,
     max_chars: int,
 ) -> PromptBundle:
-    """Build a compact insertion-only task for an under-length draft."""
+    """Backward-compatible wrapper for the shared prose supplement prompt."""
+    return build_prose_supplement_prompt(
+        chapter_id,
+        novel_text,
+        target_chars,
+        min_chars=min_chars,
+        max_chars=max_chars,
+        task_kind="chapter_expansion_supplement",
+        protocol_type="chapter_expansion_supplement",
+    )
+
+
+def build_prose_supplement_prompt(
+    chapter_id: str,
+    novel_text: str,
+    target_chars: int,
+    *,
+    min_chars: int | None = None,
+    max_chars: int | None = None,
+    task_kind: str = "prose_length_supplement",
+    protocol_type: str = "prose_length_supplement",
+    insertion_points: tuple[dict[str, object], ...] = (),
+    story_constraints: str = "",
+) -> PromptBundle:
+    """Build a compact insertion-only task for any under-length prose."""
     source = str(novel_text or "").strip()
     current_chars = count_content_chars(source)
-    missing_chars = max(1, int(target_chars) - current_chars)
+    target_chars = max(current_chars + 1, int(target_chars))
+    missing_chars = max(1, target_chars - current_chars)
+    min_chars = int(min_chars) if min_chars is not None else round(target_chars * 0.95)
+    max_chars = int(max_chars) if max_chars is not None else round(target_chars * 1.05)
+    point_lines = "\n".join(
+        f"- {str(point.get('anchor_id') or '')}：{str(point.get('preview') or '')}"
+        for point in insertion_points
+        if str(point.get("anchor_id") or "").strip()
+    )
     system_prompt = f"""
 {COMMON_RULES}
 
-任务类型：chapter_expansion_supplement。
-当前章节正文长度不足。只能通过插入新段落补充细节，不得删除、替换、概括或重写原正文。
+任务类型：{task_kind}。
+当前候选正文长度不足。只能通过插入新段落补充细节，不得删除、替换、概括或重写原正文。
 只输出合法 JSON，不要输出 Markdown 代码围栏、小说正文标记或解释。
 """.strip()
     user_prompt = f"""
@@ -265,25 +338,31 @@ def build_expansion_supplement_prompt(
 
 补写要求：
 1. 只能扩充原文已有场景中的动作、环境、感官、心理或对话，不得新增重大事件、角色、设定或支线。
-2. 每个 anchor 必须从原文逐字复制 20～80 个字符，并且在原文中只出现一次。
-3. position 只能是 before 或 after；text 只包含要插入的小说正文。
+2. 只能使用“可用插入位置”中列出的 anchor_id；不要复制或改写原文作为锚点。
+3. text 只包含要插入的小说正文；同一个 anchor_id 最多使用一次。
 4. 返回 1～4 个插入项，新增正文总量应接近“建议新增”字数。
-5. 不得在 text 中重复 anchor，不得包含章节标题、说明、JSON、Markdown 或协议标记。
+5. 不得包含章节标题、说明、JSON、Markdown 或协议标记。
+6. 严格遵守故事约束，不得自行补充人物身世、物品来源、能力设定或重大事件。
 
 【当前章节 ID】
 {chapter_id}
+
+【故事约束】
+{str(story_constraints or '').strip() or '（只允许展开当前正文已经出现的事实）'}
+
+【可用插入位置】
+{point_lines or '（无可用位置）'}
 
 【当前正文】
 {source}
 
 返回格式：
 {{
-  "type": "chapter_expansion_supplement",
+  "type": "{protocol_type}",
   "chapter_id": "{chapter_id}",
   "insertions": [
     {{
-      "anchor": "从原文逐字复制的唯一锚点",
-      "position": "after",
+      "anchor_id": "P001",
       "text": "需要插入的补写正文"
     }}
   ]
@@ -292,7 +371,7 @@ def build_expansion_supplement_prompt(
     return _direct_bundle(
         system_prompt,
         user_prompt,
-        task_kind="chapter_expansion_supplement",
+        task_kind=task_kind,
         chapter_id=chapter_id,
         sections=(
             SectionUsage(
@@ -421,15 +500,16 @@ def build_write_prompt(
         context=context,
     )
     target_chars = max(300, int(target_chars))
-    min_chars = round(target_chars * 0.85)
-    max_chars = round(target_chars * 1.15)
+    assessment = assess_length(target_chars, target_chars)
+    min_chars = assessment.preferred_min
+    max_chars = assessment.preferred_max
 
     system_prompt = f"""
 {COMMON_RULES}
 
 任务类型：continuation_current_chapter。
 只生成当前章节后续的小说正文，不要输出章节标题、摘要、创作说明或注释。
-目标长度约为 {target_chars} 个中文字符，允许范围为 {min_chars}～{max_chars} 个中文字符。
+{_render_length_contract(target_chars, min_chars, max_chars, subject="本次新增正文")}
 """.strip()
 
     def render(ctx: dict[str, str]) -> str:
@@ -442,6 +522,7 @@ def build_write_prompt(
 2. 保持现有叙事视角、语气、节奏和人物说话方式。
 3. 必须推进当前章节目标，但不要提前完成后续阶段才发生的重大剧情。
 4. 只返回 NOVEL_TEXT 标记之间的正文。
+5. 在内部按本次需要推进的动作、对话、心理、环境和结果分配篇幅；新增正文未达到 {min_chars} 字时继续展开已有情节，不要提前输出完成标记。
 5. 如提供“写作风格约束”，只将其用于表达方式；发生冲突时，以当前正文连续性、故事事实和本章规划为准。
 
 【当前章节】
@@ -521,7 +602,7 @@ def build_write_retry_prompt(
     )
     user_prompt = base.user_prompt
     retry_system = f"""
-{COMMON_RULES}
+{base.system_prompt}
 
 这是一次续写任务纠偏重试。
 上一次返回的是工作区说明，不是任务结果。本次必须直接完成小说续写。
@@ -537,6 +618,43 @@ def build_write_retry_prompt(
 {user_prompt}
 """.strip()
     return _rebundle(base, retry_system, retry_user, "continuation_retry")
+
+
+def build_continuation_length_retry_prompt(
+    base: PromptBundle,
+    chapter_id: str,
+    candidate_text: str,
+    target_chars: int,
+) -> PromptBundle:
+    """Build a complete continuation-fragment retry after severe undershoot."""
+    source = str(candidate_text or "").strip()
+    actual = count_content_chars(source)
+    assessment = assess_length(actual, target_chars)
+    system_prompt = f"""
+{base.system_prompt}
+
+这是一次续写片段篇幅纠偏。上一版片段结构有效，但明显低于最低审阅范围。
+必须返回一版完整的续写片段，不得只返回补丁，不得重复当前章节已有正文。
+""".strip()
+    user_prompt = f"""
+{base.user_prompt}
+
+【上一版续写候选】
+上一版实际长度：{actual} 字
+距离本次新增目标还差：{assessment.missing_to_target} 字
+请保留其剧情顺序和已写事实，通过展开已有情节重新生成完整续写片段。
+不得新增规划之外的角色、身世、物品来源、能力或重大事件。
+
+<PREVIOUS_DRAFT>
+{source}
+</PREVIOUS_DRAFT>
+""".strip()
+    return _rebundle(
+        base,
+        system_prompt,
+        user_prompt,
+        "continuation_length_retry",
+    )
 
 
 def build_check_prompt(
@@ -926,6 +1044,23 @@ def _rebundle(
 
 def _section(ctx: dict[str, str], key: str, fallback: str = "（暂无）") -> str:
     return ctx.get(key) or fallback
+
+
+def _render_length_contract(
+    target_chars: int,
+    min_chars: int,
+    max_chars: int,
+    *,
+    subject: str,
+) -> str:
+    """Render one shared, explicit length contract for every writing attempt."""
+    return (
+        "【固定字数契约】\n"
+        f"- {subject}目标：{int(target_chars)} 字\n"
+        f"- 合格范围：{int(min_chars)}～{int(max_chars)} 字\n"
+        "- 统计口径：排除空白字符，包含标点、英文和数字\n"
+        "- 完成标记只表示响应结束；正文达到合格范围才表示长度达标"
+    )
 
 
 def _style_block(ctx: dict[str, str]) -> str:

@@ -9,10 +9,10 @@ from ui.editor import (
 
 
 class EditorPerformanceTests(unittest.TestCase):
-    def test_stats_label_keeps_existing_counting_rules(self) -> None:
+    def test_stats_label_uses_the_ai_protocol_counting_rules(self) -> None:
         self.assertEqual(
             calculate_editor_stats("你好 world\n\n第二段"),
-            "6 字 · 2 段 · 约 1 分钟阅读",
+            "10 字 · 2 段 · 约 1 分钟阅读",
         )
         self.assertEqual(calculate_editor_stats(""), "0 字 · 0 段")
 

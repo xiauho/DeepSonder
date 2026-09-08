@@ -41,6 +41,9 @@ class AppearanceController(QObject):
         if isinstance(app, QApplication):
             apply_theme(app, self.config)
         self.inspector.set_theme(self.config)
+        editor = getattr(self.root, "editor", None)
+        if editor is not None and hasattr(editor, "set_theme"):
+            editor.set_theme(self.config)
         self.left_panel.set_theme(self.config)
         self.settings_page.set_config(self.config)
         self.refresh_icons()

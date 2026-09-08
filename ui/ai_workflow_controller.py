@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtWidgets import QDialog, QMessageBox
 
 from core import ai_protocol
@@ -22,6 +22,8 @@ from core.ai_result_service import AIResultService
 from core.ai_workflow import AIWorkflowService
 from core.config import get_chapter_target_chars, save_config
 from core.expansion import ExpansionRunResult
+from core.length_policy import assess_length
+from core.prose_supplement import ProseSupplementRunResult
 from core.project_data import ProjectDataStore
 from core.text_anchor import enrich_report_anchors, resolve_text_anchor
 from core.text_metrics import count_content_chars
@@ -33,6 +35,9 @@ from core.token_budget import (
 from ui.ai_result_coordinator import AIResultCoordinator
 from ui.chapter_selection_dialog import ChapterSelectionDialog
 from ui.expansion_context_selection_dialog import ExpansionContextSelectionDialog
+
+
+MAX_MANUAL_SUPPLEMENT_ATTEMPTS = 3
 
 
 @dataclass(frozen=True)
@@ -264,7 +269,7 @@ class AIWorkflowController(QObject):
             editor_text=chapter.raw,
         )
 
-    def update_memory(self) -> None:
+    def update_memory(self, *, force_refresh: bool = False) -> None:
         request = self._prepare_request()
         if request is None:
             return
@@ -277,6 +282,7 @@ class AIWorkflowController(QObject):
                 project,
                 chapter_id,
                 cancel_event=cancel_event,
+                force_refresh=force_refresh,
             ),
         )
 
@@ -525,6 +531,8 @@ class AIWorkflowController(QObject):
                 self._on_expansion_done(token, result)
             elif token.kind == "continuation":
                 self._on_continuation_done(token, result)
+            elif token.kind == "writing_supplement":
+                self._on_writing_supplement_done(token, result)
             elif token.kind == "check":
                 self._on_check_done(token, result)
             elif token.kind == "repair":
@@ -601,10 +609,41 @@ class AIWorkflowController(QObject):
             supplement_attempted=result.supplement_attempted,
             supplement_added_chars=result.supplement_added_chars,
             supplement_warning=result.supplement_warning,
+            review_min_chars=result.review_min_chars,
+            review_max_chars=result.review_max_chars,
+            length_status=result.length_status,
+            supplement_attempt_count=result.supplement_attempt_count,
+            can_retry_supplement=(
+                result.supplement_attempt_count < MAX_MANUAL_SUPPLEMENT_ATTEMPTS
+            ),
+            original_draft_text=result.original_draft_text,
+            original_draft_char_count=result.original_draft_char_count,
+            correction_history=result.correction_history,
             foreshadowing_feedback=parsed.foreshadowing_feedback,
             foreshadowing_titles=foreshadowing_titles,
             foreshadowing_warning=parsed.feedback_warning,
         )
+        if outcome.status == "supplement_requested":
+            self._queue_manual_supplement(
+                token,
+                writing_kind="expand",
+                candidate_text=(
+                    str(outcome.value) if isinstance(outcome.value, str) else parsed.text
+                ),
+                supplement_target_chars=result.target_chars,
+                metadata={
+                    "target_chars": result.target_chars,
+                    "initial_char_count": result.initial_char_count,
+                    "supplement_added_total": result.supplement_added_chars,
+                    "supplement_attempt_count": result.supplement_attempt_count,
+                    "length_retry_attempted": result.length_retry_attempted,
+                    "length_retry_applied": result.length_retry_applied,
+                    "original_draft_text": result.original_draft_text,
+                    "original_draft_char_count": result.original_draft_char_count,
+                    "correction_history": result.correction_history,
+                },
+            )
+            return
         if outcome.status == "cancelled":
             self._emit_output("扩写结果未确认写入，未修改正文。")
             self._emit_status("扩写结果已放弃")
@@ -665,7 +704,7 @@ class AIWorkflowController(QObject):
         if isinstance(task_context, dict):
             current_tail = str(task_context.get("current_tail") or "")
         self._emit_output(
-            f"✅ {parsed.completion_message}；续写结果已通过格式校验（约 {parsed.char_count} 字），等待确认追加"
+            f"✅ {parsed.completion_message}；续写格式有效，最终新增约 {parsed.char_count} 字，等待确认追加"
         )
         self._emit_status("续写已完成，等待确认追加")
         outcome = self.ai_result_coordinator.confirm_continuation(
@@ -675,10 +714,51 @@ class AIWorkflowController(QObject):
             requested_chars=result.requested_chars,
             generated_chars=parsed.char_count,
             target_chapter_chars=result.target_chapter_chars,
-            length_ok=parsed.length_ok,
+            length_ok=result.length_status == "qualified",
             context_matches=lambda: self._task_context_matches(token),
             append_body=self.editor.append_chapter_body,
+            min_chars=result.min_chars,
+            max_chars=result.max_chars,
+            review_min_chars=result.review_min_chars,
+            review_max_chars=result.review_max_chars,
+            run_target_chars=result.run_target_chars,
+            initial_generated_chars=result.initial_generated_chars,
+            supplement_added_chars=result.supplement_added_chars,
+            supplement_warning=result.supplement_warning,
+            length_status=result.length_status,
+            supplement_attempt_count=result.supplement_attempt_count,
+            can_retry_supplement=(
+                result.supplement_attempt_count < MAX_MANUAL_SUPPLEMENT_ATTEMPTS
+            ),
+            original_draft_text=result.original_draft_text,
+            original_draft_char_count=result.original_draft_char_count,
+            correction_history=result.correction_history,
         )
+        if outcome.status == "supplement_requested":
+            self._queue_manual_supplement(
+                token,
+                writing_kind="continuation",
+                candidate_text=(
+                    str(outcome.value) if isinstance(outcome.value, str) else parsed.text
+                ),
+                supplement_target_chars=result.requested_chars,
+                metadata={
+                    "current_chars": result.current_chars,
+                    "requested_chars": result.requested_chars,
+                    "target_chapter_chars": result.target_chapter_chars,
+                    "run_target_chars": result.run_target_chars,
+                    "initial_generated_chars": result.initial_generated_chars,
+                    "supplement_added_total": result.supplement_added_chars,
+                    "supplement_attempt_count": result.supplement_attempt_count,
+                    "current_tail": current_tail,
+                    "length_retry_attempted": result.length_retry_attempted,
+                    "length_retry_applied": result.length_retry_applied,
+                    "original_draft_text": result.original_draft_text,
+                    "original_draft_char_count": result.original_draft_char_count,
+                    "correction_history": result.correction_history,
+                },
+            )
+            return
         if outcome.status == "cancelled":
             self._emit_output("续写结果已放弃，未修改正文。")
             self._emit_status("续写结果已放弃")
@@ -689,6 +769,182 @@ class AIWorkflowController(QObject):
             return
         self._emit_output("已确认追加续写结果，尚未自动保存。")
         self._emit_status("续写已追加到当前正文，请审阅后保存")
+
+    def _queue_manual_supplement(
+        self,
+        token,
+        *,
+        writing_kind: str,
+        candidate_text: str,
+        supplement_target_chars: int,
+        metadata: dict,
+    ) -> None:
+        """Start an author-requested supplement after the current result is released."""
+        context_getter = getattr(self.ai_controller, "result_context", None)
+        original_context = context_getter(token) if callable(context_getter) else None
+        task_context = dict(original_context) if isinstance(original_context, dict) else {}
+        task_context.update(metadata)
+        task_context.update(
+            {
+                "writing_kind": str(writing_kind),
+                "candidate_text": str(candidate_text),
+                "supplement_target_chars": int(supplement_target_chars),
+            }
+        )
+        chapter_id = token.chapter_id
+        self._emit_status("正在准备重新补写")
+
+        def launch_when_idle() -> None:
+            if self.ai_controller.is_running():
+                QTimer.singleShot(50, launch_when_idle)
+                return
+            project = self.project_session.project
+            dsh = self.ai_engine_controller.client
+            if project is None or dsh is None:
+                QMessageBox.warning(self.parent, "无法补写", "项目或 AI 引擎已经不可用。")
+                return
+            workflow = self._workflow(dsh)
+            chapter = project.load_chapter(chapter_id)
+            story_constraints = "\n".join(
+                (
+                    f"章节：{chapter.title}",
+                    "本章大纲：" + (chapter.outline or "（暂无）"),
+                    "剧情简写：" + (chapter.plot_brief or "（暂无）"),
+                )
+            )[:6000]
+            task_label = (
+                "chapter_expansion_supplement"
+                if writing_kind == "expand"
+                else "continuation_supplement"
+            )
+            self._start(
+                "writing_supplement",
+                chapter_id,
+                f"正在重新补写 · {chapter_id}",
+                lambda cancel_event: workflow.supplement_prose(
+                    chapter_id,
+                    candidate_text,
+                    supplement_target_chars,
+                    cancel_event=cancel_event,
+                    task_kind=task_label,
+                    story_constraints=story_constraints,
+                ),
+                task_context=task_context,
+            )
+
+        QTimer.singleShot(0, launch_when_idle)
+
+    def _on_writing_supplement_done(
+        self,
+        token,
+        result: ProseSupplementRunResult,
+    ) -> None:
+        context_getter = getattr(self.ai_controller, "result_context", None)
+        context = context_getter(token) if callable(context_getter) else None
+        if not isinstance(context, dict):
+            QMessageBox.warning(self.parent, "补写结果无效", "缺少原始候选正文信息。")
+            return
+        attempts = int(context.get("supplement_attempt_count", 0)) + 1
+        total_added = int(context.get("supplement_added_total", 0)) + result.added_char_count
+        warning = result.warning
+        history = list(context.get("correction_history") or ())
+        if result.applied:
+            history.append(f"手动差额补写：新增 {result.added_char_count} 字，已安全应用。")
+        else:
+            history.append("手动差额补写未应用：" + (warning or "没有有效插入项。"))
+        writing_kind = str(context.get("writing_kind") or "")
+        if writing_kind == "expand":
+            target = int(context.get("target_chars", result.final_char_count))
+            assessment = assess_length(result.final_char_count, target)
+            if not assessment.is_qualified and not warning:
+                warning = "重新补写后仍未进入理想范围，可继续补写或仍然采用。"
+            expansion_result = ExpansionRunResult(
+                raw_output=(
+                    f"<NOVEL_TEXT>\n{result.text}\n</NOVEL_TEXT>\n"
+                    "<NOVALIST_TASK_DONE>扩写任务已完成</NOVALIST_TASK_DONE>"
+                ),
+                first_raw_output=None,
+                plain_text_fallback_count=0,
+                target_chars=target,
+                min_chars=assessment.preferred_min,
+                max_chars=assessment.preferred_max,
+                initial_char_count=int(
+                    context.get("initial_char_count", result.initial_char_count)
+                ),
+                final_char_count=result.final_char_count,
+                supplement_attempted=True,
+                supplement_applied=result.applied,
+                supplement_added_chars=total_added,
+                supplement_warning=warning,
+                review_min_chars=assessment.review_min,
+                review_max_chars=assessment.review_max,
+                length_status=assessment.status,
+                supplement_attempt_count=attempts,
+                length_retry_attempted=bool(
+                    context.get("length_retry_attempted", False)
+                ),
+                length_retry_applied=bool(context.get("length_retry_applied", False)),
+                original_draft_text=str(context.get("original_draft_text") or ""),
+                original_draft_char_count=int(
+                    context.get("original_draft_char_count", 0)
+                ),
+                correction_history=tuple(history),
+            )
+            self._on_expansion_done(token, expansion_result)
+            return
+        if writing_kind == "continuation":
+            current_chars = int(context.get("current_chars", 0))
+            requested_chars = int(
+                context.get("requested_chars", result.final_char_count)
+            )
+            run_target = int(
+                context.get("run_target_chars", current_chars + requested_chars)
+            )
+            projected = current_chars + result.final_char_count
+            assessment = assess_length(projected, run_target)
+            if not assessment.is_qualified and not warning:
+                warning = "重新补写后仍未进入理想范围，可继续补写或仍然采用。"
+            continuation_result = ContinuationRunResult(
+                raw_output=(
+                    f"<NOVEL_TEXT>\n{result.text}\n</NOVEL_TEXT>\n"
+                    "<NOVALIST_TASK_DONE>续写任务已完成</NOVALIST_TASK_DONE>"
+                ),
+                first_raw_output=None,
+                plain_text_fallback_count=0,
+                current_chars=current_chars,
+                requested_chars=requested_chars,
+                target_chapter_chars=int(
+                    context.get("target_chapter_chars", run_target)
+                ),
+                run_target_chars=run_target,
+                min_chars=assessment.preferred_min,
+                max_chars=assessment.preferred_max,
+                review_min_chars=assessment.review_min,
+                review_max_chars=assessment.review_max,
+                initial_generated_chars=int(
+                    context.get("initial_generated_chars", result.initial_char_count)
+                ),
+                final_generated_chars=result.final_char_count,
+                projected_final_chars=projected,
+                length_status=assessment.status,
+                supplement_attempted=True,
+                supplement_applied=result.applied,
+                supplement_added_chars=total_added,
+                supplement_warning=warning,
+                supplement_attempt_count=attempts,
+                length_retry_attempted=bool(
+                    context.get("length_retry_attempted", False)
+                ),
+                length_retry_applied=bool(context.get("length_retry_applied", False)),
+                original_draft_text=str(context.get("original_draft_text") or ""),
+                original_draft_char_count=int(
+                    context.get("original_draft_char_count", 0)
+                ),
+                correction_history=tuple(history),
+            )
+            self._on_continuation_done(token, continuation_result)
+            return
+        QMessageBox.warning(self.parent, "补写结果无效", "无法识别原始写作任务。")
 
     def _on_document_saved(self, saved_path: str) -> None:
         path_key = self._path_key(saved_path)
@@ -867,17 +1123,42 @@ class AIWorkflowController(QObject):
             return
         if proposal.has_blockers:
             details = proposal.preview_text()
-            QMessageBox.warning(
-                self.parent,
-                "记忆提案存在阻断冲突",
-                f"为避免覆盖不一致状态，本次未写入。\n\n{details}",
+            box = QMessageBox(self.parent)
+            box.setIcon(QMessageBox.Icon.Warning)
+            box.setWindowTitle("记忆提案存在阻断冲突")
+            box.setText("为避免覆盖不一致状态，本次未写入。")
+            box.setInformativeText(details)
+            box.setDetailedText(proposal.conflict_evidence_text())
+            retry_button = box.addButton(
+                "重新生成提案",
+                QMessageBox.ButtonRole.ActionRole,
             )
+            box.addButton("关闭", QMessageBox.ButtonRole.RejectRole)
+            box.setDefaultButton(retry_button)
+            box.exec()
             self._emit_output("记忆提案存在阻断冲突，故事状态未写入。")
             self._emit_status("记忆更新被冲突检测阻止")
+            if box.clickedButton() is retry_button:
+                self._emit_output("正在跳过旧提案缓存并重新生成记忆提案。")
+                QTimer.singleShot(
+                    0,
+                    lambda: self.update_memory(force_refresh=True),
+                )
             return
+        downstream = self.ai_result_service.downstream_memory_chapters(
+            project,
+            chapter_id,
+        )
+        preview_details = proposal.preview_text()
+        if downstream:
+            preview_details += (
+                "\n\n采用影响：以下后续章节记忆及摘要将被标记失效并移除，"
+                "需要按顺序重新更新：\n- "
+                + "\n- ".join(downstream)
+            )
         outcome = self.ai_result_coordinator.confirm_memory(
             summary=proposal.summary,
-            details=proposal.preview_text(),
+            details=preview_details,
             patch_count=len(proposal.patches),
             conflict_count=len(proposal.conflicts),
             context_matches=lambda: self._task_context_matches(token),
@@ -906,6 +1187,11 @@ class AIWorkflowController(QObject):
         if commit_result is None:
             return
         self._emit_output(f"长期记忆已通过事实 Patch 更新\n{proposal.summary}")
+        if commit_result.invalidated_chapters:
+            self._emit_output(
+                "以下后续章节记忆已失效，请按顺序重新运行“更新记忆”："
+                + "、".join(commit_result.invalidated_chapters)
+            )
         self.project_session.notify_data_changed(
             [
                 project.memory_dir / "story_state.json",

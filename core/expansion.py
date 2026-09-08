@@ -12,15 +12,18 @@ from .context_profiles import EXPANSION_CONTEXT_PROFILE
 from .dsh_client import DSHClient
 from .project import NovelProject
 from .prompt_builder import (
+    build_expansion_length_retry_prompt,
     build_expansion_prompt,
     build_expansion_retry_prompt,
-    build_expansion_supplement_prompt,
     build_foreshadowing_review_prompt,
 )
 from .task_controller import AITaskCancelled
 from .history_context import history_token_budget, resolve_history_count
-from .text_metrics import count_content_chars
+from .length_policy import assess_length
+from .prose_supplement import apply_prose_insertions, run_prose_supplement
 from .token_budget import DEFAULT_INPUT_TOKEN_BUDGET
+
+MAX_AUTOMATIC_WRITING_CORRECTIONS = 2
 
 
 @dataclass(frozen=True)
@@ -39,6 +42,15 @@ class ExpansionRunResult:
     supplement_applied: bool = False
     supplement_added_chars: int = 0
     supplement_warning: str = ""
+    review_min_chars: int = 0
+    review_max_chars: int = 0
+    length_status: str = "qualified"
+    supplement_attempt_count: int = 0
+    length_retry_attempted: bool = False
+    length_retry_applied: bool = False
+    original_draft_text: str = ""
+    original_draft_char_count: int = 0
+    correction_history: tuple[str, ...] = ()
 
 
 def run_expansion(
@@ -65,8 +77,9 @@ def run_expansion(
     history_limit = history_token_budget(
         getattr(dsh, "input_token_budget", DEFAULT_INPUT_TOKEN_BUDGET), strategy,
     )
-    min_chars = round(target_chars * 0.85)
-    max_chars = round(target_chars * 1.15)
+    initial_assessment = assess_length(0, target_chars)
+    min_chars = initial_assessment.preferred_min
+    max_chars = initial_assessment.preferred_max
     prompt_budget = dsh.prompt_build_budget()
 
     context = build_ai_context(
@@ -105,6 +118,7 @@ def run_expansion(
     )
     first_raw: str | None = None
     plain_text_fallbacks = 0
+    automatic_corrections = 0
     try:
         parsed = ai_protocol.parse_expansion(
             raw,
@@ -119,6 +133,7 @@ def run_expansion(
         )
         plain_text_fallbacks += int(parsed.plain_text_fallback)
     except ai_protocol.AIProtocolError:
+        automatic_corrections += 1
         first_raw = raw
         retry_prompt = build_expansion_retry_prompt(
             project,
@@ -165,54 +180,112 @@ def run_expansion(
             )
 
     initial_char_count = parsed.char_count
+    original_draft_text = ""
+    original_draft_char_count = 0
+    length_retry_attempted = False
+    length_retry_applied = False
+    history: list[str] = []
+    assessment = assess_length(parsed.char_count, target_chars)
+    if (
+        assessment.requires_strong_confirmation
+        and assessment.is_under
+        and automatic_corrections < MAX_AUTOMATIC_WRITING_CORRECTIONS
+    ):
+        automatic_corrections += 1
+        length_retry_attempted = True
+        original = parsed
+        retry = build_expansion_length_retry_prompt(
+            prompt,
+            chapter_id,
+            parsed.text,
+            target_chars,
+        )
+        try:
+            corrected_raw = dsh.generate(
+                retry.system_prompt,
+                retry.user_prompt,
+                context_report=retry.report,
+                **generate_options,
+            )
+            corrected = ai_protocol.parse_expansion(
+                corrected_raw,
+                min_chars=min_chars,
+                max_chars=max_chars,
+                expected_chapter_id=chapter_id,
+                allowed_foreshadowing_ids={
+                    str(note.get("id") or "").strip()
+                    for note in (selected_foreshadowing or ())
+                    if isinstance(note, dict) and str(note.get("id") or "").strip()
+                },
+            )
+            plain_text_fallbacks += int(corrected.plain_text_fallback)
+            if (
+                corrected.char_count > original.char_count
+                and abs(target_chars - corrected.char_count)
+                < abs(target_chars - original.char_count)
+            ):
+                original_draft_text = original.text
+                original_draft_char_count = original.char_count
+                parsed = corrected
+                length_retry_applied = True
+                history.append(
+                    f"完整篇幅纠偏：{original.char_count} → {corrected.char_count} 字，已采用纠偏稿。"
+                )
+            else:
+                history.append(
+                    f"完整篇幅纠偏未改善长度，保留 {original.char_count} 字原稿。"
+                )
+        except AITaskCancelled:
+            raise
+        except Exception as exc:  # noqa: BLE001 - preserve the usable first draft
+            history.append(f"完整篇幅纠偏失败，已保留原稿：{exc}")
+
     supplement_attempted = False
     supplement_applied = False
     supplement_added_chars = 0
     supplement_warning = ""
-    if parsed.char_count < min_chars:
+    assessment = assess_length(parsed.char_count, target_chars)
+    if (
+        assessment.is_under
+        and automatic_corrections < MAX_AUTOMATIC_WRITING_CORRECTIONS
+    ):
+        automatic_corrections += 1
         supplement_attempted = True
-        supplement_prompt = build_expansion_supplement_prompt(
+        supplement_result = run_prose_supplement(
             chapter_id,
             parsed.text,
             target_chars,
-            min_chars=min_chars,
-            max_chars=max_chars,
+            dsh,
+            cancel_event=cancel_event,
+            task_kind="chapter_expansion_supplement",
+            story_constraints=_supplement_story_constraints(context),
         )
-        missing_chars = max(1, target_chars - parsed.char_count)
-        try:
-            supplement_raw = dsh.generate_json(
-                supplement_prompt.system_prompt,
-                supplement_prompt.user_prompt,
-                context_report=supplement_prompt.report,
-                **generate_options,
+        supplement_warning = supplement_result.warning
+        if supplement_result.warning:
+            history.append("局部差额补写：" + supplement_result.warning)
+        if supplement_result.applied:
+            supplement_added_chars = supplement_result.added_char_count
+            supplement_applied = True
+            history.append(
+                f"局部差额补写：新增 {supplement_result.added_char_count} 字，已安全应用。"
             )
-            supplement = ai_protocol.parse_expansion_supplement(
-                supplement_raw,
-                expected_chapter_id=chapter_id,
-                source_text=parsed.text,
-                max_added_chars=max(300, round(missing_chars * 1.75)),
+            final_assessment = assess_length(
+                supplement_result.final_char_count,
+                target_chars,
             )
-            supplemented_text = _apply_expansion_insertions(
-                parsed.text,
-                supplement.insertions,
-            )
-            final_count = count_content_chars(supplemented_text)
-            supplement_added_chars = max(0, final_count - parsed.char_count)
-            supplement_applied = supplement_added_chars > 0
             parsed = replace(
                 parsed,
-                text=supplemented_text,
-                char_count=final_count,
-                length_ok=min_chars <= final_count <= max_chars,
+                text=supplement_result.text,
+                char_count=supplement_result.final_char_count,
+                length_ok=final_assessment.is_qualified,
             )
-            if not parsed.length_ok:
+            if not final_assessment.is_qualified:
                 supplement_warning = (
-                    "自动差额补写后仍未进入本次目标范围，请在写入前重点审阅。"
+                    "自动差额补写后仍未进入理想范围，可重新补写或仍然采用。"
                 )
-        except AITaskCancelled:
-            raise
-        except Exception as exc:
-            supplement_warning = f"自动差额补写未能安全应用：{exc}"
+    elif assessment.is_under:
+        supplement_warning = "已达到自动修正次数上限，可重新补写或仍然采用。"
+        history.append(supplement_warning)
 
     selected = tuple(
         note
@@ -229,6 +302,7 @@ def run_expansion(
         )
     else:
         raw = _canonical_expansion_output(parsed)
+    final_assessment = assess_length(parsed.char_count, target_chars)
     return ExpansionRunResult(
         raw,
         first_raw,
@@ -242,6 +316,15 @@ def run_expansion(
         supplement_applied,
         supplement_added_chars,
         supplement_warning,
+        final_assessment.review_min,
+        final_assessment.review_max,
+        final_assessment.status,
+        int(supplement_attempted),
+        length_retry_attempted,
+        length_retry_applied,
+        original_draft_text,
+        original_draft_char_count,
+        tuple(history),
     )
 
 
@@ -249,25 +332,18 @@ def _apply_expansion_insertions(
     source: str,
     insertions: tuple[ai_protocol.ExpansionInsertion, ...],
 ) -> str:
-    """Apply validated insertions by descending source offset."""
-    operations: list[tuple[int, str]] = []
-    used_offsets: set[int] = set()
-    for insertion in insertions:
-        start = source.index(insertion.anchor)
-        offset = start if insertion.position == "before" else start + len(insertion.anchor)
-        if offset in used_offsets:
-            raise ai_protocol.AIProtocolError("扩写补写包含冲突的插入位置。")
-        used_offsets.add(offset)
-        addition = (
-            insertion.text.rstrip() + "\n\n"
-            if insertion.position == "before"
-            else "\n\n" + insertion.text.lstrip()
-        )
-        operations.append((offset, addition))
-    result = source
-    for offset, addition in sorted(operations, reverse=True):
-        result = result[:offset] + addition + result[offset:]
-    return result
+    """Backward-compatible wrapper for the shared insertion helper."""
+    return apply_prose_insertions(source, insertions)
+
+
+def _supplement_story_constraints(context) -> str:
+    chapter = context.chapter
+    parts = [
+        f"章节：{chapter.title}",
+        "本章大纲：" + (chapter.outline or "（暂无）"),
+        "剧情简写：" + (chapter.plot_brief or "（暂无）"),
+    ]
+    return "\n".join(parts)[:6000]
 
 
 def _attach_foreshadowing_review(

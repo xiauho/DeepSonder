@@ -3,43 +3,47 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor, QTextDocument
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPlainTextEdit,
     QPushButton,
+    QStackedWidget,
+    QTextBrowser,
     QTextEdit,
     QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
+from core.chapter_sections import chapter_body_bounds, chapter_body_text
 from core.project import NovelProject
-from core.chapter_sections import chapter_body_bounds
-from ui.icons import set_button_icon
 from core.storage import atomic_write_text
+from core.text_metrics import count_content_chars
+from ui.icons import set_button_icon
+from ui.theme import document_css
 
 
-_CHINESE_RE = re.compile(r"[\u3400-\u9fff]")
-_LATIN_WORD_RE = re.compile(r"[A-Za-z0-9]+(?:['’-][A-Za-z0-9]+)*")
 _PARAGRAPH_RE = re.compile(r"\n\s*\n")
 FIND_DEBOUNCE_MS = 240
 STATS_DEBOUNCE_MS = 180
 MAX_FIND_HIGHLIGHTS = 200
 MAX_FIND_MATCHES_FOR_HIGHLIGHT = 1000
 LARGE_DOCUMENT_CHARS = 200_000
+_NOVALIST_PREVIEW_COMMENT_RE = re.compile(
+    r"(?m)^[ \t]*<!--[ \t]*novalist:[^\r\n]*?-->[ \t]*(?:\r?\n|$)"
+)
 
 
 def calculate_editor_stats(text: str) -> str:
     """Return the display label for one immutable editor text snapshot."""
     text = str(text or "")
-    chinese = len(_CHINESE_RE.findall(text))
-    latin_words = len(_LATIN_WORD_RE.findall(text))
-    total = chinese + latin_words
+    total = count_content_chars(text)
     paragraphs = len([part for part in _PARAGRAPH_RE.split(text) if part.strip()])
     minutes = max(1, round(total / 400)) if total else 0
     label = f"{total:,} 字 · {paragraphs} 段"
@@ -61,12 +65,33 @@ def find_highlight_config(document_length: int, match_count: int) -> tuple[int, 
     return limit, suffix
 
 
+def markdown_preview_source(text: str) -> str:
+    """Remove app-only comments from a display copy of Markdown source."""
+    return _NOVALIST_PREVIEW_COMMENT_RE.sub("", str(text or ""))
+
+
 class ExternalFileChangedError(RuntimeError):
     """Raised when the file changed after it was loaded into the editor."""
 
     def __init__(self, path: Path):
         self.path = Path(path)
         super().__init__(f"文件在编辑期间发生了外部修改：{self.path}")
+
+
+class MarkdownPreview(QTextBrowser):
+    """Read-only Markdown surface that never retrieves remote resources."""
+
+    _BLOCKED_SCHEMES = frozenset({"http", "https", "ftp"})
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setOpenExternalLinks(False)
+        self.setOpenLinks(False)
+
+    def loadResource(self, resource_type: int, name: QUrl):  # noqa: N802 - Qt API
+        if name.scheme().casefold() in self._BLOCKED_SCHEMES:
+            return None
+        return super().loadResource(resource_type, name)
 
 
 class Editor(QWidget):
@@ -84,6 +109,8 @@ class Editor(QWidget):
         self._loading = False
         self._loaded_file_revision: tuple[int, int, int] | None = None
         self._stats_revision: int | None = None
+        self._view_mode = "source"
+        self._theme_config: dict = {"theme": "light"}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 14, 18, 12)
@@ -103,6 +130,24 @@ class Editor(QWidget):
         title_box.addWidget(self.title_label)
         title_box.addWidget(self.path_label)
         header_layout.addLayout(title_box, 1)
+
+        self.source_button = QToolButton()
+        self.source_button.setText("源码")
+        self.source_button.setObjectName("editorModeButton")
+        self.source_button.setCheckable(True)
+        self.preview_button = QToolButton()
+        self.preview_button.setText("预览")
+        self.preview_button.setObjectName("editorModeButton")
+        self.preview_button.setCheckable(True)
+        self._mode_group = QButtonGroup(self)
+        self._mode_group.setExclusive(True)
+        self._mode_group.addButton(self.source_button)
+        self._mode_group.addButton(self.preview_button)
+        self.source_button.setChecked(True)
+        self.source_button.clicked.connect(lambda: self.set_view_mode("source"))
+        self.preview_button.clicked.connect(lambda: self.set_view_mode("preview"))
+        header_layout.addWidget(self.source_button)
+        header_layout.addWidget(self.preview_button)
 
         self.exit_focus_button = QPushButton("退出专注  Esc")
         self.exit_focus_button.setObjectName("focusExitButton")
@@ -157,7 +202,17 @@ class Editor(QWidget):
         )
         self.text_edit.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
         self.text_edit.setTabStopDistance(32.0)
-        layout.addWidget(self.text_edit, 1)
+        self.preview_browser = MarkdownPreview()
+        self.preview_browser.setObjectName("markdownPreview")
+        self.preview_browser.setToolTip("只读 Markdown 预览；保存仍以源码内容为准")
+        self.preview_browser.document().setDefaultStyleSheet(
+            document_css(self._theme_config)
+        )
+        self.editor_stack = QStackedWidget()
+        self.editor_stack.setObjectName("editorViewStack")
+        self.editor_stack.addWidget(self.text_edit)
+        self.editor_stack.addWidget(self.preview_browser)
+        layout.addWidget(self.editor_stack, 1)
 
         footer = QFrame()
         footer.setObjectName("editorFooter")
@@ -193,6 +248,52 @@ class Editor(QWidget):
         self._find_timer.setInterval(FIND_DEBOUNCE_MS)
         self._find_timer.timeout.connect(self._update_match_count)
 
+    def set_view_mode(self, mode: str) -> None:
+        """Switch between editable source and a read-only in-memory preview."""
+        normalized = "preview" if str(mode) == "preview" else "source"
+        self._view_mode = normalized
+        if normalized == "preview":
+            self._find_timer.stop()
+            self.find_bar.hide()
+            self._clear_find_highlights()
+            self._render_preview()
+            self.editor_stack.setCurrentWidget(self.preview_browser)
+            self.preview_button.setChecked(True)
+            self.cursor_label.setText("只读预览")
+            self.preview_browser.setFocus()
+            return
+        self.editor_stack.setCurrentWidget(self.text_edit)
+        self.source_button.setChecked(True)
+        self._update_cursor_status()
+        self.text_edit.setFocus()
+
+    def view_mode(self) -> str:
+        return self._view_mode
+
+    def set_theme(self, config: dict | None = None) -> None:
+        """Refresh theme-aware document CSS without changing the source."""
+        self._theme_config = dict(config or {"theme": "light"})
+        self.preview_browser.document().setDefaultStyleSheet(
+            document_css(self._theme_config)
+        )
+        if self._view_mode == "preview":
+            self._render_preview()
+
+    def undo(self) -> None:
+        self.set_view_mode("source")
+        self.text_edit.undo()
+
+    def redo(self) -> None:
+        self.set_view_mode("source")
+        self.text_edit.redo()
+
+    def _render_preview(self, *, reset_scroll: bool = False) -> None:
+        scroll = 0 if reset_scroll else self.preview_browser.verticalScrollBar().value()
+        self.preview_browser.setMarkdown(
+            markdown_preview_source(self.text_edit.toPlainText())
+        )
+        self.preview_browser.verticalScrollBar().setValue(scroll)
+
     def open_file(self, category: str, path_str: str) -> bool:
         path = Path(path_str)
         if not path.exists():
@@ -214,13 +315,18 @@ class Editor(QWidget):
         self._set_dirty(False)
         self.title_label.setText(self._extract_title(content, path))
         self.path_label.setText(f"{category}  /  {path.name}")
-        self.text_edit.setFocus()
+        if self._view_mode == "preview":
+            self._render_preview(reset_scroll=True)
+            self.preview_browser.setFocus()
+        else:
+            self.text_edit.setFocus()
         self._update_stats()
         return True
 
     def clear_document(self, message: str = "未打开文件") -> None:
         self._loading = True
         self.text_edit.clear()
+        self.preview_browser.clear()
         self._loading = False
         self._current_path = None
         self._current_category = ""
@@ -283,6 +389,7 @@ class Editor(QWidget):
         return path.stem if self._current_category == "章节" else None
 
     def append_text(self, text: str) -> None:
+        self.set_view_mode("source")
         cursor = self.text_edit.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
         if self.text_edit.toPlainText().strip():
@@ -294,6 +401,7 @@ class Editor(QWidget):
 
     def append_chapter_body(self, text: str) -> None:
         """Append one continuation inside ``## 正文`` as one undoable edit."""
+        self.set_view_mode("source")
         continuation = str(text or "").strip()
         if not continuation:
             return
@@ -316,6 +424,7 @@ class Editor(QWidget):
 
     def replace_chapter_body(self, text: str) -> None:
         """Replace only the current chapter's ``## 正文`` section."""
+        self.set_view_mode("source")
         raw = self.text_edit.toPlainText()
         body = str(text or "").strip()
         replacement = NovelProject.replace_chapter_body(raw, body)
@@ -327,6 +436,7 @@ class Editor(QWidget):
 
     def reveal_range(self, start: int, end: int) -> bool:
         """Select and reveal a zero-based character range in the editor."""
+        self.set_view_mode("source")
         document_length = self.text_edit.document().characterCount() - 1
         start = max(0, min(int(start), document_length))
         end = max(start, min(int(end), document_length))
@@ -346,6 +456,7 @@ class Editor(QWidget):
         replacement: str,
     ) -> bool:
         """Replace one range only when its current text still matches exactly."""
+        self.set_view_mode("source")
         current = self.text_edit.toPlainText()
         start = max(0, int(start))
         end = min(len(current), max(start, int(end)))
@@ -369,6 +480,7 @@ class Editor(QWidget):
         position: int,
         anchor: int | None = None,
     ) -> None:
+        self.set_view_mode("source")
         cursor = self.text_edit.textCursor()
         document_length = self.text_edit.document().characterCount() - 1
         position = max(0, min(int(position), document_length))
@@ -380,6 +492,7 @@ class Editor(QWidget):
         self.text_edit.ensureCursorVisible()
 
     def show_find(self) -> None:
+        self.set_view_mode("source")
         self.find_bar.show()
         selected = self.text_edit.textCursor().selectedText()
         if selected and "\u2029" not in selected and len(selected) < 100:
@@ -457,7 +570,9 @@ class Editor(QWidget):
         revision = int(self.text_edit.document().revision())
         if self._stats_revision == revision:
             return
-        label = calculate_editor_stats(self.text_edit.toPlainText())
+        source = self.text_edit.toPlainText()
+        measured = chapter_body_text(source) if self._current_category == "章节" else source
+        label = calculate_editor_stats(measured)
         self._stats_revision = revision
         self.stats_label.setText(label)
         self.stats_changed.emit(label)

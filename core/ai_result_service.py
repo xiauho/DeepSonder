@@ -10,7 +10,8 @@ from .chapter_memory import ChapterMemoryProposal, canonical_hash
 from .project import NovelProject, chapter_number_from_id
 from .project_data import ProjectDataStore
 from .text_chunking import chapter_content_hash
-from .accepted_memory import make_accepted_record
+from .accepted_memory import load_accepted_memory, make_accepted_record, memory_base_state_for
+from .length_policy import assess_length
 
 
 @dataclass(frozen=True)
@@ -18,6 +19,7 @@ class MemoryCommitResult:
     merged_state: dict[str, Any]
     expected_chapter: int | None
     received_chapter: object
+    invalidated_chapters: tuple[str, ...] = ()
 
     @property
     def chapter_was_corrected(self) -> bool:
@@ -44,10 +46,11 @@ class AIResultService:
             for note in (selected_foreshadowing or ())
             if isinstance(note, dict) and str(note.get("id") or "").strip()
         }
+        assessment = assess_length(target_chars, target_chars)
         return ai_protocol.parse_expansion(
             raw,
-            min_chars=round(target_chars * 0.85),
-            max_chars=round(target_chars * 1.15),
+            min_chars=assessment.preferred_min,
+            max_chars=assessment.preferred_max,
             expected_chapter_id=chapter_id,
             allowed_foreshadowing_ids=allowed_ids,
         )
@@ -58,10 +61,11 @@ class AIResultService:
         requested_chars: int,
     ) -> ai_protocol.ContinuationResult:
         requested_chars = max(300, int(requested_chars))
+        assessment = assess_length(requested_chars, requested_chars)
         return ai_protocol.parse_continuation(
             raw,
-            min_chars=round(requested_chars * 0.85),
-            max_chars=round(requested_chars * 1.15),
+            min_chars=assessment.preferred_min,
+            max_chars=assessment.preferred_max,
         )
 
     @staticmethod
@@ -107,21 +111,69 @@ class AIResultService:
             raise ValueError("章节正文在记忆提案生成后已发生变化。")
         store = ProjectDataStore(project)
         current_state = store.load_story_state()
-        if canonical_hash(current_state) != proposal.base_state_hash:
-            raise ValueError("故事状态在记忆提案生成后已发生变化。")
+        expected_chapter = chapter_number_from_id(chapter_id)
+        if proposal.base_state_scope:
+            base_state, _base_scope = memory_base_state_for(
+                project,
+                chapter_id,
+                current_state,
+            )
+            if canonical_hash(base_state) != proposal.base_state_hash:
+                raise ValueError("章前故事状态在记忆提案生成后已发生变化。")
+            if (
+                proposal.source_state_hash
+                and canonical_hash(current_state) != proposal.source_state_hash
+            ):
+                raise ValueError("全局故事状态在记忆提案生成后已发生变化。")
+        else:
+            # Backward-compatible trust boundary for locally constructed V2
+            # proposals that predate chapter-scoped base state metadata.
+            base_state = current_state
+            if canonical_hash(current_state) != proposal.base_state_hash:
+                raise ValueError("故事状态在记忆提案生成后已发生变化。")
+
+        downstream = AIResultService.downstream_memory_chapters(
+            project,
+            chapter_id,
+        )
 
         resulting_state = dict(proposal.resulting_state)
         if "foreshadowing" in current_state:
             resulting_state["foreshadowing"] = current_state["foreshadowing"]
-        expected_chapter = chapter_number_from_id(chapter_id)
         if expected_chapter is not None:
             resulting_state["current_chapter"] = expected_chapter
-        accepted_record = make_accepted_record(project, proposal, resulting_state, current_state)
+        accepted_record = make_accepted_record(
+            project,
+            proposal,
+            resulting_state,
+            base_state,
+        )
         store.commit_memory_update(
-            chapter_id, proposal.summary, resulting_state, accepted_record=accepted_record,
+            chapter_id,
+            proposal.summary,
+            resulting_state,
+            accepted_record=accepted_record,
+            invalidated_chapter_ids=downstream,
         )
         return MemoryCommitResult(
             merged_state=resulting_state,
             expected_chapter=expected_chapter,
             received_chapter=expected_chapter,
+            invalidated_chapters=downstream,
         )
+
+    @staticmethod
+    def downstream_memory_chapters(
+        project: NovelProject,
+        chapter_id: str,
+    ) -> tuple[str, ...]:
+        """List adopted records that must be rebuilt after this chapter."""
+        target = chapter_number_from_id(chapter_id)
+        if target is None:
+            return ()
+        numbered = []
+        for key in load_accepted_memory(project):
+            number = chapter_number_from_id(key)
+            if number is not None and number > target:
+                numbered.append((number, key))
+        return tuple(key for _number, key in sorted(numbered))

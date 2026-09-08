@@ -4,7 +4,12 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import patch
 
-from core.accepted_memory import AcceptedMemoryView, accepted_memory_path, load_accepted_memory
+from core.accepted_memory import (
+    AcceptedMemoryView,
+    accepted_memory_path,
+    load_accepted_memory,
+    memory_base_state_for,
+)
 from core.ai_result_service import AIResultService
 from core.chapter_facts import FactRecord
 from core.chapter_memory import ChapterDigest, ChapterMemoryProposal, DigestEntry, canonical_hash
@@ -113,6 +118,127 @@ class AcceptedMemoryTests(TestCase):
         self.project.save_chapter("chapter_30", outline="", content="旧章已改写")
         context = build_ai_context(self.project, "chapter_500", profile=EXPANSION_CONTEXT_PROFILE)
         self.assertEqual(context.story_state, {})
+
+    def test_memory_replacement_uses_previous_chapter_snapshot(self):
+        self.adopt("chapter_02", "第二章终态：林舟昏迷。")
+        self.adopt("chapter_03", "第三章旧稿终态：林舟背着苏婉。")
+        self.project.save_chapter(
+            "chapter_03",
+            outline="",
+            content="第三章新稿：苏婉搀扶刚苏醒的林舟。",
+        )
+
+        state, scope = memory_base_state_for(self.project, "chapter_03")
+
+        self.assertEqual(scope, "snapshot:chapter_02")
+        self.assertEqual(state["current_chapter"], 2)
+        self.assertEqual(state["current_location"], "第二章终态：林舟昏迷。")
+
+    def test_first_chapter_replacement_reuses_recorded_pre_state(self):
+        initial = self.project.load_story_state()
+        initial["current_location"] = "故事开始前"
+        self.project.save_story_state(initial)
+        self.adopt("chapter_01", "第一章旧稿终态")
+        self.project.save_chapter("chapter_01", outline="", content="第一章新稿")
+
+        state, scope = memory_base_state_for(self.project, "chapter_01")
+
+        self.assertEqual(scope, "recorded_base:chapter_01")
+        self.assertEqual(state["current_location"], "故事开始前")
+
+    def test_commit_can_replace_latest_chapter_from_prior_snapshot(self):
+        self.adopt("chapter_02", "第二章终态")
+        self.adopt("chapter_03", "第三章旧稿终态")
+        new_content = "第三章新稿终态"
+        self.project.save_chapter("chapter_03", outline="", content=new_content)
+        base, scope = memory_base_state_for(self.project, "chapter_03")
+        source = self.project.load_story_state()
+        resulting = {**base, "current_location": new_content}
+        proposal = ChapterMemoryProposal(
+            "chapter_03",
+            chapter_content_hash(new_content),
+            canonical_hash(base),
+            "context",
+            ChapterDigest(new_content),
+            (),
+            (),
+            resulting,
+            base_state_scope=scope,
+            source_state_hash=canonical_hash(source),
+        )
+
+        result = AIResultService.commit_memory_proposal(
+            self.project,
+            "chapter_03",
+            proposal,
+        )
+
+        self.assertEqual(result.merged_state["current_location"], new_content)
+        self.assertEqual(self.project.load_story_state()["current_chapter"], 3)
+        record = load_accepted_memory(self.project)["chapter_03"]
+        self.assertEqual(record["base_state"]["current_chapter"], 2)
+
+    def test_scoped_replacement_rejects_concurrent_global_state_change(self):
+        self.adopt("chapter_02", "第二章终态")
+        self.adopt("chapter_03", "第三章旧稿终态")
+        new_content = "第三章新稿终态"
+        self.project.save_chapter("chapter_03", outline="", content=new_content)
+        base, scope = memory_base_state_for(self.project, "chapter_03")
+        source = self.project.load_story_state()
+        proposal = ChapterMemoryProposal(
+            "chapter_03",
+            chapter_content_hash(new_content),
+            canonical_hash(base),
+            "context",
+            ChapterDigest(new_content),
+            (),
+            (),
+            {**base, "current_location": new_content},
+            base_state_scope=scope,
+            source_state_hash=canonical_hash(source),
+        )
+        changed = self.project.load_story_state()
+        changed["current_location"] = "用户并发修改"
+        self.project.save_story_state(changed)
+
+        with self.assertRaisesRegex(ValueError, "全局故事状态"):
+            AIResultService.commit_memory_proposal(
+                self.project,
+                "chapter_03",
+                proposal,
+            )
+
+    def test_commit_invalidates_downstream_memory_atomically(self):
+        self.adopt("chapter_02", "第二章终态")
+        self.adopt("chapter_03", "第三章旧稿终态")
+        self.adopt("chapter_04", "第四章终态")
+        new_content = "第三章新稿终态"
+        self.project.save_chapter("chapter_03", outline="", content=new_content)
+        base, scope = memory_base_state_for(self.project, "chapter_03")
+        source = self.project.load_story_state()
+        proposal = ChapterMemoryProposal(
+            "chapter_03",
+            chapter_content_hash(new_content),
+            canonical_hash(base),
+            "context",
+            ChapterDigest(new_content),
+            (),
+            (),
+            {**base, "current_location": new_content},
+            base_state_scope=scope,
+            source_state_hash=canonical_hash(source),
+        )
+
+        result = AIResultService.commit_memory_proposal(
+            self.project,
+            "chapter_03",
+            proposal,
+        )
+
+        self.assertEqual(result.invalidated_chapters, ("chapter_04",))
+        self.assertNotIn("chapter_04", load_accepted_memory(self.project))
+        self.assertNotIn("chapter_04", self.project.load_chapter_summaries())
+        self.assertEqual(self.project.load_story_state()["current_chapter"], 3)
 
     def test_snapshot_invalidates_when_earlier_dependency_changes(self):
         self.project.save_chapter("chapter_02", outline="", content="旧线索")

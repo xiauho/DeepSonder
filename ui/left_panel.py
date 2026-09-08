@@ -34,6 +34,7 @@ class LeftPanel(QWidget):
     system_importance_requested = Signal(str, str)
     delete_chapter_requested = Signal(str)
     delete_character_requested = Signal(str)
+    sync_character_requested = Signal(str)
     delete_canon_requested = Signal(str, str)
     new_timeline_requested = Signal()
     toggle_requested = Signal()
@@ -382,6 +383,12 @@ class LeftPanel(QWidget):
         if not path_str or category not in {"章节", "角色", "世界观", "时间线"}:
             return
         menu = QMenu(self.tree)
+        if category == "角色":
+            sync_action = menu.addAction("同步角色档案…")
+            sync_action.triggered.connect(
+                lambda _checked=False, path=str(path_str): self.sync_character_requested.emit(path)
+            )
+            menu.addSeparator()
         delete_action = menu.addAction("移入回收站")
         if category == "章节":
             delete_action.triggered.connect(

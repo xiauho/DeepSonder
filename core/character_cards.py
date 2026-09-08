@@ -6,8 +6,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .character_card_sync import replace_managed_state
 from .project import NovelProject
-from .project_data import ProjectDataStore, sanitize_filename
+from .project_data import CANON_ENTRY_TYPES, ProjectDataStore, sanitize_filename
 
 
 @dataclass(frozen=True)
@@ -65,31 +66,18 @@ def missing_character_cards(
 def render_character_card(candidate: CharacterCardCandidate) -> str:
     """Render a conservative draft card from tracked story state."""
     details = candidate.details
-    lines = [f"# {candidate.name}", ""]
-    fields = (
-        ("当前状态", details.get("state")),
-        ("当前位置", details.get("location")),
-        ("当前战力", details.get("power_level")),
+    template = str(CANON_ENTRY_TYPES["character"]["template"]).format(
+        title=candidate.name
     )
-    for label, value in fields:
-        if value not in (None, ""):
-            lines.append(f"- {label}：{value}")
-
-    items = details.get("items")
-    if isinstance(items, (list, tuple)) and items:
-        item_text = "、".join(str(item) for item in items if str(item).strip())
-        if item_text:
-            lines.append(f"- 持有物：{item_text}")
-
-    relations = details.get("relations")
-    if isinstance(relations, dict) and relations:
-        lines.append("- 关系：")
-        for name, relation in relations.items():
-            if str(name).strip() and str(relation).strip():
-                lines.append(f"  - {name}：{relation}")
-    if len(lines) == 2:
-        lines.append("- 备注：由故事记忆生成的待完善角色卡。")
-    return "\n".join(lines).rstrip() + "\n"
+    managed = {
+        key: details.get(key)
+        for key in ("state", "location", "power_level", "items", "relations")
+        if key in details
+    }
+    rendered = replace_managed_state(template, managed)
+    if not managed:
+        rendered = rendered.rstrip() + "\n\n- 备注：由故事记忆生成的待完善角色卡。\n"
+    return rendered
 
 
 def create_character_cards(

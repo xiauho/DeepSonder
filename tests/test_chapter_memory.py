@@ -128,6 +128,9 @@ class ChapterMemoryProtocolTests(TestCase):
         self.assertNotIn('"completion_message"', response_contract)
         self.assertNotIn(ledger.chapter_hash, prompt.user_prompt)
         self.assertNotIn(canonical_hash(state), prompt.user_prompt)
+        self.assertIn("严格表示本章开始前的状态", prompt.user_prompt)
+        self.assertIn("不能只凭“一行人”“众人”", prompt.user_prompt)
+        self.assertIn("同时引用地点事实", prompt.user_prompt)
 
     def test_v2_response_must_match_compact_request_id(self):
         ledger = make_ledger()
@@ -247,6 +250,93 @@ class ChapterMemoryProtocolTests(TestCase):
         value["changes"][0]["kind"] = "set_character_relation"
         value["changes"][0]["field"] = "顾青"
         value["changes"][0]["value"] = "盟友"
+
+        proposal = parse_memory_proposal(
+            value,
+            ledger,
+            state,
+            expected_context_hash="context-hash",
+        )
+
+        self.assertTrue(proposal.has_blockers)
+        self.assertIn("unsupported_patch", {item.kind for item in proposal.conflicts})
+
+    def test_group_location_and_named_presence_can_support_character_location(self):
+        ledger = make_ledger()
+        group_location = FactRecord(
+            "fact_group_location",
+            "location",
+            "一行人",
+            "停下休整",
+            "北港",
+            "chapter_01:p0001",
+            "explicit",
+        )
+        named_presence = FactRecord(
+            "fact_named_presence",
+            "event",
+            "林舟",
+            "随队到达",
+            "与一行人共同抵达休整处",
+            "chapter_01:p0001",
+            "explicit",
+        )
+        ledger = ChapterFactLedger(
+            chapter_id=ledger.chapter_id,
+            chapter_hash=ledger.chapter_hash,
+            chunks=ledger.chunks,
+            facts=(group_location, named_presence),
+            unknowns=(),
+            cache_hits=0,
+            extracted_chunks=1,
+        )
+        state = base_state()
+        value = valid_proposal(ledger, state)
+        value["digest"]["key_events"][0]["fact_ids"] = ["fact_group_location"]
+        value["digest"]["location_changes"][0]["fact_ids"] = ["fact_group_location"]
+        value["changes"][0]["evidence_fact_ids"] = [
+            "fact_group_location",
+            "fact_named_presence",
+        ]
+
+        proposal = parse_memory_proposal(
+            value,
+            ledger,
+            state,
+            expected_context_hash="context-hash",
+        )
+
+        self.assertFalse(proposal.has_blockers)
+        self.assertEqual(
+            proposal.resulting_state["characters"]["林舟"]["location"],
+            "北港",
+        )
+
+    def test_anonymous_group_location_alone_cannot_support_character_location(self):
+        ledger = make_ledger()
+        group_location = FactRecord(
+            "fact_group_location",
+            "location",
+            "一行人",
+            "停下休整",
+            "北港",
+            "chapter_01:p0001",
+            "explicit",
+        )
+        ledger = ChapterFactLedger(
+            chapter_id=ledger.chapter_id,
+            chapter_hash=ledger.chapter_hash,
+            chunks=ledger.chunks,
+            facts=(group_location,),
+            unknowns=(),
+            cache_hits=0,
+            extracted_chunks=1,
+        )
+        state = base_state()
+        value = valid_proposal(ledger, state)
+        value["digest"]["key_events"][0]["fact_ids"] = ["fact_group_location"]
+        value["digest"]["location_changes"][0]["fact_ids"] = ["fact_group_location"]
+        value["changes"][0]["evidence_fact_ids"] = ["fact_group_location"]
 
         proposal = parse_memory_proposal(
             value,
@@ -518,6 +608,14 @@ class ChapterMemoryWorkflowTests(TestCase):
             )
             self.assertNotIn("summary", proposal_cache)
             self.assertNotIn("expected_before", proposal_cache["changes"][0])
+
+            refreshed = workflow.update_memory(
+                project,
+                "chapter_01",
+                force_refresh=True,
+            )
+            self.assertFalse(refreshed.cache_hit)
+            self.assertEqual(len(dsh.calls), first_calls + 1)
 
     def test_oversized_ledger_uses_hierarchical_reduction(self):
         facts = tuple(

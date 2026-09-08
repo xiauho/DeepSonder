@@ -94,7 +94,11 @@ class ProjectDataStoreTests(TestCase):
             self.assertEqual(character, project.canon_dir / "characters" / "新角色.md")
             self.assertEqual(world, project.canon_dir / "world" / "新世界.md")
             self.assertEqual(power, project.canon_dir / "power" / "新体系.md")
-            self.assertIn("## 秘密与人物弧线", character.read_text(encoding="utf-8"))
+            character_text = character.read_text(encoding="utf-8")
+            self.assertIn("## 秘密与人物弧线", character_text)
+            self.assertIn("<!-- novalist:character-card:v2 -->", character_text)
+            self.assertIn("## 能力档案", character_text)
+            self.assertIn("novalist:auto-state:v1:start", character_text)
             self.assertIn("## 对剧情的约束", world.read_text(encoding="utf-8"))
             self.assertIn("## 代价与副作用", power.read_text(encoding="utf-8"))
 

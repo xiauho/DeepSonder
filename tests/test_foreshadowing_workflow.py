@@ -8,6 +8,7 @@ from PySide6.QtCore import QCoreApplication, QObject, Signal
 
 from core.foreshadowing import ForeshadowingStore
 from core.expansion import ExpansionRunResult
+from core.prose_supplement import ProseSupplementRunResult
 from core.project import NovelProject
 from ui.ai_result_coordinator import CommitOutcome
 from ui.ai_workflow_controller import (
@@ -139,8 +140,8 @@ class ForeshadowingWorkflowTests(TestCase):
                 first_raw_output=None,
                 plain_text_fallback_count=0,
                 target_chars=3000,
-                min_chars=2550,
-                max_chars=3450,
+                min_chars=2850,
+                max_chars=3150,
                 initial_char_count=2000,
                 final_char_count=2900,
                 supplement_attempted=True,
@@ -163,5 +164,54 @@ class ForeshadowingWorkflowTests(TestCase):
                 controller.ai_result_coordinator.confirm_expansion.call_args.kwargs
             )
             self.assertEqual(confirm_kwargs["target_chars"], 3000)
-            self.assertEqual(confirm_kwargs["min_chars"], 2550)
-            self.assertEqual(confirm_kwargs["max_chars"], 3450)
+            self.assertEqual(confirm_kwargs["min_chars"], 2850)
+            self.assertEqual(confirm_kwargs["max_chars"], 3150)
+
+    def test_manual_continuation_supplement_reopens_preview_with_updated_counts(self) -> None:
+        session = ProjectSession()
+        ai_controller = FakeAIController()
+        ai_controller.task_context = {
+            "writing_kind": "continuation",
+            "current_chars": 800,
+            "requested_chars": 2200,
+            "target_chapter_chars": 3000,
+            "run_target_chars": 3000,
+            "initial_generated_chars": 1500,
+            "supplement_added_total": 200,
+            "supplement_attempt_count": 1,
+            "current_tail": "原文结尾",
+        }
+        controller = AIWorkflowController(
+            config={},
+            project_session=session,
+            editor=Mock(),
+            document_controller=FakeDocumentController(),
+            ai_controller=ai_controller,
+            ai_engine_controller=object(),
+            inspector=object(),
+            reports_page=object(),
+            go_to_writing=lambda: True,
+        )
+        controller.ai_result_coordinator.confirm_continuation = Mock(
+            return_value=CommitOutcome(status="cancelled")
+        )
+        result = ProseSupplementRunResult(
+            text="续" * 2100,
+            initial_char_count=1700,
+            final_char_count=2100,
+            added_char_count=400,
+            applied=True,
+        )
+
+        controller._on_writing_supplement_done(
+            SimpleNamespace(chapter_id="chapter_01"),
+            result,
+        )
+
+        confirm_kwargs = (
+            controller.ai_result_coordinator.confirm_continuation.call_args.kwargs
+        )
+        self.assertEqual(confirm_kwargs["generated_chars"], 2100)
+        self.assertEqual(confirm_kwargs["supplement_added_chars"], 600)
+        self.assertEqual(confirm_kwargs["supplement_attempt_count"], 2)
+        self.assertEqual(confirm_kwargs["length_status"], "qualified")

@@ -13,6 +13,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -33,6 +34,11 @@ from PySide6.QtWidgets import (
 )
 
 from core.chapter_sections import chapter_body_text
+from core.character_card_sync import (
+    CharacterCardSyncError,
+    apply_character_card_sync,
+    build_character_card_sync_proposal,
+)
 from core.config import get_chapter_target_chars, load_config
 from core.continuation import MIN_CONTINUATION_CHARS
 from core.project import NovelProject
@@ -51,6 +57,10 @@ from ui.ai_engine_controller import AIEngineController
 from ui.ai_task_view_controller import AITaskViewController
 from ui.ai_workflow_controller import AIWorkflowController
 from ui.appearance_controller import AppearanceController
+from ui.character_card_sync_dialog import (
+    CharacterCardSyncPreviewDialog,
+    CharacterCardSyncSelectionDialog,
+)
 from ui.document_controller import DocumentController
 from ui.export_controller import ExportController
 from ui.editor import Editor
@@ -295,11 +305,12 @@ class MainWindow(QMainWindow):
         )
         self.actions["delete_chapter"].setEnabled(False)
         action("new_character", "新建角色", self.new_character, "Ctrl+Alt+C")
+        action("character_sync", "同步角色档案…", lambda: self.sync_character_card())
         action("new_world", "新建世界观条目", self.new_world_entry)
         action("new_power", "新建体系设定", self.new_power_entry)
         action("new_timeline", "新建时间线", self.new_timeline)
-        action("undo", "撤销", lambda: self.editor.text_edit.undo(), "Ctrl+Z")
-        action("redo", "重做", lambda: self.editor.text_edit.redo(), "Ctrl+Y")
+        action("undo", "撤销", lambda: self.editor.undo(), "Ctrl+Z")
+        action("redo", "重做", lambda: self.editor.redo(), "Ctrl+Y")
         action("find", "查找与替换", lambda: self.editor.show_find(), "Ctrl+F")
         action("focus", "专注模式", self.toggle_focus_mode, "Ctrl+K")
         action("navigation", "显示/隐藏资料面板", self.toggle_navigation_panel, "Ctrl+Shift+L")
@@ -534,6 +545,7 @@ class MainWindow(QMainWindow):
         create_menu.addAction(self.actions["new_chapter"])
         create_menu.addAction(self.actions["delete_chapter"])
         create_menu.addAction(self.actions["new_character"])
+        create_menu.addAction(self.actions["character_sync"])
         create_menu.addAction(self.actions["new_world"])
         create_menu.addAction(self.actions["new_power"])
         create_menu.addAction(self.actions["new_timeline"])
@@ -594,6 +606,7 @@ class MainWindow(QMainWindow):
         self.left_panel.system_importance_requested.connect(self.set_system_importance)
         self.left_panel.delete_chapter_requested.connect(self.delete_chapter_by_path)
         self.left_panel.delete_character_requested.connect(self.delete_character_by_path)
+        self.left_panel.sync_character_requested.connect(self.sync_character_card)
         self.left_panel.delete_canon_requested.connect(self.delete_canon_by_path)
         self.left_panel.new_timeline_requested.connect(self.new_timeline)
         self.left_panel.toggle_requested.connect(self.toggle_navigation_panel)
@@ -1185,6 +1198,75 @@ class MainWindow(QMainWindow):
     def new_character(self) -> None:
         self.new_canon_entry("character")
 
+    def sync_character_card(self, card_path: str | None = None) -> None:
+        """Preview and apply an evidence-bound sync to one character card."""
+        project = self.project
+        if project is None:
+            self._require_project()
+            return
+        if self.ai_controller.is_running():
+            QMessageBox.information(
+                self,
+                "AI 正在工作",
+                "请等待当前 AI 任务完成后再同步角色档案。",
+            )
+            return
+        if not self._save_if_dirty():
+            return
+
+        default_card: Path | str | None = card_path
+        if default_card is None and self.editor.current_category() == "角色":
+            default_card = self.editor.current_path()
+        selection = CharacterCardSyncSelectionDialog(
+            project,
+            default_card=default_card,
+            parent=self,
+        )
+        if selection.exec() != QDialog.DialogCode.Accepted:
+            return
+        chosen = selection.selection()
+        if chosen is None:
+            return
+        selected_card, chapter_ids = chosen
+        try:
+            proposal = build_character_card_sync_proposal(
+                project,
+                selected_card,
+                chapter_ids,
+            )
+        except (CharacterCardSyncError, OSError, UnicodeError, ValueError) as exc:
+            QMessageBox.warning(self, "无法生成同步预览", str(exc))
+            return
+
+        preview = CharacterCardSyncPreviewDialog(proposal, self)
+        if preview.exec() != QDialog.DialogCode.Accepted:
+            return
+        try:
+            result = apply_character_card_sync(
+                project,
+                proposal,
+                preview.selected_fields(),
+            )
+        except (CharacterCardSyncError, OSError, UnicodeError, ValueError) as exc:
+            QMessageBox.warning(self, "角色档案同步失败", str(exc))
+            return
+
+        self.project_session.notify_data_changed([result.card_path], kind="canon")
+        current = self.editor.current_path()
+        if current and Path(current).resolve() == result.card_path.resolve():
+            self.editor.reload_current_file()
+        self.left_panel.select_path(result.card_path)
+        labels = "、".join(
+            patch.label for patch in proposal.patches if patch.field in result.applied_fields
+        )
+        self.status_message.setText(f"角色档案已同步 · {proposal.character_name}")
+        QMessageBox.information(
+            self,
+            "角色档案已同步",
+            f"已更新：{labels}\n本次同步截止章节：{proposal.as_of_chapter}\n\n"
+            f"同步前版本已备份到：\n{result.backup_path}",
+        )
+
     def new_world_entry(self) -> None:
         self.new_canon_entry("world")
 
@@ -1713,6 +1795,13 @@ class MainWindow(QMainWindow):
             return
         running = self.ai_controller.is_running()
         chapter_open = self.project is not None and self.editor.current_chapter_id() is not None
+        if "character_sync" in self.actions:
+            self.actions["character_sync"].setEnabled(
+                self.project is not None
+                and not running
+                and bool(self.project.list_characters())
+                and bool(self.project.list_chapters())
+            )
         self.actions["expand"].setEnabled(chapter_open and not running)
         continuation_enabled = False
         continuation_tip = "请先打开一个包含正文的章节。"

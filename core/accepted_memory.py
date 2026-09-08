@@ -58,6 +58,18 @@ def make_accepted_record(project, proposal, state: dict, base_state: dict) -> di
                     chapter_content_hash(project.load_chapter(path.stem).content),
                 ))
         dependencies.sort()
+    base_coverage = max(0, ordinal - 1) if ordinal is not None else None
+    base_dependencies = []
+    if base_coverage is not None:
+        for path in project.list_chapters():
+            number = chapter_number_from_id(path.stem)
+            if number is not None and number <= base_coverage:
+                base_dependencies.append((
+                    number,
+                    path.stem,
+                    chapter_content_hash(project.load_chapter(path.stem).content),
+                ))
+        base_dependencies.sort()
     record = {
         "schema_version": ACCEPTED_MEMORY_SCHEMA,
         "chapter_id": proposal.chapter_id,
@@ -68,6 +80,15 @@ def make_accepted_record(project, proposal, state: dict, base_state: dict) -> di
         "context_hash": proposal.context_hash,
         "accepted_at": datetime.now(timezone.utc).isoformat(),
         "state": deepcopy(state),
+        # Preserve the actual pre-chapter state so chapter 1 and projects with
+        # gaps can safely replace an already-adopted version of the same chapter.
+        "base_state": deepcopy(base_state),
+        "base_state_scope": str(getattr(proposal, "base_state_scope", "") or ""),
+        "base_state_through_chapter": base_coverage,
+        "base_dependency_hash": (
+            memory_hash(base_dependencies) if base_coverage is not None else ""
+        ),
+        "base_dependency_count": len(base_dependencies),
         "state_through_chapter": coverage,
         # Store a compact ordered fingerprint instead of every preceding hash in
         # every record; this keeps adopted-memory storage linear in chapter count.
@@ -109,16 +130,7 @@ class AcceptedMemoryView:
         record = self.records.get(chapter_id)
         if record is None:
             return "unverified"
-        if not isinstance(record, dict):
-            return "invalid"
-        payload = {key: value for key, value in record.items() if key != "record_hash"}
-        if (record.get("schema_version") != ACCEPTED_MEMORY_SCHEMA
-                or record.get("chapter_id") != chapter_id
-                or record.get("record_hash") != memory_hash(payload)
-                or not isinstance(record.get("digest"), dict)
-                or not isinstance(record.get("state"), dict)
-                or not isinstance(record.get("state_dependency_hash"), str)
-                or type(record.get("state_dependency_count")) is not int):
+        if not self._record_integrity_valid(chapter_id, record):
             return "invalid"
         if self.source_hash(chapter_id) is None:
             return "missing_source"
@@ -126,6 +138,21 @@ class AcceptedMemoryView:
                 or record.get("summary_hash") != memory_hash(self.summaries.get(chapter_id))):
             return "stale"
         return "verified"
+
+    @staticmethod
+    def _record_integrity_valid(chapter_id: str, record: object) -> bool:
+        if not isinstance(record, dict):
+            return False
+        payload = {key: value for key, value in record.items() if key != "record_hash"}
+        return bool(
+            record.get("schema_version") == ACCEPTED_MEMORY_SCHEMA
+            and record.get("chapter_id") == chapter_id
+            and record.get("record_hash") == memory_hash(payload)
+            and isinstance(record.get("digest"), dict)
+            and isinstance(record.get("state"), dict)
+            and isinstance(record.get("state_dependency_hash"), str)
+            and type(record.get("state_dependency_count")) is int
+        )
 
     def dependency_signature(self, coverage: int) -> tuple[str, int]:
         if coverage not in self._dependency_signatures:
@@ -163,3 +190,52 @@ class AcceptedMemoryView:
         if not self.records and not self.error and type(latest_ordinal) is int and latest_ordinal < target:
             return deepcopy(latest), "legacy_unverified"
         return {}, "future_or_unverified_state_omitted"
+
+    def base_state_for(self, current_id: str, latest: dict) -> tuple[dict, str]:
+        """Return state strictly before ``current_id`` for memory replacement.
+
+        Normal context reads only need an earlier verified endpoint. Memory
+        replacement additionally needs the recorded pre-state for chapter 1 or
+        sparse/legacy projects where no earlier accepted endpoint exists.
+        """
+        state, scope = self.state_for(current_id, latest)
+        if scope.startswith("snapshot:") or scope == "legacy_unverified":
+            return state, scope
+
+        target = chapter_number_from_id(current_id)
+        record = self.records.get(current_id)
+        if target is not None and self._record_integrity_valid(current_id, record):
+            assert isinstance(record, dict)
+            recorded_base = record.get("base_state")
+            base_coverage = record.get("base_state_through_chapter")
+            if (
+                isinstance(recorded_base, dict)
+                and type(base_coverage) is int
+                and isinstance(record.get("base_dependency_hash"), str)
+                and type(record.get("base_dependency_count")) is int
+            ):
+                dependency_hash, dependency_count = self.dependency_signature(
+                    base_coverage
+                )
+                if (
+                    record["base_dependency_hash"] == dependency_hash
+                    and record["base_dependency_count"] == dependency_count
+                ):
+                    return deepcopy(recorded_base), f"recorded_base:{current_id}"
+
+        latest_ordinal = latest.get("current_chapter")
+        if (
+            target is not None
+            and current_id not in self.records
+            and type(latest_ordinal) is int
+            and latest_ordinal <= target
+        ):
+            return deepcopy(latest), "legacy_current"
+        return {}, "future_or_unverified_state_omitted"
+
+
+def memory_base_state_for(project, chapter_id: str, latest: dict | None = None) -> tuple[dict, str]:
+    """Resolve the immutable pre-chapter state used by memory generation/commit."""
+    latest_state = deepcopy(latest if isinstance(latest, dict) else project.load_story_state())
+    summaries = project.load_chapter_summaries()
+    return AcceptedMemoryView(project, summaries).base_state_for(chapter_id, latest_state)

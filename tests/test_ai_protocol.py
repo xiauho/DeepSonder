@@ -9,10 +9,31 @@ from core.ai_protocol import (
     parse_continuation,
     parse_expansion,
     parse_expansion_supplement,
+    parse_prose_supplement,
 )
 
 
 class AIProtocolTests(TestCase):
+    def test_prose_supplement_uses_app_anchor_ids_and_keeps_valid_items(self) -> None:
+        result = parse_prose_supplement(
+            {
+                "type": "prose_length_supplement",
+                "chapter_id": "chapter_01",
+                "insertions": [
+                    {"anchor_id": "UNKNOWN", "text": "无效补写。"},
+                    {"anchor_id": "P002", "text": "有效补写正文。"},
+                ],
+            },
+            expected_chapter_id="chapter_01",
+            source_text="第一段。\n\n第二段。",
+            max_added_chars=100,
+            insertion_points={"P001": 4, "P002": 9},
+        )
+
+        self.assertEqual(len(result.insertions), 1)
+        self.assertEqual(result.insertions[0].anchor_id, "P002")
+        self.assertIn("未知 anchor_id", result.warnings[0])
+
     def test_expansion_supplement_requires_unique_source_anchor(self) -> None:
         source = "这是一个足够长而且只出现一次的原文锚点，用于安全插入后续补写内容。"
         result = parse_expansion_supplement(

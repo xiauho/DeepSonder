@@ -2,6 +2,8 @@ from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
+from PySide6.QtWidgets import QMessageBox
+
 from core.ai_protocol import ForeshadowingSuggestion
 from ui.ai_result_coordinator import (
     AIResultCoordinator,
@@ -83,15 +85,37 @@ class AIResultCoordinatorTests(TestCase):
         self.assertEqual(outcome.value, ("f-selected",))
         replace_body.assert_called_once_with("正文")
 
+    def test_expansion_commits_the_candidate_selected_in_preview(self) -> None:
+        replace_body = Mock()
+        dialog = SimpleNamespace(
+            confirmed=True,
+            exec=Mock(),
+            selected_text=lambda: "原稿",
+            selected_resolution_ids=lambda: (),
+        )
+        with patch("ui.ai_result_coordinator.ExpansionPreviewDialog", return_value=dialog):
+            outcome = AIResultCoordinator().confirm_expansion(
+                text="纠偏稿",
+                char_count=3,
+                length_ok=True,
+                has_existing_content=False,
+                context_matches=lambda: True,
+                replace_body=replace_body,
+            )
+
+        self.assertEqual(outcome.status, "committed")
+        replace_body.assert_called_once_with("原稿")
+
     def test_continuation_commits_only_after_confirmation_and_fresh_context(self) -> None:
         append_body = Mock()
+        continuation_text = "续" * 1900
         dialog = SimpleNamespace(confirmed=True, exec=Mock())
         with patch(
             "ui.ai_result_coordinator.ContinuationPreviewDialog",
             return_value=dialog,
         ):
             outcome = AIResultCoordinator().confirm_continuation(
-                text="续写正文",
+                text=continuation_text,
                 current_tail="原文结尾",
                 current_chars=1000,
                 requested_chars=2000,
@@ -103,7 +127,7 @@ class AIResultCoordinatorTests(TestCase):
             )
 
         self.assertEqual(outcome.status, "committed")
-        append_body.assert_called_once_with("续写正文")
+        append_body.assert_called_once_with(continuation_text)
 
     def test_stale_continuation_is_not_appended(self) -> None:
         append_body = Mock()
@@ -126,6 +150,65 @@ class AIResultCoordinatorTests(TestCase):
 
         self.assertEqual(outcome.status, "stale")
         append_body.assert_not_called()
+
+    def test_under_length_continuation_can_request_another_supplement(self) -> None:
+        append_body = Mock()
+        dialog = SimpleNamespace(
+            confirmed=False,
+            retry_requested=True,
+            exec=Mock(),
+            selected_text=lambda: "选中的偏短续写",
+        )
+        with patch(
+            "ui.ai_result_coordinator.ContinuationPreviewDialog",
+            return_value=dialog,
+        ):
+            outcome = AIResultCoordinator().confirm_continuation(
+                text="偏短续写",
+                current_tail="原文结尾",
+                current_chars=800,
+                requested_chars=2200,
+                generated_chars=1500,
+                target_chapter_chars=3000,
+                run_target_chars=3000,
+                length_ok=False,
+                length_status="severely_under",
+                context_matches=lambda: True,
+                append_body=append_body,
+            )
+
+        self.assertEqual(outcome.status, "supplement_requested")
+        self.assertEqual(outcome.value, "选中的偏短续写")
+        append_body.assert_not_called()
+
+    def test_severely_short_expansion_requires_explicit_second_confirmation(self) -> None:
+        replace_body = Mock()
+        dialog = SimpleNamespace(
+            confirmed=True,
+            retry_requested=False,
+            exec=Mock(),
+            selected_resolution_ids=lambda: (),
+        )
+        with patch(
+            "ui.ai_result_coordinator.ExpansionPreviewDialog",
+            return_value=dialog,
+        ), patch(
+            "ui.ai_result_coordinator.QMessageBox.question",
+            return_value=QMessageBox.StandardButton.No,
+        ):
+            outcome = AIResultCoordinator().confirm_expansion(
+                text="短" * 2497,
+                char_count=2497,
+                target_chars=3000,
+                length_ok=False,
+                length_status="severely_under",
+                has_existing_content=False,
+                context_matches=lambda: True,
+                replace_body=replace_body,
+            )
+
+        self.assertEqual(outcome.status, "cancelled")
+        replace_body.assert_not_called()
 
     def test_memory_cancel_and_stale_context_do_not_commit(self) -> None:
         commit = Mock()
