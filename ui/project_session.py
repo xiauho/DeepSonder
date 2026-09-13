@@ -8,9 +8,10 @@ from typing import Iterable
 
 from PySide6.QtCore import QObject, Signal
 
+from application.project_service import OpenedProject, ProjectService
 from core.project import NovelProject
 from core.project_data import ProjectDataStore
-from core.project_migrations import ProjectMigrationResult, migrate_project
+from core.project_migrations import ProjectMigrationResult
 
 
 @dataclass(frozen=True)
@@ -32,8 +33,9 @@ class ProjectSession(QObject):
     project_changed = Signal(object)
     data_change_detail = Signal(object, object)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, project_service: ProjectService | None = None):
         super().__init__(parent)
+        self.project_service = project_service or ProjectService()
         self._project: NovelProject | None = None
         self._data_store: ProjectDataStore | None = None
         self._last_migration_result: ProjectMigrationResult | None = None
@@ -58,13 +60,18 @@ class ProjectSession(QObject):
 
     def load(self, path: Path) -> NovelProject:
         """Load and activate one valid project directory."""
-        path = Path(path)
-        if not NovelProject.is_project(path):
-            raise ValueError(f"该目录不是有效的 Novalist 创作项目：\n{path}")
-        self._last_migration_result = migrate_project(path)
-        project = NovelProject(path)
-        self.set_project(project)
-        return project
+        opened = self.project_service.open_project(path)
+        return self.activate_opened(opened)
+
+    def activate_opened(self, opened: OpenedProject) -> NovelProject:
+        """Activate a project already validated by the application service."""
+        if not isinstance(opened, OpenedProject):
+            raise TypeError("opened 必须是 OpenedProject。")
+        self._last_migration_result = opened.migration
+        self._project = opened.project
+        self._data_store = opened.data_store
+        self.project_changed.emit(opened.project)
+        return opened.project
 
     def set_project(self, project: NovelProject | None) -> None:
         if project is not None and not isinstance(project, NovelProject):

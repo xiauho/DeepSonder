@@ -1,0 +1,32 @@
+{
+  "current_chapter": 2,
+  "current_location": "雾港旧灯塔",
+  "characters": {
+    "林砚": {
+      "location": "雾港旧灯塔",
+      "state": "保持警惕，决定进入灯塔地下室",
+      "power_level": "普通人",
+      "items": [
+        "银钥匙",
+        "黑色笔记本"
+      ],
+      "relations": {
+        "苏乔": "互相信任的调查搭档",
+        "白鸥": "身份不明的线人"
+      }
+    },
+    "苏乔": {
+      "location": "雾港旧灯塔",
+      "state": "正在检查灯塔地下室入口",
+      "power_level": "受过训练",
+      "items": [
+        "旧表",
+        "手电筒"
+      ],
+      "relations": {
+        "林砚": "需要保护但可以托付后背的同伴"
+      }
+    }
+  }
+}
+

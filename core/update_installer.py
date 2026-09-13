@@ -10,6 +10,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 import zipfile
 from dataclasses import dataclass
@@ -28,7 +29,11 @@ COPY_CHUNK_BYTES = 1024 * 1024
 PROCESS_EXIT_TIMEOUT_SECONDS = 120
 HEALTH_CHECK_TIMEOUT_SECONDS = 60
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+_TRANSACTION_ID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 _DRIVE_PATH_PATTERN = re.compile(r"^[A-Za-z]:")
+TARGET_TRANSACTION_PREFIX = ".novalist-update-"
+NEW_MANIFEST_SNAPSHOT_NAME = "new-package-files.json"
+MINIMUM_TRANSACTION_FREE_BYTES = 16 * 1024 * 1024
 _WINDOWS_RESERVED_NAMES = {
     "CON",
     "PRN",
@@ -69,6 +74,7 @@ class PackageManifest:
 
 @dataclass(frozen=True)
 class InstallRequest:
+    transaction_id: str
     current_pid: int
     current_version: AppVersion
     target_version: AppVersion
@@ -212,6 +218,9 @@ def load_install_request(request_path: Path) -> InstallRequest:
         raise UpdateInstallError("自动安装请求包含无效进程或版本。") from exc
     if current_pid <= 0 or target_version <= current_version:
         raise UpdateInstallError("自动安装请求中的版本顺序无效。")
+    transaction_id = str(data.get("transaction_id") or "").strip().casefold()
+    if not _TRANSACTION_ID_PATTERN.fullmatch(transaction_id):
+        raise UpdateInstallError("自动安装请求中的事务标识无效。")
 
     transaction_root = request_path.parent.resolve()
     install_dir = _absolute_path(data.get("install_dir"), "安装目录")
@@ -222,6 +231,7 @@ def load_install_request(request_path: Path) -> InstallRequest:
     if install_dir.parent == install_dir or len(install_dir.parts) < 2:
         raise UpdateInstallError("拒绝将磁盘根目录作为安装目录。")
     return InstallRequest(
+        transaction_id=transaction_id,
         current_pid=current_pid,
         current_version=current_version,
         target_version=target_version,
@@ -246,8 +256,12 @@ def install_update(
     launch = launch_application or launch_novalist
     result_path = request.transaction_root / "install-result.json"
     journal_path = request.transaction_root / "install-journal.json"
-    staging_root = request.transaction_root / "staging"
-    backup_root = request.transaction_root / "backup"
+    target_transaction_root = (
+        request.install_dir / f"{TARGET_TRANSACTION_PREFIX}{request.transaction_id}"
+    )
+    target_journal_path = target_transaction_root / "install-journal.json"
+    staging_root = target_transaction_root / "staging"
+    backup_root = target_transaction_root / "backup"
     old_manifest: PackageManifest | None = None
     new_manifest: PackageManifest | None = None
     backup_complete = False
@@ -256,6 +270,38 @@ def install_update(
     try:
         wait(request.current_pid, PROCESS_EXIT_TIMEOUT_SECONDS)
         main_exited = True
+        try:
+            recovered = _recover_existing_transaction(
+                request,
+                target_transaction_root,
+                journal_path,
+                result_path,
+                launch,
+            )
+        except Exception as recovery_exc:
+            # Preserve the target-volume recovery journal and backup verbatim;
+            # overwriting their state here could make a retry unrecoverable.
+            message = f"未完成的自动更新恢复失败：{recovery_exc}"
+            try:
+                _write_json_atomic(
+                    result_path,
+                    _result_payload(request, "recovery_failed", message),
+                )
+                _write_json_atomic(
+                    journal_path,
+                    _journal_payload(request, "recovery_failed"),
+                )
+            except OSError:
+                pass
+            current_app = request.install_dir / "Novalist.exe"
+            if current_app.is_file():
+                try:
+                    launch(current_app)
+                except OSError:
+                    pass
+            return InstallOutcome(False, False, message, result_path)
+        if recovered is not None:
+            return recovered
         _validate_verified_state(request)
         new_manifest = validate_update_archive(
             request.archive_path,
@@ -274,12 +320,41 @@ def install_update(
             ) from exc
         _verify_installed_files(request.install_dir, old_manifest)
         _reject_unmanaged_collisions(request.install_dir, old_manifest, new_manifest)
-        _extract_verified_archive(request.archive_path, staging_root, new_manifest)
-        _backup_managed_files(request.install_dir, backup_root, old_manifest)
-        backup_complete = True
-        _write_json_atomic(
+        _ensure_transaction_space(request.install_dir, old_manifest, new_manifest)
+        _assert_no_link_components(
+            request.install_dir,
+            target_transaction_root.name,
+            allow_missing=True,
+        )
+        try:
+            target_transaction_root.mkdir(exist_ok=False)
+        except OSError as exc:
+            raise UpdateInstallError("无法在安装盘创建更新事务目录。") from exc
+        _write_install_journals(
+            request,
             journal_path,
-            _journal_payload(request, "backed_up"),
+            target_journal_path,
+            "prepared",
+        )
+        _extract_verified_archive(request.archive_path, staging_root, new_manifest)
+        shutil.copy2(
+            staging_root / PACKAGE_MANIFEST_NAME,
+            target_transaction_root / NEW_MANIFEST_SNAPSHOT_NAME,
+        )
+        _backup_managed_files(request.install_dir, backup_root, old_manifest)
+        _verify_installed_files(backup_root, old_manifest)
+        backup_complete = True
+        _write_install_journals(
+            request,
+            journal_path,
+            target_journal_path,
+            "backup_verified",
+        )
+        _write_install_journals(
+            request,
+            journal_path,
+            target_journal_path,
+            "applying",
         )
         _apply_staged_files(
             request.install_dir,
@@ -287,17 +362,23 @@ def install_update(
             old_manifest,
             new_manifest,
         )
-        _write_json_atomic(journal_path, _journal_payload(request, "health_check"))
+        _write_install_journals(
+            request,
+            journal_path,
+            target_journal_path,
+            "health_check",
+        )
         check(request.install_dir / "Novalist.exe")
         _write_json_atomic(
             result_path,
             _result_payload(request, "installed", "更新已安装并通过启动自检。"),
         )
-        _write_json_atomic(journal_path, _journal_payload(request, "completed"))
-        shutil.rmtree(backup_root, ignore_errors=True)
-        shutil.rmtree(staging_root, ignore_errors=True)
-        launch(request.install_dir / "Novalist.exe")
-        return InstallOutcome(True, False, "更新安装成功。", result_path)
+        _write_install_journals(
+            request,
+            journal_path,
+            target_journal_path,
+            "committed",
+        )
     except Exception as exc:  # updater must recover the portable installation
         message = str(exc) or "自动安装失败。"
         rolled_back = False
@@ -326,6 +407,16 @@ def install_update(
                 journal_path,
                 _journal_payload(request, "rolled_back" if rolled_back else "failed"),
             )
+            if target_transaction_root.is_dir():
+                target_status = (
+                    "rolled_back"
+                    if rolled_back
+                    else "rollback_failed" if backup_complete else "failed"
+                )
+                _write_json_atomic(
+                    target_journal_path,
+                    _journal_payload(request, target_status),
+                )
         except OSError:
             pass
         current_app = request.install_dir / "Novalist.exe"
@@ -335,6 +426,18 @@ def install_update(
             except OSError:
                 pass
         return InstallOutcome(False, rolled_back, message, result_path)
+
+    try:
+        launch(request.install_dir / "Novalist.exe")
+    except Exception as exc:  # installation is committed; a relaunch is not rollback
+        message = f"更新已安装并通过启动自检，但无法自动启动：{exc}"
+        _write_json_atomic(
+            result_path,
+            _result_payload(request, "installed_launch_failed", message),
+        )
+        return InstallOutcome(False, False, message, result_path)
+    shutil.rmtree(target_transaction_root, ignore_errors=True)
+    return InstallOutcome(True, False, "更新安装成功。", result_path)
 
 
 def wait_for_process_exit(process_id: int, timeout_seconds: int) -> None:
@@ -589,18 +692,196 @@ def _rollback_managed_files(
     old: PackageManifest,
     new: PackageManifest,
 ) -> None:
-    for item in new.files:
-        target = root / Path(*PurePosixPath(item.path).parts)
-        if target.is_file():
-            target.unlink()
-    (root / PACKAGE_MANIFEST_NAME).unlink(missing_ok=True)
-    for relative in [item.path for item in old.files] + [PACKAGE_MANIFEST_NAME]:
-        source = backup / Path(*PurePosixPath(relative).parts)
+    # Restore every old file before removing new-only content. The backup is
+    # intentionally copied rather than moved so an interrupted rollback can be
+    # retried from the same verified source.
+    for item in old.files:
+        source = backup / Path(*PurePosixPath(item.path).parts)
         if not source.is_file():
-            raise UpdateInstallError(f"更新备份缺少文件：{relative}")
-        destination = root / Path(*PurePosixPath(relative).parts)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        os.replace(source, destination)
+            raise UpdateInstallError(f"更新备份缺少文件：{item.path}")
+        destination = root / Path(*PurePosixPath(item.path).parts)
+        _atomic_copy_replace(
+            source,
+            destination,
+            expected_size=item.size,
+            expected_sha256=item.sha256,
+        )
+
+    manifest_source = backup / PACKAGE_MANIFEST_NAME
+    if not manifest_source.is_file():
+        raise UpdateInstallError(f"更新备份缺少文件：{PACKAGE_MANIFEST_NAME}")
+    _atomic_copy_replace(manifest_source, root / PACKAGE_MANIFEST_NAME)
+
+    new_only = set(new.by_path) - set(old.by_path)
+    for key in new_only:
+        target = root / Path(*PurePosixPath(new.by_path[key].path).parts)
+        target.unlink(missing_ok=True)
+    _verify_installed_files(root, old)
+
+
+def _atomic_copy_replace(
+    source: Path,
+    destination: Path,
+    *,
+    expected_size: int | None = None,
+    expected_sha256: str | None = None,
+) -> None:
+    """Copy beside the destination, verify, then atomically replace it."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{destination.name}.novalist-restore-",
+        suffix=".tmp",
+        dir=destination.parent,
+    )
+    os.close(descriptor)
+    temporary = Path(temporary_name)
+    try:
+        shutil.copy2(source, temporary)
+        if expected_size is not None and temporary.stat().st_size != expected_size:
+            raise UpdateInstallError("更新备份恢复文件大小校验失败。")
+        if expected_sha256 is not None and _hash_file(temporary) != expected_sha256:
+            raise UpdateInstallError("更新备份恢复文件 SHA-256 校验失败。")
+        os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _ensure_transaction_space(
+    root: Path,
+    old: PackageManifest,
+    new: PackageManifest,
+) -> None:
+    required = (
+        sum(item.size for item in old.files)
+        + sum(item.size for item in new.files)
+        + MINIMUM_TRANSACTION_FREE_BYTES
+    )
+    try:
+        free = shutil.disk_usage(root).free
+    except OSError as exc:
+        raise UpdateInstallError("无法确认安装盘剩余空间。") from exc
+    if free < required:
+        raise UpdateInstallError("安装盘空间不足，无法安全暂存并备份更新。")
+
+
+def _write_install_journals(
+    request: InstallRequest,
+    cache_journal_path: Path,
+    target_journal_path: Path,
+    status: str,
+) -> None:
+    payload = _journal_payload(request, status)
+    # The target-volume journal is authoritative for crash recovery. Write it
+    # before the disposable cache copy whenever state advances.
+    _write_json_atomic(target_journal_path, payload)
+    _write_json_atomic(cache_journal_path, payload)
+
+
+def _recover_existing_transaction(
+    request: InstallRequest,
+    target_root: Path,
+    cache_journal_path: Path,
+    result_path: Path,
+    launch: Callable[[Path], None],
+) -> InstallOutcome | None:
+    """Recover a previously interrupted transaction for the same request."""
+    if not target_root.exists():
+        return None
+    if not target_root.is_dir():
+        raise UpdateInstallError("安装目录中的更新事务路径不是文件夹。")
+    _assert_no_link_components(request.install_dir, target_root.name)
+    target_journal_path = target_root / "install-journal.json"
+    status = ""
+    if target_journal_path.is_file():
+        try:
+            payload = json.loads(target_journal_path.read_text(encoding="utf-8-sig"))
+            if isinstance(payload, dict):
+                status = str(payload.get("status") or "")
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise UpdateInstallError("安装盘中的更新事务日志无法读取。") from exc
+
+    if status == "committed":
+        installed = _load_installed_manifest(
+            request.install_dir,
+            request.target_version,
+        )
+        _verify_installed_files(request.install_dir, installed)
+        message = "更新已安装并通过启动自检。"
+        _write_json_atomic(
+            result_path,
+            _result_payload(request, "installed", message),
+        )
+        _write_json_atomic(
+            cache_journal_path,
+            _journal_payload(request, "committed"),
+        )
+        try:
+            launch(request.install_dir / "Novalist.exe")
+        except Exception as exc:
+            message = f"更新已安装，但无法自动启动：{exc}"
+            _write_json_atomic(
+                result_path,
+                _result_payload(request, "installed_launch_failed", message),
+            )
+            return InstallOutcome(False, False, message, result_path)
+        shutil.rmtree(target_root, ignore_errors=True)
+        return InstallOutcome(True, False, "更新安装成功。", result_path)
+
+    recoverable = {"backup_verified", "applying", "health_check", "rollback_failed"}
+    if status in recoverable:
+        backup_root = target_root / "backup"
+        old_manifest = _load_installed_manifest(
+            backup_root,
+            request.current_version,
+        )
+        new_manifest_path = target_root / NEW_MANIFEST_SNAPSHOT_NAME
+        try:
+            new_manifest = parse_package_manifest(
+                new_manifest_path.read_bytes(),
+                expected_version=request.target_version,
+            )
+        except OSError as exc:
+            raise UpdateInstallError("更新事务缺少新版文件清单快照。") from exc
+        _verify_installed_files(backup_root, old_manifest)
+        _rollback_managed_files(
+            request.install_dir,
+            backup_root,
+            old_manifest,
+            new_manifest,
+        )
+        message = "检测到未完成的自动更新，已恢复原版本。"
+        _write_json_atomic(
+            result_path,
+            _result_payload(request, "rolled_back", message),
+        )
+        _write_install_journals(
+            request,
+            cache_journal_path,
+            target_journal_path,
+            "rolled_back",
+        )
+        try:
+            launch(request.install_dir / "Novalist.exe")
+        except OSError:
+            pass
+        return InstallOutcome(False, True, message, result_path)
+
+    # Before the applying state, installed files have not been changed. A
+    # verified old installation permits discarding partial staging and retrying.
+    installed = _load_installed_manifest(request.install_dir, request.current_version)
+    _verify_installed_files(request.install_dir, installed)
+    shutil.rmtree(target_root)
+    return None
+
+
+def _load_installed_manifest(root: Path, version: AppVersion) -> PackageManifest:
+    try:
+        return parse_package_manifest(
+            (root / PACKAGE_MANIFEST_NAME).read_bytes(),
+            expected_version=version,
+        )
+    except OSError as exc:
+        raise UpdateInstallError("当前安装缺少软件包文件清单。") from exc
 
 
 def _hash_file(path: Path) -> str:

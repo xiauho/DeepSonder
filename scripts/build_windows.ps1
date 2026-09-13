@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$PythonExecutable = "",
-    [string]$MinimumUpdaterVersion = "2.0.7-beta",
+    [string]$MinimumUpdaterVersion = "",
     [switch]$SkipTests
 )
 
@@ -24,6 +24,12 @@ else {
 $Version = (Get-Content -LiteralPath (Join-Path $ProjectRoot "VERSION") -Raw).Trim()
 if ($Version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
     throw "VERSION 格式无效：$Version"
+}
+if (-not $MinimumUpdaterVersion) {
+    # Default to a manual-install bootstrap. A maintainer must explicitly name
+    # an older updater only after that exact version passes the compatibility
+    # and cross-volume installation suite.
+    $MinimumUpdaterVersion = $Version
 }
 if ($MinimumUpdaterVersion -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
     throw "最低更新器版本格式无效：$MinimumUpdaterVersion"

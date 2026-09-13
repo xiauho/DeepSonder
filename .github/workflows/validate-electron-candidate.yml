@@ -1,0 +1,55 @@
+name: Validate Electron Candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      package_run_id:
+        description: "Run ID of the signed Package Electron Windows workflow"
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  clean-machine:
+    name: Clean ${{ matrix.client }}
+    environment: electron-prerelease
+    strategy:
+      fail-fast: false
+      matrix:
+        client: [windows-10, windows-11]
+    runs-on: [self-hosted, windows, x64, novalist-clean, "${{ matrix.client }}"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Download signed candidate from packaging run
+        uses: actions/download-artifact@v4
+        with:
+          name: novalist-electron-windows-x64
+          path: candidate
+          run-id: ${{ inputs.package_run_id }}
+          github-token: ${{ github.token }}
+      - name: Validate install, trust pin, backup, and recovery
+        shell: pwsh
+        env:
+          RELEASE_PUBLIC_KEY_B64: ${{ secrets.NOVALIST_RELEASE_PUBLIC_KEY_B64 }}
+        run: |
+          if (-not $env:RELEASE_PUBLIC_KEY_B64) {
+            throw "The protected environment must provide the trusted release public key."
+          }
+          $publicKey = Join-Path $env:RUNNER_TEMP "novalist-release-public.pem"
+          [IO.File]::WriteAllBytes($publicKey, [Convert]::FromBase64String($env:RELEASE_PUBLIC_KEY_B64))
+          ./scripts/validate_electron_candidate.ps1 `
+            -ReleaseDirectory ./candidate `
+            -PublicKeyPath $publicKey `
+            -ReportPath ./candidate-validation-report.json
+      - name: Upload clean-machine report
+        uses: actions/upload-artifact@v4
+        with:
+          name: novalist-${{ matrix.client }}-candidate-report
+          path: candidate-validation-report.json
+          if-no-files-found: error

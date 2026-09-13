@@ -1,0 +1,26 @@
+{
+  "fixture_schema_version": 1,
+  "fixture_version": 1,
+  "project_directory": "golden_project",
+  "expected": {
+    "project_schema_version": 1,
+    "project_name": "迁移基线：雾港来信",
+    "chapter_ids": [
+      "chapter_01",
+      "chapter_02"
+    ],
+    "character_names": [
+      "林砚",
+      "苏乔"
+    ],
+    "current_chapter": 2,
+    "open_foreshadowing": 1,
+    "resolved_foreshadowing": 1,
+    "directed_relationships": [
+      ["林砚", "苏乔", "互相信任的调查搭档"],
+      ["林砚", "白鸥", "身份不明的线人"],
+      ["苏乔", "林砚", "需要保护但可以托付后背的同伴"]
+    ]
+  }
+}
+

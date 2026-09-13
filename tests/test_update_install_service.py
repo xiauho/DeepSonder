@@ -3,6 +3,7 @@ import json
 import zipfile
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import patch
 
@@ -246,6 +247,33 @@ class InstallLaunchTests(TestCase):
                 side_effect=tampered_copy,
             ):
                 with self.assertRaisesRegex(RuntimeError, "副本未通过受管文件校验"):
+                    launch_verified_update_install(
+                        verified,
+                        CURRENT,
+                        install_dir=install_root,
+                        cache_root=cache,
+                        platform="win32",
+                        frozen=True,
+                        process_factory=lambda *args, **kwargs: calls.append(args),
+                    )
+
+            self.assertEqual(calls, [])
+
+    def test_insufficient_install_drive_space_is_rejected_before_launch(self) -> None:
+        with TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            install_root = base / "portable"
+            install_root.mkdir()
+            write_current_manifest(install_root)
+            cache = base / "cache"
+            verified = build_verified_update(cache)
+            calls = []
+
+            with patch(
+                "core.update_install_service.shutil.disk_usage",
+                return_value=SimpleNamespace(free=0),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "安装盘空间不足"):
                     launch_verified_update_install(
                         verified,
                         CURRENT,

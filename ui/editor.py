@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from application.document_service import DocumentService, DocumentSnapshot
 from core.chapter_sections import chapter_body_bounds, chapter_body_text
 from core.project import NovelProject
 from core.storage import atomic_write_text
@@ -107,7 +108,7 @@ class Editor(QWidget):
         self._current_category = ""
         self._dirty = False
         self._loading = False
-        self._loaded_file_revision: tuple[int, int, int] | None = None
+        self._loaded_file_revision: str | tuple[int, int, int] | None = None
         self._stats_revision: int | None = None
         self._view_mode = "source"
         self._theme_config: dict = {"theme": "light"}
@@ -295,6 +296,7 @@ class Editor(QWidget):
         self.preview_browser.verticalScrollBar().setValue(scroll)
 
     def open_file(self, category: str, path_str: str) -> bool:
+        """Legacy direct-open wrapper; controllers use ``load_document``."""
         path = Path(path_str)
         if not path.exists():
             self.clear_document("文件不存在")
@@ -305,23 +307,53 @@ class Editor(QWidget):
             self.clear_document(f"读取失败：{exc}")
             return False
 
+        self._load_content(
+            category=category,
+            path=str(path),
+            content=content,
+            revision=self._file_revision(path),
+            title=self._extract_title(content, path),
+        )
+        return True
+
+    def load_document(self, snapshot: DocumentSnapshot) -> bool:
+        """Display a snapshot already validated by ``DocumentService``."""
+        if not isinstance(snapshot, DocumentSnapshot):
+            raise TypeError("snapshot 必须是 DocumentSnapshot。")
+        self._load_content(
+            category=snapshot.category,
+            path=snapshot.path,
+            content=snapshot.content,
+            revision=snapshot.revision,
+            title=snapshot.title,
+        )
+        return True
+
+    def _load_content(
+        self,
+        *,
+        category: str,
+        path: str,
+        content: str,
+        revision: str | tuple[int, int, int] | None,
+        title: str,
+    ) -> None:
         self._loading = True
         self._current_path = str(path)
-        self._current_category = category
-        self._loaded_file_revision = self._file_revision(path)
+        self._current_category = str(category)
+        self._loaded_file_revision = revision
         self.text_edit.setPlainText(content)
         self.text_edit.document().setModified(False)
         self._loading = False
         self._set_dirty(False)
-        self.title_label.setText(self._extract_title(content, path))
-        self.path_label.setText(f"{category}  /  {path.name}")
+        self.title_label.setText(title)
+        self.path_label.setText(f"{category}  /  {Path(path).name}")
         if self._view_mode == "preview":
             self._render_preview(reset_scroll=True)
             self.preview_browser.setFocus()
         else:
             self.text_edit.setFocus()
         self._update_stats()
-        return True
 
     def clear_document(self, message: str = "未打开文件") -> None:
         self._loading = True
@@ -336,6 +368,7 @@ class Editor(QWidget):
         self._set_dirty(False)
 
     def save(self, *, force: bool = False) -> bool:
+        """Legacy direct-save wrapper; controllers use ``DocumentService``."""
         if not self._current_path:
             return False
         path = Path(self._current_path)
@@ -347,17 +380,37 @@ class Editor(QWidget):
             self.dirty_badge.setText("保存失败")
             self.path_label.setText(f"保存失败：{exc}")
             return False
-        self.text_edit.document().setModified(False)
-        self._loaded_file_revision = self._file_revision(path)
-        self._set_dirty(False)
-        self.file_saved.emit(str(path))
+        self.mark_saved(self._file_revision(path))
         return True
+
+    def document_text(self) -> str:
+        return self.text_edit.toPlainText()
+
+    def loaded_revision(self) -> str | tuple[int, int, int] | None:
+        return self._loaded_file_revision
+
+    def mark_saved(self, revision: str | tuple[int, int, int] | None) -> None:
+        """Accept a service-confirmed save without performing another write."""
+        if not self._current_path:
+            return
+        self.text_edit.document().setModified(False)
+        self._loaded_file_revision = revision
+        self._set_dirty(False)
+        self.file_saved.emit(self._current_path)
+
+    def show_save_error(self, message: str) -> None:
+        self.dirty_badge.setText("保存失败")
+        self.path_label.setText(f"保存失败：{message}")
 
     def has_external_change(self) -> bool:
         """Return whether the loaded file changed outside this editor."""
         if not self._current_path or self._loaded_file_revision is None:
             return False
-        return self._file_revision(Path(self._current_path)) != self._loaded_file_revision
+        if isinstance(self._loaded_file_revision, str):
+            current = DocumentService.revision_for_path(Path(self._current_path))
+        else:
+            current = self._file_revision(Path(self._current_path))
+        return current != self._loaded_file_revision
 
     def reload_current_file(self) -> bool:
         """Discard local edits and reload the current file from disk."""

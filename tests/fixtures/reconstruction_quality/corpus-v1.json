@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "corpus_id": "novalist-synthetic-reconstruction-v1",
+  "privacy": {
+    "synthetic": true,
+    "contains_personal_data": false
+  },
+  "quality_gates": {
+    "local": {
+      "entities": {"precision": 0.95, "recall": 0.75, "f1": 0.85},
+      "relations": {"precision": 0.95, "recall": 0.7, "f1": 0.8}
+    },
+    "combined": {
+      "entities": {"precision": 0.95, "recall": 0.95, "f1": 0.95},
+      "relations": {"precision": 0.75, "recall": 0.95, "f1": 0.85}
+    }
+  },
+  "cases": [
+    {
+      "case_id": "explicit-markers",
+      "chapters": [{
+        "chapter_id": "chapter_0001",
+        "content": "# 信使\n\n[[人物:林砚]] [[人物:苏乔]] [[关系:林砚|调查搭档|苏乔]]\n"
+      }],
+      "expected": {
+        "entities": ["林砚", "苏乔"],
+        "relations": [{"source": "林砚", "target": "苏乔", "label": "调查搭档"}]
+      },
+      "recorded_enhanced": {"entities": [], "relations": []}
+    },
+    {
+      "case_id": "action-speakers",
+      "chapters": [{
+        "chapter_id": "chapter_0001",
+        "content": "# 门廊\n\n林舟拆开信封。苏棠低声说：先别开门。\n"
+      }],
+      "expected": {
+        "entities": ["林舟", "苏棠"],
+        "relations": []
+      },
+      "recorded_enhanced": {"entities": [], "relations": []}
+    },
+    {
+      "case_id": "natural-relation",
+      "chapters": [{
+        "chapter_id": "chapter_0001",
+        "content": "# 旧友\n\n周宁是许澄的朋友。\n"
+      }],
+      "expected": {
+        "entities": ["周宁", "许澄"],
+        "relations": [{"source": "周宁", "target": "许澄", "label": "朋友"}]
+      },
+      "recorded_enhanced": {"entities": [], "relations": []}
+    },
+    {
+      "case_id": "semantic-enhancement",
+      "chapters": [{
+        "chapter_id": "chapter_0001",
+        "content": "# 对峙\n\n闻溪凝视着白榆，白榆悄悄按住刀柄。\n"
+      }],
+      "expected": {
+        "entities": ["闻溪", "白榆"],
+        "relations": [{"source": "白榆", "target": "闻溪", "label": "警惕"}]
+      },
+      "recorded_enhanced": {
+        "entities": [
+          {"name": "闻溪", "confidence": 0.76},
+          {"name": "白榆", "confidence": 0.76}
+        ],
+        "relations": [
+          {"source": "白榆", "target": "闻溪", "label": "警惕", "confidence": 0.72}
+        ]
+      }
+    },
+    {
+      "case_id": "negative-weather",
+      "chapters": [{
+        "chapter_id": "chapter_0001",
+        "content": "# 雨夜\n\n雨落在屋檐上，空巷里只有风声。\n"
+      }],
+      "expected": {"entities": [], "relations": []},
+      "recorded_enhanced": {"entities": [], "relations": []}
+    },
+    {
+      "case_id": "duplicate-and-conflict",
+      "chapters": [{
+        "chapter_id": "chapter_0001",
+        "content": "# 同盟\n\n[[人物:季川]] [[人物:秦澜]] [[关系:季川|盟友|秦澜]]\n"
+      }],
+      "expected": {
+        "entities": ["季川", "秦澜"],
+        "relations": [{"source": "季川", "target": "秦澜", "label": "盟友"}]
+      },
+      "recorded_enhanced": {
+        "entities": [
+          {"name": "季川", "confidence": 0.76},
+          {"name": "秦澜", "confidence": 0.76}
+        ],
+        "relations": [
+          {"source": "季川", "target": "秦澜", "label": "盟友", "confidence": 0.76},
+          {"source": "秦澜", "target": "季川", "label": "敌对", "confidence": 0.62}
+        ]
+      }
+    }
+  ]
+}

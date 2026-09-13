@@ -32,6 +32,23 @@ DeepSeek Harness is not bundled with or redistributed by this repository.
 Novalist can invoke a separately installed `dsh` command when the user enables
 AI-assisted features.
 
+## Electron and web frontend runtime
+
+Future Electron distributions bundle Electron 44, React/React DOM 19,
+Cytoscape.js 3, CodeMirror 6, and their locked transitive dependencies.
+Electron, React, Cytoscape.js, and CodeMirror are available under the MIT
+License; transitive packages retain their own terms.
+
+- Electron: <https://github.com/electron/electron>
+- React: <https://github.com/facebook/react>
+- Cytoscape.js: <https://github.com/cytoscape/cytoscape.js>
+- CodeMirror: <https://github.com/codemirror>
+
+Electron packages include `LICENSE.electron.txt` and the Chromium notice bundle
+`LICENSES.chromium.html` at their root. Copyright notices for the directly
+bundled MIT frontend libraries are also packaged as
+`licenses/third-party/JAVASCRIPT-MIT-NOTICES.txt`.
+
 ## Bundled Stitch typography assets
 
 The native interface bundles the local font files under `assets/fonts/` for

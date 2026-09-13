@@ -1,4 +1,4 @@
-name: Package Windows
+name: Package Electron Windows
 
 on:
   workflow_dispatch:
@@ -12,6 +12,7 @@ permissions:
 jobs:
   package:
     runs-on: windows-latest
+    environment: electron-prerelease
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -21,6 +22,11 @@ jobs:
           cache-dependency-path: |
             requirements.txt
             requirements-build.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: electron/package-lock.json
       - name: Verify tag matches VERSION
         if: startsWith(github.ref, 'refs/tags/')
         shell: pwsh
@@ -31,12 +37,47 @@ jobs:
           }
       - name: Install runtime and build dependencies
         run: python -m pip install -r requirements.txt -r requirements-build.txt
-      - name: Build and smoke-test Windows package
+      - name: Install Electron dependencies
+        working-directory: electron
+        run: npm ci
+      - name: Build and rehearse Electron-only Windows package
         shell: pwsh
-        run: ./scripts/build_windows.ps1 -PythonExecutable python
-      - name: Upload package baseline
+        env:
+          RELEASE_PRIVATE_KEY_B64: ${{ secrets.NOVALIST_RELEASE_PRIVATE_KEY_B64 }}
+          RELEASE_PUBLIC_KEY_B64: ${{ secrets.NOVALIST_RELEASE_PUBLIC_KEY_B64 }}
+          CSC_LINK: ${{ secrets.NOVALIST_WINDOWS_CERTIFICATE_B64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.NOVALIST_WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $arguments = @{
+            PythonExecutable = "python"
+            NodeExecutable = "node"
+            ExerciseInstaller = $true
+          }
+          if ($env:GITHUB_REF.StartsWith("refs/tags/")) {
+            if (-not $env:RELEASE_PRIVATE_KEY_B64 -or -not $env:RELEASE_PUBLIC_KEY_B64) {
+              throw "Tagged releases require Ed25519 metadata signing secrets."
+            }
+            if (-not $env:CSC_LINK -or -not $env:CSC_KEY_PASSWORD) {
+              throw "Tagged releases require Windows code-signing secrets."
+            }
+            $privateKey = Join-Path $env:RUNNER_TEMP "release-private.pem"
+            $publicKey = Join-Path $env:RUNNER_TEMP "release-public.pem"
+            $certificate = Join-Path $env:RUNNER_TEMP "novalist-code-signing.pfx"
+            [IO.File]::WriteAllBytes($privateKey, [Convert]::FromBase64String($env:RELEASE_PRIVATE_KEY_B64))
+            [IO.File]::WriteAllBytes($publicKey, [Convert]::FromBase64String($env:RELEASE_PUBLIC_KEY_B64))
+            [IO.File]::WriteAllBytes($certificate, [Convert]::FromBase64String($env:CSC_LINK))
+            $env:CSC_LINK = $certificate
+            $arguments.RequireMetadataSignature = $true
+            $arguments.ReleasePrivateKeyPath = $privateKey
+            $arguments.ReleasePublicKeyPath = $publicKey
+            $arguments.RequireCodeSigning = $true
+            $arguments.CodeSigningCertificatePath = $certificate
+            $arguments.CodeSigningCertificatePassword = $env:CSC_KEY_PASSWORD
+          }
+          ./scripts/build_electron_windows.ps1 @arguments
+      - name: Upload Electron-only release rehearsal
         uses: actions/upload-artifact@v4
         with:
-          name: novalist-windows-x64
-          path: dist/release/*
+          name: novalist-electron-windows-x64
+          path: electron/release/publish/*
           if-no-files-found: error

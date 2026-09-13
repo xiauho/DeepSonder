@@ -17,6 +17,7 @@ from uuid import uuid4
 from .app_paths import update_cache_dir
 from .update_download_service import VerifiedUpdate, inspect_update_archive
 from .update_installer import (
+    MINIMUM_TRANSACTION_FREE_BYTES,
     PACKAGE_MANIFEST_NAME,
     parse_package_manifest,
     validate_update_archive,
@@ -108,7 +109,10 @@ def launch_verified_update_install(
     # process. The helper independently repeats these checks after the app exits.
     try:
         inspect_update_archive(archive_path, verified.manifest)
-        validate_update_archive(archive_path, verified.manifest.version)
+        target_manifest = validate_update_archive(
+            archive_path,
+            verified.manifest.version,
+        )
     except RuntimeError as exc:
         raise UpdateInstallLaunchError(
             "更新包在安装前复核失败，请重新下载。"
@@ -135,6 +139,20 @@ def launch_verified_update_install(
         raise UpdateInstallLaunchError("无法校验当前安装的独立更新器。") from exc
     if not helper_is_valid:
         raise UpdateInstallLaunchError("当前安装的独立更新器未通过受管文件校验。")
+
+    required_space = (
+        sum(item.size for item in current_manifest.files)
+        + sum(item.size for item in target_manifest.files)
+        + MINIMUM_TRANSACTION_FREE_BYTES
+    )
+    try:
+        available_space = shutil.disk_usage(root).free
+    except OSError as exc:
+        raise UpdateInstallLaunchError("无法确认安装盘剩余空间。") from exc
+    if available_space < required_space:
+        raise UpdateInstallLaunchError(
+            "安装盘空间不足，无法安全暂存并备份更新。"
+        )
 
     transaction_id = uuid4().hex
     transaction_root = archive_path.parent / f"install-{transaction_id}"

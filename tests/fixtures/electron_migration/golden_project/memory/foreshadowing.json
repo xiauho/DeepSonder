@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "items": [
+    {
+      "id": "f-silver-key",
+      "title": "银钥匙上的潮汐刻度",
+      "note": "三道刻线在旧灯塔地下门前依次发光。",
+      "first_seen_chapter": "chapter_01",
+      "planned_resolution_chapter": "chapter_05",
+      "recent_seen_chapter": "chapter_02",
+      "resolved_chapter": "",
+      "status": "open",
+      "priority": "high",
+      "related_characters": [
+        "林砚",
+        "苏乔"
+      ],
+      "tags": [
+        "钥匙",
+        "灯塔"
+      ],
+      "appearances": [
+        {
+          "chapter_id": "chapter_01",
+          "note": "随无寄件人信件出现。"
+        },
+        {
+          "chapter_id": "chapter_02",
+          "note": "打开地下门时发光。"
+        }
+      ],
+      "created_at": "2026-09-11T00:00:00+00:00",
+      "updated_at": "2026-09-11T00:00:00+00:00"
+    },
+    {
+      "id": "f-blue-fiber",
+      "title": "门缝中的蓝色纤维",
+      "note": "已由作者确认来自港务厅旧制服。",
+      "first_seen_chapter": "chapter_02",
+      "planned_resolution_chapter": "chapter_02",
+      "recent_seen_chapter": "chapter_02",
+      "resolved_chapter": "chapter_02",
+      "status": "resolved",
+      "priority": "medium",
+      "related_characters": [
+        "苏乔"
+      ],
+      "tags": [
+        "港务厅"
+      ],
+      "appearances": [
+        {
+          "chapter_id": "chapter_02",
+          "note": "出现在旧灯塔门缝。"
+        }
+      ],
+      "created_at": "2026-09-11T00:00:00+00:00",
+      "updated_at": "2026-09-11T00:00:00+00:00"
+    }
+  ]
+}
+

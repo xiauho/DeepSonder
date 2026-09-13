@@ -9,6 +9,10 @@ config.json
 # Build outputs
 build/
 dist/
+node_modules/
+electron/dist/
+electron/generated/
+electron/release/
 *.spec.bak
 
 # Local editor and operating-system state

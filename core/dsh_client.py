@@ -787,7 +787,10 @@ class DSHClient:
             return None
         return str(node), str(script)
 
-    def check_connection(self) -> str:
+    def check_connection(
+        self,
+        cancel_event: threading.Event | None = None,
+    ) -> str:
         """Check startup and verify that a real task reaches headless DSH.
 
         ``--version`` only proves that the executable can start.  It does not
@@ -797,6 +800,8 @@ class DSHClient:
         the same path used by normal generation.
         """
         executable = self.dsh_command
+        if cancel_event is not None and cancel_event.is_set():
+            raise AITaskCancelled()
         if not Path(executable).is_absolute() and shutil.which(executable) is None:
             # npx.cmd and shell aliases are resolved by the subprocess layer on
             # Windows only when present on PATH; report the same actionable error.
@@ -829,6 +834,7 @@ class DSHClient:
                 "",
                 f"这是 Novalist 的连接测试。请只回复 {DSH_PROBE_MARKER}。",
                 timeout_override=min(self.timeout, 15),
+                cancel_event=cancel_event,
             )
         except RuntimeError as exc:
             raise RuntimeError(

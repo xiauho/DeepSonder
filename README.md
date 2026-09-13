@@ -2,7 +2,12 @@
 
 > 当前发布版本：`v2.1.0-beta`。本版本重构 AI 任务传参与响应协议，并完善扩写/续写字数闭环、故事记忆、一致性检查和角色档案同步，属于较大范围的公开预览更新；请在真实创作项目中使用前先完成一次本机 DSh 实测并保留独立备份。
 
-Novalist 是一款面向长篇小说创作的本地桌面工具，使用 PySide6 构建，并可通过 `dsh` 的 `headless` 模式调用 DeepSeek Harness 完成章节扩写、正文续写、一致性检查、章节摘要和故事状态更新。
+Novalist 是一款面向长篇小说创作的本地桌面工具。当前公开版使用 PySide6；后续发行版已确定以 Electron 作为唯一入口，通过受限的本地 Python Sidecar 复用领域能力，并可通过 `dsh` 的 `headless` 模式调用 DeepSeek Harness。
+
+> Electron 迁移已完成阶段十八的 Windows 打包演练，但本地演练产物未签名，不等同于新的公开发行版。实施与验收边界见 [阶段十八说明](docs/electron-migration/phase-18-packaged-cutover-rehearsal.md)。
+
+阶段十九已提供签名预发布和干净 Windows 10/11 验收流水线。正式切换前请遵循
+[Electron 迁移、备份与恢复指南](docs/ELECTRON_TRANSITION_GUIDE.md)；目前仍未启用 Electron 自动更新。
 
 > **第三方项目声明**：Novalist 是独立开发的第三方开源工具，不是 DeepSeek 或 DeepSeek Harness 的官方产品，与其不存在隶属、合作、授权、认证或背书关系。“DeepSeek Harness”仅用于说明兼容性和所依赖的外部工具。
 
@@ -86,7 +91,9 @@ Novalist 将本机设置保存在当前用户的应用数据目录中：Windows 
 
 “帮助 → 检查更新”会读取 `xiauho/novalist` 的公开 GitHub Release。设置中可自愿开启启动检查；开启后最多每 24 小时检查一次。从 `v2.0.7-beta` 开始，发现新版本后可将唯一匹配的 Windows x64 软件包下载到 `%LOCALAPPDATA%\Novalist\updates`，并核对 GitHub 摘要、发布清单、文件大小、SHA-256、包内路径、版本和全部 ZIP 文件 CRC。
 
-`v2.0.8-beta` 便携包增加独立的 `NovalistUpdater.exe` 和逐文件 `package-files.json`。用户确认安装后，主程序只把当前安装中通过受管文件校验的更新器复制到缓存并退出；更新器再次验证缓存状态、ZIP、软件包清单和逐文件哈希，只备份及替换清单内的程序文件，保留项目和其他非受管内容。新版必须通过 `Novalist.exe --self-test` 才会启动，否则恢复旧版本。自动安装仅支持可写的 Windows x64 便携目录，不申请管理员权限，无法满足条件时仍保留手动解压方案。由于 `v2.0.7-beta` 本身没有独立更新器，从该版本升级到 `v2.0.8-beta` 仍需手动安装；安装 `v2.0.8-beta` 后才能自动安装后续兼容版本。
+`v2.0.8-beta` 便携包增加独立的 `NovalistUpdater.exe` 和逐文件 `package-files.json`。用户确认安装后，主程序只把当前安装中通过受管文件校验的更新器复制到缓存并退出；更新器再次验证缓存状态、ZIP、软件包清单和逐文件哈希，只备份及替换清单内的程序文件，保留项目和其他非受管内容。新版必须通过 `Novalist.exe --self-test` 才会启动，否则恢复旧版本。自动安装仅支持可写的 Windows x64 便携目录，不申请管理员权限，无法满足条件时仍保留手动解压方案。
+
+已发布的 `v2.0.8-beta` 更新器存在跨磁盘缺陷：当 `%LOCALAPPDATA%` 更新缓存与便携安装目录位于不同盘符时，替换和回滚都会失败。此版本不应使用“立即重启并安装”跨盘升级；请将包含修复更新器的首个后续版本完整解压到新目录。修复后的更新器会把暂存、备份和恢复日志放在安装盘内，逐文件恢复时不会预先删除原文件，并支持从保留的备份重试中断的回滚。首个修复版本应采用仅允许手动安装的最低更新器版本，之后的版本才能重新开放自动升级。
 
 `v2.1.0-beta` 是首个用于完整验证上述自动安装链路的后续兼容 beta 包。扩写与续写现在共用项目级目标章节字数、确定性的统计口径和分层纠偏流程；记忆更新、一致性检查与角色档案同步改用可追溯的结构化协议。由于 AI 任务的底层传参与协议缓存版本发生变化，升级后首次运行相关任务可能需要重新生成旧协议缓存，但已保存的章节、资料和已采用记忆不会被发布包覆盖。
 
@@ -274,6 +281,7 @@ AI 输出可能存在事实错误、遗漏、不当内容或与第三方作品�
 ```bash
 python -m unittest discover -s tests
 python -m compileall -q main.py core ui
+cd electron && npm test
 ```
 
 使用本机已经配置的 DSh 运行长上下文真实验收（会发起少量真实模型请求，
@@ -299,6 +307,8 @@ core/
 ui/
 projects/demo_novel/
 tests/
+electron/
+sidecar/
 ```
 
 ## 许可

@@ -1,9 +1,12 @@
 import hashlib
 import json
+import os
+import sys
 import zipfile
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest import TestCase
+from unittest import TestCase, skipUnless
+from unittest.mock import patch
 
 from core.update_installer import (
     PACKAGE_MANIFEST_NAME,
@@ -18,6 +21,7 @@ from core.update_installer import (
 
 OLD_VERSION = "2.0.8-beta"
 NEW_VERSION = "2.0.9-beta"
+TRANSACTION_ID = "a" * 32
 
 
 def package_files(version: str, marker: bytes) -> dict[str, bytes]:
@@ -93,6 +97,7 @@ def write_request(base: Path, install_root: Path) -> tuple[Path, dict[str, bytes
         json.dumps(
             {
                 "schema_version": 1,
+                "transaction_id": TRANSACTION_ID,
                 "current_pid": 123,
                 "current_version": OLD_VERSION,
                 "target_version": NEW_VERSION,
@@ -215,6 +220,199 @@ class TransactionalInstallTests(TestCase):
                 (install_root / PACKAGE_MANIFEST_NAME).read_bytes()
             )
             self.assertEqual(str(installed_manifest.version), NEW_VERSION)
+            self.assertFalse(
+                (install_root / f".novalist-update-{TRANSACTION_ID}").exists()
+            )
+
+    def test_cache_and_install_may_be_on_different_volumes(self) -> None:
+        with TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            install_root = base / "portable"
+            install_root.mkdir()
+            write_install(install_root, OLD_VERSION, b"old")
+            cache_root = base / "cache"
+            request_path, new_files = write_request(cache_root, install_root)
+            real_replace = os.replace
+
+            def reject_cache_to_install_replace(source, destination):
+                source_path = Path(source).resolve()
+                destination_path = Path(destination).resolve()
+                if (
+                    source_path.is_relative_to(cache_root.resolve())
+                    and destination_path.is_relative_to(install_root.resolve())
+                ):
+                    raise OSError(17, "simulated cross-volume move")
+                return real_replace(source, destination)
+
+            with patch(
+                "core.update_installer.os.replace",
+                side_effect=reject_cache_to_install_replace,
+            ):
+                outcome = install_update(
+                    request_path,
+                    wait_for_process=lambda _pid, _timeout: None,
+                    health_check=lambda _app: None,
+                    launch_application=lambda _app: None,
+                )
+
+            self.assertTrue(outcome.success)
+            self.assertEqual(
+                (install_root / "Novalist.exe").read_bytes(),
+                new_files["Novalist.exe"],
+            )
+
+    @skipUnless(sys.platform == "win32", "requires Windows drive semantics")
+    def test_real_cross_volume_install_when_workspace_and_temp_differ(self) -> None:
+        with TemporaryDirectory() as cache_tmp, TemporaryDirectory(
+            dir=Path.cwd()
+        ) as install_tmp:
+            cache_root = Path(cache_tmp)
+            install_root = Path(install_tmp)
+            if cache_root.drive.casefold() == install_root.drive.casefold():
+                self.skipTest("temporary directory and workspace use the same drive")
+            write_install(install_root, OLD_VERSION, b"old")
+            request_path, new_files = write_request(cache_root, install_root)
+
+            outcome = install_update(
+                request_path,
+                wait_for_process=lambda _pid, _timeout: None,
+                health_check=lambda _app: None,
+                launch_application=lambda _app: None,
+            )
+
+            self.assertTrue(outcome.success)
+            self.assertEqual(
+                (install_root / "Novalist.exe").read_bytes(),
+                new_files["Novalist.exe"],
+            )
+
+    def test_apply_failure_restores_every_old_file_without_predeleting(self) -> None:
+        with TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            install_root = base / "portable"
+            install_root.mkdir()
+            old_files = write_install(install_root, OLD_VERSION, b"old")
+            request_path, _new_files = write_request(base / "cache", install_root)
+            real_replace = os.replace
+            replacements = 0
+
+            def fail_second_staged_replace(source, destination):
+                nonlocal replacements
+                source_path = Path(source)
+                if "staging" in source_path.parts:
+                    replacements += 1
+                    if replacements == 2:
+                        raise OSError("simulated mid-apply failure")
+                return real_replace(source, destination)
+
+            with patch(
+                "core.update_installer.os.replace",
+                side_effect=fail_second_staged_replace,
+            ):
+                outcome = install_update(
+                    request_path,
+                    wait_for_process=lambda _pid, _timeout: None,
+                    health_check=lambda _app: None,
+                    launch_application=lambda _app: None,
+                )
+
+            self.assertFalse(outcome.success)
+            self.assertTrue(outcome.rolled_back)
+            for relative, content in old_files.items():
+                self.assertEqual(
+                    (install_root / Path(*relative.split("/"))).read_bytes(),
+                    content,
+                )
+            restored_manifest = parse_package_manifest(
+                (install_root / PACKAGE_MANIFEST_NAME).read_bytes()
+            )
+            self.assertEqual(str(restored_manifest.version), OLD_VERSION)
+
+    def test_launch_failure_keeps_committed_new_version_and_backup(self) -> None:
+        with TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            install_root = base / "portable"
+            install_root.mkdir()
+            write_install(install_root, OLD_VERSION, b"old")
+            request_path, new_files = write_request(base / "cache", install_root)
+
+            outcome = install_update(
+                request_path,
+                wait_for_process=lambda _pid, _timeout: None,
+                health_check=lambda _app: None,
+                launch_application=lambda _app: (_ for _ in ()).throw(
+                    OSError("simulated launch failure")
+                ),
+            )
+
+            self.assertFalse(outcome.success)
+            self.assertFalse(outcome.rolled_back)
+            self.assertIn("已安装并通过启动自检", outcome.message)
+            self.assertEqual(
+                (install_root / "Novalist.exe").read_bytes(),
+                new_files["Novalist.exe"],
+            )
+            transaction_root = install_root / f".novalist-update-{TRANSACTION_ID}"
+            self.assertTrue((transaction_root / "backup" / "Novalist.exe").is_file())
+
+    def test_interrupted_failed_rollback_can_be_retried_from_backup(self) -> None:
+        with TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            install_root = base / "portable"
+            install_root.mkdir()
+            old_files = write_install(install_root, OLD_VERSION, b"old")
+            request_path, _new_files = write_request(base / "cache", install_root)
+            real_replace = os.replace
+            staged_replacements = 0
+            rollback_failed = False
+
+            def interrupt_apply_and_first_rollback(source, destination):
+                nonlocal staged_replacements, rollback_failed
+                source_path = Path(source)
+                if "staging" in source_path.parts:
+                    staged_replacements += 1
+                    if staged_replacements == 2:
+                        raise OSError("simulated interrupted apply")
+                if "novalist-restore-" in source_path.name and not rollback_failed:
+                    rollback_failed = True
+                    raise OSError("simulated interrupted rollback")
+                return real_replace(source, destination)
+
+            with patch(
+                "core.update_installer.os.replace",
+                side_effect=interrupt_apply_and_first_rollback,
+            ):
+                first = install_update(
+                    request_path,
+                    wait_for_process=lambda _pid, _timeout: None,
+                    health_check=lambda _app: None,
+                    launch_application=lambda _app: None,
+                )
+
+            self.assertFalse(first.success)
+            self.assertFalse(first.rolled_back)
+            transaction_root = install_root / f".novalist-update-{TRANSACTION_ID}"
+            journal = json.loads(
+                (transaction_root / "install-journal.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(journal["status"], "rollback_failed")
+
+            second = install_update(
+                request_path,
+                wait_for_process=lambda _pid, _timeout: None,
+                health_check=lambda _app: None,
+                launch_application=lambda _app: None,
+            )
+
+            self.assertFalse(second.success)
+            self.assertTrue(second.rolled_back)
+            for relative, content in old_files.items():
+                self.assertEqual(
+                    (install_root / Path(*relative.split("/"))).read_bytes(),
+                    content,
+                )
 
     def test_health_check_failure_restores_old_version(self) -> None:
         with TemporaryDirectory() as tmp:

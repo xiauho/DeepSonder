@@ -4,6 +4,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QCoreApplication, QObject, Signal
 
+from application.document_service import DocumentSnapshot
 from core.project import NovelProject
 from core.project_data import ChapterIdConflictError
 from ui.document_controller import DocumentController
@@ -19,10 +20,11 @@ class FakeEditor(QObject):
         self.category = ""
         self.dirty = False
         self.content = ""
+        self.revision: str | None = None
         self.save_calls = 0
         self.cleared = []
-        self.external_change = False
         self.reload_calls = 0
+        self.save_errors = []
 
     def current_path(self):
         return self.path
@@ -37,6 +39,15 @@ class FakeEditor(QObject):
         self.dirty = False
         return True
 
+    def load_document(self, snapshot: DocumentSnapshot) -> bool:
+        self.reload_calls += 1
+        self.category = snapshot.category
+        self.path = snapshot.path
+        self.content = snapshot.content
+        self.revision = snapshot.revision
+        self.dirty = False
+        return True
+
     def save(self, *, force: bool = False) -> bool:
         self.save_calls += 1
         if self.path is None:
@@ -46,20 +57,30 @@ class FakeEditor(QObject):
         self.file_saved.emit(self.path)
         return True
 
-    def has_external_change(self):
-        return self.external_change
+    def current_category(self):
+        return self.category
 
-    def reload_current_file(self) -> bool:
-        self.reload_calls += 1
-        self.content = Path(self.path).read_text(encoding="utf-8")
+    def document_text(self):
+        return self.content
+
+    def loaded_revision(self):
+        return self.revision
+
+    def mark_saved(self, revision: str) -> None:
+        self.save_calls += 1
+        self.revision = revision
         self.dirty = False
-        return True
+        self.file_saved.emit(self.path)
+
+    def show_save_error(self, message: str) -> None:
+        self.save_errors.append(message)
 
     def clear_document(self, message: str = "未打开文件") -> None:
         self.cleared.append(message)
         self.path = None
         self.category = ""
         self.content = ""
+        self.revision = None
         self.dirty = False
 
 
@@ -75,10 +96,12 @@ class DocumentControllerTests(unittest.TestCase):
             second = project.chapters_dir / "chapter_02.md"
             second.write_text("# 第二章\n\n## 正文\n新内容\n", encoding="utf-8")
             editor = FakeEditor()
-            editor.path = str(first)
+            session = ProjectSession()
+            session.set_project(project)
+            controller = DocumentController(editor, session)
+            self.assertTrue(controller.open_file("章节", first))
             editor.content = "已修改"
             editor.dirty = True
-            controller = DocumentController(editor, ProjectSession())
 
             self.assertTrue(controller.open_file("章节", second))
             self.assertEqual(editor.save_calls, 1)
@@ -157,10 +180,16 @@ class DocumentControllerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             project = NovelProject.create(Path(tmp) / "proj", "测试")
             editor = FakeEditor()
-            editor.path = str(project.chapters_dir / "chapter_01.md")
+            session = ProjectSession()
+            session.set_project(project)
+            controller = DocumentController(editor, session)
+            self.assertTrue(
+                controller.open_file(
+                    "章节", project.chapters_dir / "chapter_01.md"
+                )
+            )
             editor.content = "自动保存内容"
             editor.dirty = True
-            controller = DocumentController(editor, ProjectSession())
             saved = []
             controller.auto_saved.connect(saved.append)
 
@@ -172,17 +201,22 @@ class DocumentControllerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             project = NovelProject.create(Path(tmp) / "proj", "测试")
             editor = FakeEditor()
-            editor.path = str(project.chapters_dir / "chapter_01.md")
+            session = ProjectSession()
+            session.set_project(project)
+            controller = DocumentController(editor, session)
+            self.assertTrue(
+                controller.open_file(
+                    "章节", project.chapters_dir / "chapter_01.md"
+                )
+            )
             editor.content = "本地修改"
             editor.dirty = True
-            editor.external_change = True
-            controller = DocumentController(editor, ProjectSession())
+            Path(editor.path).write_text("外部修改", encoding="utf-8")
 
             self.assertFalse(controller.save())
             self.assertEqual(editor.save_calls, 0)
             self.assertEqual(controller.save_conflict_path, Path(editor.path))
 
-            editor.external_change = False
             self.assertTrue(controller.save(force=True))
             self.assertIsNone(controller.save_conflict_path)
             self.assertEqual(editor.save_calls, 1)
@@ -191,13 +225,22 @@ class DocumentControllerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             project = NovelProject.create(Path(tmp) / "proj", "测试")
             editor = FakeEditor()
-            editor.path = str(project.chapters_dir / "chapter_01.md")
-            editor.external_change = True
-            controller = DocumentController(editor, ProjectSession())
+            session = ProjectSession()
+            session.set_project(project)
+            controller = DocumentController(editor, session)
+            self.assertTrue(
+                controller.open_file(
+                    "章节", project.chapters_dir / "chapter_01.md"
+                )
+            )
+            editor.content = "本地修改"
+            editor.dirty = True
+            Path(editor.path).write_text("外部修改", encoding="utf-8")
 
             self.assertFalse(controller.save())
             self.assertTrue(controller.reload_current_file())
-            self.assertEqual(editor.reload_calls, 1)
+            self.assertEqual(editor.reload_calls, 2)
+            self.assertEqual(editor.content, "外部修改")
             self.assertIsNone(controller.save_conflict_path)
 
     def test_delete_current_chapter_clears_editor_and_notifies_session(self) -> None:
