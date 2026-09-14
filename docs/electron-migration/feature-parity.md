@@ -5,6 +5,10 @@
 > story data. Existing Preview rows remain reusable implementation evidence;
 > schema-v2 import, reconstruction, and Electron-only release gates are tracked
 > in the Phase 7B roadmap.
+>
+> `Baseline` rows are not the current Electron backlog. Product work should be
+> selected from the schema-v2 workflow and current user needs; release status is
+> defined by the Phase 20-24 checklists and protected release gates.
 
 Baseline: Novalist `2.1.0-beta`, recorded 2026-09-11.
 

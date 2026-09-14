@@ -75,8 +75,8 @@ portable recovery checks, run from the repository root:
 Unsigned output is explicitly local-only. Tagged CI packaging additionally
 requires Ed25519 release-metadata keys and a Windows Authenticode certificate.
 
-The latest source-bound post-cutover rehearsal and artifact hashes are recorded
-in [`phase-22c-source-bound-rehearsal.md`](../docs/electron-migration/phase-22c-source-bound-rehearsal.md).
+The latest source-bound local rehearsal and artifact hashes are recorded in
+[`phase-24-release-candidate-and-quality.md`](../docs/electron-migration/phase-24-release-candidate-and-quality.md).
 
 ## Current slice
 

@@ -18,6 +18,11 @@ to reuse the mature browser visualization ecosystem.
 
 ## Decision
 
+The following text records the original incremental migration decision. ADR-0002
+supersedes its temporary PySide-entry and full-parity conditions: Electron is
+now the only user entry, and legacy structured data is reconstructed from
+imported manuscript evidence rather than copied into schema v2.
+
 Electron will become the final desktop shell. The renderer will use React,
 TypeScript, and Vite. The existing Python domain core will remain authoritative
 and will run in a packaged local sidecar process.

@@ -56,6 +56,13 @@ Phase 14 retains this corpus for historical comparison and makes
 `corpus-v2.json` the default gate. The v2 corpus adds world concepts and
 character fields while keeping the v1 entity and relationship cases.
 
+Phase 16 introduced schema-v3 event coverage. Phase 24 expands the current v3
+corpus from 8 to 14 cases across historical, science-fiction, ensemble,
+multi-chapter, pronoun, and negative-control scenarios. Optional
+`local_expected` annotations distinguish the deliberately narrow local fallback
+contract from complete combined semantic expectations. All prior corpora remain
+readable for historical comparison.
+
 ## Regression gate
 
 Run the evaluator from the repository root:

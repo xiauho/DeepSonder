@@ -71,7 +71,7 @@ _EXPLICIT_EVENT = re.compile(
 )
 _CHARACTER_FIELDS = {"身份", "外貌", "性格", "目标", "能力", "阵营", "状态"}
 _ACTION_ENTITY = re.compile(
-    r"(?<![\u4e00-\u9fff])(?P<name>[\u4e00-\u9fff]{2,4}?)"
+    r"(?<![\u4e00-\u9fff])(?P<name>[\u4e00-\u9fff]{2,3}?)"
     r"(?=(?:低声|轻声|沉声|忽然|冷冷)?(?:说|问|答|喊|道|笑道|说道|示意|看向|望向|走向|拆开|拿起|递给|抓住|推开|检查|后退|离开))"
 )
 _PAIR = re.compile(

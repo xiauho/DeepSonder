@@ -79,6 +79,9 @@ The candidate remains explicitly unsigned local-rehearsal output. It is not an
 officially distributable build, and later uncommitted Phase 23B work is not
 contained in these artifacts.
 
+Phase 24 supersedes these artifacts with a local candidate built from the
+complete Phase 23B commit. This table remains the exact Phase 23A evidence.
+
 Phase 23B should exercise large manuscripts and dense relationship graphs,
 record responsiveness and memory baselines, and add targeted virtualization or
 graph-loading limits only where measurements show a problem. `GraphView` is now

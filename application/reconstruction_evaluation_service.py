@@ -93,25 +93,13 @@ class ReconstructionEvaluationService:
             duplicate_total += len(local_keys & enhanced_keys)
             conflict_total += service._relation_conflict_count(combined)
             local_conflict_total += service._relation_conflict_count(local)
-            expected_entities = {str(name).strip().casefold() for name in case["expected"]["entities"]}
-            expected_relations = {
-                (item["source"].strip().casefold(), item["target"].strip().casefold(), item["label"].strip().casefold())
-                for item in case["expected"]["relations"]
-            }
-            expected_worlds = {
-                (item["name"].strip().casefold(), item["category"].strip().casefold(), item["description"].strip().casefold())
-                for item in case["expected"].get("worlds", [])
-            }
-            expected_character_fields = {
-                (item["character"].strip().casefold(), item["field"].strip().casefold(), item["value"].strip().casefold())
-                for item in case["expected"].get("character_fields", [])
-            }
-            expected_events = {
-                (item["time_label"].strip().casefold(), item["title"].strip().casefold(), item["description"].strip().casefold(),
-                 tuple(name.strip().casefold() for name in item["characters"]), tuple(name.strip().casefold() for name in item["worlds"]))
-                for item in case["expected"].get("events", [])
+            expected_by_mode = {
+                "local": self._expected_sets(case.get("local_expected", case["expected"])),
+                "combined": self._expected_sets(case["expected"]),
             }
             for mode, proposals in (("local", local), ("combined", combined)):
+                (expected_entities, expected_relations, expected_worlds,
+                 expected_character_fields, expected_events) = expected_by_mode[mode]
                 predicted_entities = {item["name"].casefold() for item in proposals if item["kind"] == "entity"}
                 predicted_relations = {
                     (item["source_name"].casefold(), item["target_name"].casefold(), item["label"].casefold())
@@ -191,7 +179,7 @@ class ReconstructionEvaluationService:
     @staticmethod
     def _validate_case(case: Any, seen: set[str], *, schema_version: int) -> None:
         required = {"case_id", "chapters", "expected"}
-        allowed = required | {"recorded_enhanced"}
+        allowed = required | {"local_expected", "recorded_enhanced"}
         if not isinstance(case, dict) or not required.issubset(case) or set(case) - allowed:
             raise ReconstructionEvaluationError("评估用例字段无效。")
         case_id = case.get("case_id")
@@ -205,8 +193,18 @@ class ReconstructionEvaluationService:
             for item in chapters
         ):
             raise ReconstructionEvaluationError("评估章节结构无效。")
-        expected = case.get("expected")
         expected_keys = {"entities", "relations"} if schema_version == 1 else set(_SUBJECTS[:4] if schema_version == 2 else _SUBJECTS)
+        expected = case.get("expected")
+        ReconstructionEvaluationService._validate_expected(expected, expected_keys)
+        if "local_expected" in case:
+            ReconstructionEvaluationService._validate_expected(case["local_expected"], expected_keys)
+        empty_enhanced = {key: [] for key in expected_keys}
+        enhanced = case.get("recorded_enhanced", empty_enhanced)
+        if not isinstance(enhanced, dict) or set(enhanced) != expected_keys or not all(isinstance(enhanced[key], list) for key in expected_keys):
+            raise ReconstructionEvaluationError("记录的增强候选无效。")
+
+    @staticmethod
+    def _validate_expected(expected: Any, expected_keys: set[str]) -> None:
         if not isinstance(expected, dict) or set(expected) != expected_keys or not all(isinstance(expected[key], list) for key in expected_keys):
             raise ReconstructionEvaluationError("评估标注结构无效。")
         if not all(isinstance(item, str) and item.strip() for item in expected["entities"]):
@@ -229,10 +227,29 @@ class ReconstructionEvaluationService:
                 raise ReconstructionEvaluationError("评估事件文本无效。")
             if not all(isinstance(event[key], list) and all(isinstance(item, str) and item.strip() for item in event[key]) for key in ("characters", "worlds")):
                 raise ReconstructionEvaluationError("评估事件引用无效。")
-        empty_enhanced = {key: [] for key in expected_keys}
-        enhanced = case.get("recorded_enhanced", empty_enhanced)
-        if not isinstance(enhanced, dict) or set(enhanced) != expected_keys or not all(isinstance(enhanced[key], list) for key in expected_keys):
-            raise ReconstructionEvaluationError("记录的增强候选无效。")
+
+    @staticmethod
+    def _expected_sets(expected: dict[str, Any]) -> tuple[set[Any], set[Any], set[Any], set[Any], set[Any]]:
+        return (
+            {str(name).strip().casefold() for name in expected["entities"]},
+            {
+                (item["source"].strip().casefold(), item["target"].strip().casefold(), item["label"].strip().casefold())
+                for item in expected["relations"]
+            },
+            {
+                (item["name"].strip().casefold(), item["category"].strip().casefold(), item["description"].strip().casefold())
+                for item in expected.get("worlds", [])
+            },
+            {
+                (item["character"].strip().casefold(), item["field"].strip().casefold(), item["value"].strip().casefold())
+                for item in expected.get("character_fields", [])
+            },
+            {
+                (item["time_label"].strip().casefold(), item["title"].strip().casefold(), item["description"].strip().casefold(),
+                 tuple(name.strip().casefold() for name in item["characters"]), tuple(name.strip().casefold() for name in item["worlds"]))
+                for item in expected.get("events", [])
+            },
+        )
 
     @staticmethod
     def _recorded_proposals(value: dict[str, Any]) -> list[dict[str, Any]]:

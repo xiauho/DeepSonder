@@ -5,10 +5,12 @@ shell with Electron without rewriting the Python domain core.
 
 ## Current phase
 
-Phase 19 binds the protected release key inside packaged Electron and establishes
-a signed prerelease plus clean Windows 10/11 install, backup, and recovery
-acceptance workflow. Local mechanics pass; official signed-client evidence is
-still required before stable cutover.
+Phase 24 carries the completed Electron-only source entry, schema-v2 workflow,
+renderer performance work, and broader offline reconstruction baseline into the
+latest source-bound local candidate. Local mechanics pass; official signing,
+live DSH evidence, and clean Windows 10/11 reports remain external release
+gates. Historical phase checklists describe the path taken, not a requirement
+to reproduce every former PySide screen.
 
 Phase 0 deliverables:
 
@@ -631,7 +633,23 @@ feature-preservation scope, and next performance slice.
   runtime.
 
 See [Phase 23B](phase-23b-large-workspace-performance.md) for the measurements,
-layout threshold, budget rationale, and remaining renderer-level probe.
+layout threshold, budget rationale, and completed renderer probes.
+
+## Phase 24 exit criteria
+
+- [x] Rebuild and independently validate a local candidate from the complete
+  Phase 23B commit.
+- [x] Record exact source identity and artifact hashes without weakening the
+  unsigned-release boundary.
+- [x] Expand the offline reconstruction corpus across genres and multi-chapter
+  knowledge changes.
+- [x] Separate local fallback expectations from combined semantic expectations.
+- [x] Fix the false-positive action-name heuristic without lowering quality
+  thresholds.
+- [ ] Collect live DSH and signed clean-client release evidence.
+
+See [Phase 24](phase-24-release-candidate-and-quality.md) for candidate hashes,
+quality measurements, and the remaining external gates.
 
 ## Working rules for later phases
 

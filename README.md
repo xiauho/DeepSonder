@@ -4,7 +4,7 @@
 
 Novalist 是一款面向长篇小说创作的本地桌面工具。当前源码工作区以 Electron 作为唯一普通入口，通过受限的本地 Python Sidecar 复用领域能力，并可通过 `dsh` 的 `headless` 模式调用 DeepSeek Harness。旧 PySide6 源码仅保留作维护者回退和回归比较，不再由用户启动脚本调用。
 
-> Electron 迁移已完成阶段十八的 Windows 打包演练，但本地演练产物未签名，不等同于新的公开发行版。实施与验收边界见 [阶段十八说明](docs/electron-migration/phase-18-packaged-cutover-rehearsal.md)。
+> Electron 迁移已完成阶段二十四的最新源码绑定 Windows 打包演练，但本地演练产物未签名，不等同于新的公开发行版。实施与验收边界见 [阶段二十四说明](docs/electron-migration/phase-24-release-candidate-and-quality.md)。
 
 阶段十九已提供签名预发布和干净 Windows 10/11 验收流水线。正式切换前请遵循
 [Electron 迁移、备份与恢复指南](docs/ELECTRON_TRANSITION_GUIDE.md)；目前仍未启用 Electron 自动更新。
