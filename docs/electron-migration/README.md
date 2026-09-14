@@ -567,6 +567,31 @@ The live verifier is also available as the protected, manually dispatched
 See [Phase 21](phase-21-release-readiness.md) for the evidence contract and
 operator sequence.
 
+## Phase 22A exit criteria
+
+- [x] The repository-root launcher starts Electron instead of `main.py`.
+- [x] Source startup validates Python Sidecar and Node/npm prerequisites.
+- [x] Partial Electron dependencies are repaired only after repository-owned
+  Electron locks are ruled out.
+- [x] The documented user entry no longer instructs users to launch PySide6.
+- [x] Rebuild and exercise the local unpacked application from the cutover
+  revision.
+
+See [Phase 22A](phase-22-source-entry-cutover.md) for launcher behavior and the
+maintainer rollback boundary.
+
+## Phase 22B exit criteria
+
+- [x] Rebuild the Electron Sidecar, unpacked directory, installer, and portable
+  ZIP after the source-entry cutover.
+- [x] Pass full source, packaged, install/uninstall, backup, and recovery checks.
+- [x] Record the local artifact hashes and keep unsigned output in the rehearsal
+  channel.
+- [ ] Commit the cutover and produce a source-bound signed candidate.
+
+See [Phase 22B](phase-22b-local-package-rehearsal.md) for local artifact hashes,
+test evidence, and the remaining release boundary.
+
 ## Working rules for later phases
 
 1. Do not add Electron-specific imports to `core/`.

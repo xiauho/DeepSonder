@@ -1,8 +1,9 @@
 # Novalist Electron desktop
 
-This directory contains the Electron + React + TypeScript shell selected as the
-only entry point for future distributions. Until a signed prerelease completes
-the Phase 19 clean-machine gate, the current public release remains unchanged.
+This directory contains the Electron + React + TypeScript shell used by the root
+source launcher and selected as the only entry point for future distributions.
+Until a signed prerelease completes the clean-machine gate, existing public
+artifacts remain unchanged.
 
 ## Requirements
 
@@ -29,6 +30,11 @@ npm run package:win
 Electron window, verifies the context-isolated preload bridge and Sidecar ping,
 then exits. `npm run capture` additionally writes an ignored visual-QA screenshot
 to `dist/electron-preview.png`.
+
+On Windows, the repository-root `run.bat` is the normal source entry. It creates
+the Sidecar environment, verifies Node.js 24+, repairs an incomplete npm install
+when safe, and then delegates to `npm start`. It never starts the legacy PySide6
+shell.
 
 The self-test also checks that an opened schema-v2 project exposes chapter
 lifecycle, append/export, and reviewed-only AI controls. A live AI acceptance
@@ -63,6 +69,9 @@ portable recovery checks, run from the repository root:
 
 Unsigned output is explicitly local-only. Tagged CI packaging additionally
 requires Ed25519 release-metadata keys and a Windows Authenticode certificate.
+
+The latest post-cutover local rehearsal and artifact hashes are recorded in
+[`phase-22b-local-package-rehearsal.md`](../docs/electron-migration/phase-22b-local-package-rehearsal.md).
 
 ## Current slice
 

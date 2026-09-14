@@ -2,7 +2,7 @@
 
 > 当前发布版本：`v2.1.0-beta`。本版本重构 AI 任务传参与响应协议，并完善扩写/续写字数闭环、故事记忆、一致性检查和角色档案同步，属于较大范围的公开预览更新；请在真实创作项目中使用前先完成一次本机 DSh 实测并保留独立备份。
 
-Novalist 是一款面向长篇小说创作的本地桌面工具。当前公开版使用 PySide6；后续发行版已确定以 Electron 作为唯一入口，通过受限的本地 Python Sidecar 复用领域能力，并可通过 `dsh` 的 `headless` 模式调用 DeepSeek Harness。
+Novalist 是一款面向长篇小说创作的本地桌面工具。当前源码工作区以 Electron 作为唯一普通入口，通过受限的本地 Python Sidecar 复用领域能力，并可通过 `dsh` 的 `headless` 模式调用 DeepSeek Harness。旧 PySide6 源码仅保留作维护者回退和回归比较，不再由用户启动脚本调用。
 
 > Electron 迁移已完成阶段十八的 Windows 打包演练，但本地演练产物未签名，不等同于新的公开发行版。实施与验收边界见 [阶段十八说明](docs/electron-migration/phase-18-packaged-cutover-rehearsal.md)。
 
@@ -37,8 +37,9 @@ Novalist 是一款面向长篇小说创作的本地桌面工具。当前公开�
 
 ## 环境要求
 
-- Python 3.10 或更高版本
-- Windows 10/11（`run.bat`）；其他系统可使用 Python 手动启动
+- Python 3.10 或更高版本（仅用于本地 Sidecar）
+- Node.js 24 或更高版本
+- Windows 10/11（`run.bat`）；当前正式打包目标为 Windows x64
 - 使用 AI 功能时，需要另行安装并配置 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
 
 DeepSeek Harness 当前仍处于开发者预览阶段，可能发生不兼容变更。遇到调用问题时，请先核对 Harness 的最新官方说明和命令行参数。
@@ -53,33 +54,22 @@ DeepSeek Harness 当前仍处于开发者预览阶段，可能发生不兼容变
 run.bat
 ```
 
-脚本会创建项目专用的 `.venv` 环境并安装 `requirements.txt` 中声明的依赖。它不会安装 DeepSeek Harness，也不会读取或写入 API 密钥。
+脚本会创建项目专用的 `.venv` Sidecar 环境，检查 Node.js/npm，并在 Electron 依赖不完整时根据锁文件执行 `npm ci`，最后构建并打开 Electron 工作台。它不会安装 DeepSeek Harness，也不会读取或写入 API 密钥。
 
 ## 手动启动
 
-```bash
+```powershell
 python -m venv .venv
+cd electron
+npm ci
+npm start
 ```
 
-Windows：
-
-```bat
-.venv\Scripts\activate
-python -m pip install -r requirements.txt
-python main.py
-```
-
-macOS/Linux：
-
-```bash
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-python main.py
-```
+Electron 源码启动器会优先使用仓库中的 `.venv\Scripts\python.exe` 运行 Sidecar；也可通过 `NOVALIST_PYTHON` 显式指定 Python。`main.py` 仅作为未分发的维护者回退源码保留。
 
 ## Windows 打包
 
-从 `v2.0.6-beta` 开始，项目提供无需预装 Python 的 Windows x64 目录包基线。开发者安装 `requirements-build.txt` 后可运行 `scripts/build_windows.ps1`；脚本会执行全量测试、构建 PyInstaller 包、运行无界面自检，并在 `dist/release` 中生成 ZIP、发布清单和 SHA-256 文件。详细边界见 `PACKAGING.md`。
+Electron Windows 包内置独立 Python Sidecar，最终用户无需预装 Python 或 Node.js。开发者安装构建依赖后可运行 `scripts/build_electron_windows.ps1`，生成 NSIS 安装包与便携恢复 ZIP；未签名的本地产物仅用于演练，正式候选必须通过签名及干净 Windows 10/11 门禁。
 
 ## 配置 DeepSeek Harness
 
@@ -280,7 +270,7 @@ AI 输出可能存在事实错误、遗漏、不当内容或与第三方作品�
 
 ```bash
 python -m unittest discover -s tests
-python -m compileall -q main.py core ui
+python -m compileall -q sidecar_main.py application core sidecar
 cd electron && npm test
 ```
 
@@ -298,17 +288,13 @@ python scripts/verify_dsh_prompt_transport.py --long-chars 45000
 ## 项目结构
 
 ```text
-main.py
-run.bat
-requirements.txt
-config.example.json
-assets/
-core/
-ui/
-projects/demo_novel/
-tests/
-electron/
-sidecar/
+run.bat                 # Windows Electron 源码入口
+electron/               # Electron、React、TypeScript 与发布门禁
+sidecar/                # 受限的本地 RPC Sidecar
+application/            # 与 UI 无关的应用服务
+core/                   # 领域逻辑与持久化规则
+tests/                  # Python 与迁移回归测试
+main.py、ui/            # 未分发的维护者旧界面回退源码
 ```
 
 ## 许可
