@@ -61,7 +61,8 @@ release owner's explicit remote-processing and cost consent.
 ## Remaining external gates
 
 - configure and protect the `electron-prerelease` environment;
-- provision Ed25519 metadata and Authenticode credentials outside the repository;
-- run live synthetic DSH validation and signed packaging from one chosen commit;
+- provision Ed25519 metadata credentials outside the repository; Authenticode
+  may be deferred for a prerelease but remains mandatory for stable versions;
+- run live synthetic DSH validation and trust-bound packaging from one chosen commit;
 - pass clean Windows 10 and Windows 11 validation for that exact candidate;
 - complete independent human release review.

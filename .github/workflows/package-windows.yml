@@ -40,7 +40,7 @@ jobs:
       - name: Install Electron dependencies
         working-directory: electron
         run: npm ci
-      - name: Build and validate signed Electron-only Windows candidate
+      - name: Build and validate trust-bound Electron-only Windows candidate
         shell: pwsh
         env:
           RELEASE_PRIVATE_KEY_B64: ${{ secrets.NOVALIST_RELEASE_PRIVATE_KEY_B64 }}
@@ -57,24 +57,32 @@ jobs:
           if (-not $env:RELEASE_PRIVATE_KEY_B64 -or -not $env:RELEASE_PUBLIC_KEY_B64) {
             throw "Candidate packaging requires Ed25519 metadata signing secrets."
           }
-          if (-not $env:CSC_LINK -or -not $env:CSC_KEY_PASSWORD) {
-            throw "Candidate packaging requires Windows code-signing secrets."
+          $hasCertificate = -not [string]::IsNullOrWhiteSpace($env:CSC_LINK)
+          $hasCertificatePassword = -not [string]::IsNullOrWhiteSpace($env:CSC_KEY_PASSWORD)
+          if ($hasCertificate -ne $hasCertificatePassword) {
+            throw "Windows code-signing certificate and password must be configured together."
           }
           $privateKey = Join-Path $env:RUNNER_TEMP "release-private.pem"
           $publicKey = Join-Path $env:RUNNER_TEMP "release-public.pem"
-          $certificate = Join-Path $env:RUNNER_TEMP "novalist-code-signing.pfx"
           [IO.File]::WriteAllBytes($privateKey, [Convert]::FromBase64String($env:RELEASE_PRIVATE_KEY_B64))
           [IO.File]::WriteAllBytes($publicKey, [Convert]::FromBase64String($env:RELEASE_PUBLIC_KEY_B64))
-          [IO.File]::WriteAllBytes($certificate, [Convert]::FromBase64String($env:CSC_LINK))
-          $env:CSC_LINK = $certificate
           $arguments.RequireMetadataSignature = $true
           $arguments.ReleasePrivateKeyPath = $privateKey
           $arguments.ReleasePublicKeyPath = $publicKey
-          $arguments.RequireCodeSigning = $true
-          $arguments.CodeSigningCertificatePath = $certificate
-          $arguments.CodeSigningCertificatePassword = $env:CSC_KEY_PASSWORD
+          if ($hasCertificate) {
+            $certificate = Join-Path $env:RUNNER_TEMP "novalist-code-signing.pfx"
+            [IO.File]::WriteAllBytes($certificate, [Convert]::FromBase64String($env:CSC_LINK))
+            $env:CSC_LINK = $certificate
+            $arguments.RequireCodeSigning = $true
+            $arguments.CodeSigningCertificatePath = $certificate
+            $arguments.CodeSigningCertificatePassword = $env:CSC_KEY_PASSWORD
+          } else {
+            Remove-Item Env:CSC_LINK -ErrorAction SilentlyContinue
+            Remove-Item Env:CSC_KEY_PASSWORD -ErrorAction SilentlyContinue
+            Write-Host "Building an Ed25519-signed candidate without Authenticode; stable versions will fail closed."
+          }
           ./scripts/build_electron_windows.ps1 @arguments
-      - name: Upload Electron-only release rehearsal
+      - name: Upload Electron-only release candidate
         uses: actions/upload-artifact@v4
         with:
           name: novalist-electron-windows-x64

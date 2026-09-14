@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       package_run_id:
-        description: "Run ID of the signed Package Electron Windows workflow"
+        description: "Run ID of the Ed25519-bound Package Electron Windows workflow"
         required: true
         type: string
       ai_run_id:
@@ -30,7 +30,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
-      - name: Download signed candidate from packaging run
+      - name: Download trust-bound candidate from packaging run
         uses: actions/download-artifact@v4
         with:
           name: novalist-electron-windows-x64
@@ -73,7 +73,7 @@ jobs:
         with:
           pattern: novalist-*-candidate-report
           path: reports
-      - name: Verify both reports belong to the exact signed candidate
+      - name: Verify both reports belong to the exact candidate
         shell: pwsh
         run: |
           node ./electron/scripts/candidate-report-gate.mjs `
@@ -87,7 +87,7 @@ jobs:
           path: ai-report
           run-id: ${{ inputs.ai_run_id }}
           github-token: ${{ github.token }}
-      - name: Bind signed candidate and live AI evidence to one source
+      - name: Bind candidate and live AI evidence to one source
         shell: pwsh
         run: |
           node ./electron/scripts/release-readiness-gate.mjs `

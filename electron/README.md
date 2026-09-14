@@ -72,8 +72,10 @@ portable recovery checks, run from the repository root:
 .\scripts\build_electron_windows.ps1 -PythonExecutable .\.venv\Scripts\python.exe
 ```
 
-Unsigned output is explicitly local-only. Tagged CI packaging additionally
-requires Ed25519 release-metadata keys and a Windows Authenticode certificate.
+Output without an Ed25519 metadata signature is explicitly local-only.
+Protected prerelease packaging always requires the Ed25519 keys and accepts an
+absent Authenticode certificate; a configured but invalid or incomplete Windows
+signature still fails closed. Stable versions require both signature families.
 
 The latest source-bound local rehearsal and artifact hashes are recorded in
 [`phase-24-release-candidate-and-quality.md`](../docs/electron-migration/phase-24-release-candidate-and-quality.md).
@@ -99,9 +101,11 @@ The Phase 18 candidate supports:
   numbers without exposing sensitive application configuration.
 
 Phase 19 embeds the protected release public key in production packages and
-provides a clean Windows 10/11 candidate-validation matrix. Provisioning the
-official keys/runners and collecting both signed reports remain release-owner
-actions; automatic updating stays disabled.
+provides a clean Windows 10/11 candidate-validation matrix. Phase 25 separates
+the mandatory Ed25519 update trust from optional prerelease Authenticode while
+retaining Authenticode as a stable-release requirement. Provisioning the
+metadata keys/runners and collecting both reports remain release-owner actions;
+automatic updating stays disabled.
 
 Phase 20A adds the schema-v2 daily chapter lifecycle: create after the current
 chapter, revision-safe rename, stable-ID reordering, recoverable deletion, and

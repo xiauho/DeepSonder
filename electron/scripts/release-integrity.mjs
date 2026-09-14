@@ -20,11 +20,15 @@ export function publicKeyFingerprint(publicKeyPem) {
 export async function validateReleaseManifest(releaseDirectory, manifestPath) {
   const bytes = await readFile(manifestPath);
   const value = JSON.parse(bytes.toString("utf8"));
-  if (value?.schema_version !== 3 || value.package_kind !== "electron-only") {
-    throw new Error("发布清单不是 Electron-only schema 3。 ");
+  if (value?.schema_version !== 4 || value.package_kind !== "electron-only") {
+    throw new Error("发布清单不是 Electron-only schema 4。 ");
   }
   if (!VERSION.test(value.version) || value.platform !== "windows" || value.architecture !== "x64") {
     throw new Error("发布清单版本或平台无效。");
+  }
+  const expectedTier = value.version.includes("-") ? "prerelease" : "stable";
+  if (value.release_tier !== expectedTier) {
+    throw new Error("发布清单级别与版本不一致。");
   }
   if (value.entrypoint !== "Novalist.exe" || value.sidecar !== "resources/sidecar/NovalistSidecar.exe") {
     throw new Error("发布清单入口或 Sidecar 路径无效。");

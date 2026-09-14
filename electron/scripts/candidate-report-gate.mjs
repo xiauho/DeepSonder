@@ -7,7 +7,7 @@ const VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u;
 const SOURCE_COMMIT = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u;
 
 function assertReport(report, expectedClient) {
-  if (report?.schema_version !== 1 || report.result !== "passed" ||
+  if (report?.schema_version !== 2 || report.result !== "passed" ||
       report.package_kind !== "electron-only" || report.unsigned_local_rehearsal !== false) {
     throw new Error(`${expectedClient} 验收报告不是通过的正式 Electron 候选。`);
   }
@@ -16,9 +16,12 @@ function assertReport(report, expectedClient) {
       !SHA256.test(report.installer_sha256) || !SHA256.test(report.portable_sha256)) {
     throw new Error(`${expectedClient} 验收报告的版本、密钥或产物摘要无效。`);
   }
+  const expectedTier = report.version.includes("-") ? "prerelease" : "stable";
+  if (report.release_tier !== expectedTier) {
+    throw new Error(`${expectedClient} 验收报告的发布级别与版本不一致。`);
+  }
   for (const [key, expected] of Object.entries({
     manifest_signature: "passed",
-    authenticode: "passed",
     nsis_install_and_uninstall: "passed",
     schema_v2_workflow_surface: "passed",
     schema_v2_ai_review_surface: "passed",
@@ -28,6 +31,14 @@ function assertReport(report, expectedClient) {
     if (report[key] !== expected) {
       throw new Error(`${expectedClient} 验收报告缺少通过门禁：${key}。`);
     }
+  }
+  if (report.authenticode !== "passed" &&
+      !(report.release_tier === "prerelease" && report.authenticode === "not_present")) {
+    throw new Error(`${expectedClient} 验收报告的 Authenticode 状态不符合发布级别。`);
+  }
+  const expectedAuthenticodePolicy = report.release_tier === "stable" ? "required" : "optional";
+  if (report.authenticode_policy !== expectedAuthenticodePolicy) {
+    throw new Error(`${expectedClient} 验收报告的 Authenticode 策略无效。`);
   }
   if (report.schema_v2_open_was_read_only !== true) {
     throw new Error(`${expectedClient} 验收未证明 schema-v2 打开过程只读。`);
@@ -41,18 +52,20 @@ function assertReport(report, expectedClient) {
 export function compareCandidateReports(windows10, windows11) {
   assertReport(windows10, "windows-10");
   assertReport(windows11, "windows-11");
-  for (const key of ["version", "source_commit", "release_key_id", "installer_sha256", "portable_sha256"]) {
+  for (const key of ["release_tier", "version", "source_commit", "release_key_id", "authenticode", "installer_sha256", "portable_sha256"]) {
     if (windows10[key] !== windows11[key]) {
       throw new Error(`Windows 10/11 验收报告不属于同一候选：${key}。`);
     }
   }
   return {
-    schema_version: 1,
+    schema_version: 2,
     result: "passed",
     package_kind: "electron-only",
+    release_tier: windows10.release_tier,
     version: windows10.version,
     source_commit: windows10.source_commit,
     release_key_id: windows10.release_key_id,
+    authenticode: windows10.authenticode,
     installer_sha256: windows10.installer_sha256,
     portable_sha256: windows10.portable_sha256,
     clients: [
@@ -60,7 +73,8 @@ export function compareCandidateReports(windows10, windows11) {
       { client: "windows-11", os_version: windows11.os_version, os_build: windows11.os_build },
     ],
     gates: {
-      signatures: "passed",
+      metadata_signature: "passed",
+      authenticode: windows10.authenticode,
       install_and_uninstall: "passed",
       schema_v2_read_only_open: "passed",
       schema_v2_workflow_surface: "passed",

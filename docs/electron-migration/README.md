@@ -520,8 +520,10 @@ Phase 19 deliverables:
 - [x] Packaged Electron launches with its embedded, version-matched Sidecar.
 - [x] A newly created schema-v2 project opens without compatibility writes.
 - [x] Unpacked, portable recovery, and NSIS install/uninstall rehearsals pass.
-- [x] Both release artifacts are bound to a schema-3 manifest by SHA-256.
-- [x] Tagged CI builds require Ed25519 metadata and Authenticode signatures.
+- [x] Both release artifacts are bound to a versioned manifest by SHA-256
+  (schema 4 for the tiered policy).
+- [x] Tagged CI builds require Ed25519 metadata signatures; stable versions
+  additionally require Authenticode.
 - [x] Tagged packaging exposes Electron as the only application entry.
 
 ## Phase 19 exit criteria
@@ -530,8 +532,9 @@ Phase 19 deliverables:
 - [x] A clean-client validator covers install, zero-write open, backup restore,
   portable recovery, and uninstall.
 - [x] Protected Windows 10/11 workflow definitions are present.
-- [ ] Official metadata/Authenticode credentials are provisioned.
-- [ ] One signed packaging run and both clean-client reports pass.
+- [ ] Official metadata credentials are provisioned; Authenticode may be
+  deferred for prereleases.
+- [ ] One trust-bound packaging run and both clean-client reports pass.
 
 ## Phase 20 exit criteria
 
@@ -549,15 +552,16 @@ status.
 
 Phase 20D adds packaged checks for the complete v2 workflow surface, an
 explicit-consent synthetic live-DSH verifier, and an automated gate that binds
-the Windows 10/11 clean-client reports to one exact signed candidate. Real DSH,
-signing credentials, and clean-client runs remain release-environment gates.
+the Windows 10/11 clean-client reports to one exact trust-bound candidate. Real
+DSH, metadata-signing credentials, and clean-client runs remain
+release-environment gates.
 The live verifier is also available as the protected, manually dispatched
 `validate-v2-ai-dsh.yml` workflow on a `novalist-dsh` Windows runner.
 
 ## Phase 21 exit criteria
 
-- [x] Protected candidate packaging always requires metadata and Windows code
-  signing, whether started by a tag or manually.
+- [x] Protected candidate packaging always requires metadata signing; Windows
+  code signing is optional for prereleases and mandatory for stable versions.
 - [x] Signed manifests, clean-client reports, and live DSH reports carry the
   complete source commit.
 - [x] The final readiness gate binds version, source, release key, artifacts,
@@ -590,7 +594,7 @@ maintainer rollback boundary.
 - [x] Record the local artifact hashes and keep unsigned output in the rehearsal
   channel.
 - [x] Commit the cutover and produce a source-bound local candidate.
-- [ ] Produce a source-bound signed candidate in the protected environment.
+- [ ] Produce a source-bound, metadata-signed candidate in the protected environment.
 
 See [Phase 22B](phase-22b-local-package-rehearsal.md) for local artifact hashes,
 test evidence, and the remaining release boundary.
@@ -600,7 +604,7 @@ test evidence, and the remaining release boundary.
 - [x] Rebuild from the committed Phase 22A/B baseline.
 - [x] Carry the complete source commit through the manifest and validator report.
 - [x] Pass full local source-bound candidate validation.
-- [ ] Replace local-rehearsal metadata with protected signatures and collect the
+- [ ] Replace local-rehearsal metadata with a protected Ed25519 signature and collect the
   external release evidence.
 
 See [Phase 22C](phase-22c-source-bound-rehearsal.md) for the current artifact
@@ -646,10 +650,25 @@ layout threshold, budget rationale, and completed renderer probes.
 - [x] Separate local fallback expectations from combined semantic expectations.
 - [x] Fix the false-positive action-name heuristic without lowering quality
   thresholds.
-- [ ] Collect live DSH and signed clean-client release evidence.
+- [ ] Collect live DSH and metadata-signed clean-client release evidence.
 
 See [Phase 24](phase-24-release-candidate-and-quality.md) for candidate hashes,
 quality measurements, and the remaining external gates.
+
+## Phase 25 exit criteria
+
+- [x] Bind `prerelease` or `stable` to the semantic version in release metadata.
+- [x] Keep Ed25519, SHA-256, clean-client, and manual-review gates mandatory for
+  every protected candidate.
+- [x] Permit Authenticode to be absent only for prereleases.
+- [x] Reject invalid, partial, cross-client-mismatched, or unsigned stable
+  Authenticode states.
+- [ ] Provision the protected Ed25519 key pair and collect one prerelease run.
+- [ ] Implement the user-confirmed Electron update client before enabling
+  automatic updates.
+
+See [Phase 25](phase-25-tiered-release-security.md) for the tier matrix and
+security boundary.
 
 ## Working rules for later phases
 

@@ -5,6 +5,7 @@ param(
     [string]$NodeExecutable = "node",
     [string]$ReportPath = "",
     [switch]$AllowUnsignedLocalRehearsal,
+    [switch]$RequireCodeSigning,
     [switch]$KeepWorkDirectory
 )
 
@@ -33,11 +34,19 @@ function Get-TreeFingerprint([string]$Root) {
     } | ConvertTo-Json -Depth 4 -Compress)
 }
 
-function Assert-ValidSignature([string]$Path) {
-    $signature = Get-AuthenticodeSignature -LiteralPath $Path
-    if ($signature.Status -ne "Valid") {
-        throw "Authenticode signature is not valid: $Path ($($signature.Status))"
+function Get-AuthenticodeState([string[]]$Paths) {
+    $statuses = @($Paths | ForEach-Object {
+        $signature = Get-AuthenticodeSignature -LiteralPath $_
+        [ordered]@{ path = $_; status = [string]$signature.Status }
+    })
+    if (@($statuses | Where-Object status -eq "Valid").Count -eq $statuses.Count) {
+        return "passed"
     }
+    if (@($statuses | Where-Object status -eq "NotSigned").Count -eq $statuses.Count) {
+        return "not_present"
+    }
+    $summary = ($statuses | ForEach-Object { "$($_.path)=$($_.status)" }) -join "; "
+    throw "Authenticode signatures are invalid or inconsistent: $summary"
 }
 
 function Invoke-AppSelfTest([string]$Executable, [string]$ProjectPath, [string]$KeyId) {
@@ -134,6 +143,13 @@ try {
         throw "Release manifest is missing."
     }
     $Manifest = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
+    $ExpectedReleaseTier = if ([string]$Manifest.version -like "*-*") { "prerelease" } else { "stable" }
+    if ($Manifest.release_tier -notin @("prerelease", "stable") -or
+        $Manifest.release_tier -ne $ExpectedReleaseTier) {
+        throw "Release tier does not match the candidate version."
+    }
+    $TierAuthenticodePolicy = if ($Manifest.release_tier -eq "stable") { "required" } else { "optional" }
+    $CodeSigningRequired = [bool](-not $AllowUnsignedLocalRehearsal -and ($RequireCodeSigning -or $TierAuthenticodePolicy -eq "required"))
     $KeyId = ""
     if ($AllowUnsignedLocalRehearsal) {
         & $NodeExecutable (Join-Path $ProjectRoot "electron\scripts\release-integrity.mjs") verify $ReleaseRoot $ManifestPath
@@ -156,15 +172,18 @@ try {
     $PortableName = ($Manifest.artifacts | Where-Object kind -eq "portable_zip").name
     $InstallerPath = Join-Path $ReleaseRoot $InstallerName
     $PortablePath = Join-Path $ReleaseRoot $PortableName
-    if (-not $AllowUnsignedLocalRehearsal) { Assert-ValidSignature $InstallerPath }
 
     $RecoveryRoot = Join-Path $WorkRoot "portable-recovery"
     Expand-Archive -LiteralPath $PortablePath -DestinationPath $RecoveryRoot -Force
     $RecoveryExecutable = Join-Path $RecoveryRoot "Novalist.exe"
     $RecoverySidecar = Join-Path $RecoveryRoot "resources\sidecar\NovalistSidecar.exe"
-    if (-not $AllowUnsignedLocalRehearsal) {
-        Assert-ValidSignature $RecoveryExecutable
-        Assert-ValidSignature $RecoverySidecar
+    $AuthenticodeState = if ($AllowUnsignedLocalRehearsal) {
+        "not_required"
+    } else {
+        Get-AuthenticodeState @($InstallerPath, $RecoveryExecutable, $RecoverySidecar)
+    }
+    if ($CodeSigningRequired -and $AuthenticodeState -ne "passed") {
+        throw "Authenticode code signing is required for this release tier."
     }
 
     $ProjectPath = New-CandidateProject $WorkRoot
@@ -177,8 +196,13 @@ try {
         if ($install.ExitCode -ne 0) { throw "NSIS install failed with exit code $($install.ExitCode)." }
         $InstalledExecutable = Join-Path $InstallRoot "Novalist.exe"
         if (-not $AllowUnsignedLocalRehearsal) {
-            Assert-ValidSignature $InstalledExecutable
-            Assert-ValidSignature (Join-Path $InstallRoot "resources\sidecar\NovalistSidecar.exe")
+            $InstalledAuthenticode = Get-AuthenticodeState @(
+                $InstalledExecutable,
+                (Join-Path $InstallRoot "resources\sidecar\NovalistSidecar.exe")
+            )
+            if ($InstalledAuthenticode -ne $AuthenticodeState) {
+                throw "Installed Authenticode state differs from the packaged candidate."
+            }
         }
         Invoke-AppSelfTest $InstalledExecutable $ProjectPath $KeyId
     } finally {
@@ -199,9 +223,10 @@ try {
 
     $Os = Get-CimInstance Win32_OperatingSystem
     $Report = [ordered]@{
-        schema_version = 1
+        schema_version = 2
         result = "passed"
         package_kind = "electron-only"
+        release_tier = $Manifest.release_tier
         version = $Manifest.version
         source_commit = $Manifest.source_commit
         release_key_id = $(if ($KeyId) { $KeyId } else { $null })
@@ -211,7 +236,8 @@ try {
         os_build = $Os.BuildNumber
         generated_at_utc = [DateTime]::UtcNow.ToString("o")
         manifest_signature = $(if ($AllowUnsignedLocalRehearsal) { "not_required" } else { "passed" })
-        authenticode = $(if ($AllowUnsignedLocalRehearsal) { "not_required" } else { "passed" })
+        authenticode = $AuthenticodeState
+        authenticode_policy = $TierAuthenticodePolicy
         nsis_install_and_uninstall = "passed"
         schema_v2_open_was_read_only = $true
         schema_v2_workflow_surface = "passed"

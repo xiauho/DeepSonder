@@ -30,8 +30,9 @@ async function fixture(signature) {
   })));
   const manifestPath = path.join(directory, "release-manifest.json");
   await writeFile(manifestPath, JSON.stringify({
-    schema_version: 3,
+    schema_version: 4,
     package_kind: "electron-only",
+    release_tier: "prerelease",
     version: "2.1.0-beta",
     platform: "windows",
     architecture: "x64",
@@ -100,6 +101,21 @@ test("signed metadata rejects a missing source commit", async () => {
     await assert.rejects(
       validateReleaseManifest(sample.directory, sample.manifestPath),
       /签名元数据无效/u,
+    );
+  } finally {
+    await rm(sample.directory, { recursive: true, force: true });
+  }
+});
+
+test("release tier must match the semantic version", async () => {
+  const sample = await fixture({ algorithm: "none", reason: "local-rehearsal" });
+  try {
+    const manifest = JSON.parse(await readFile(sample.manifestPath, "utf8"));
+    manifest.release_tier = "stable";
+    await writeFile(sample.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    await assert.rejects(
+      validateReleaseManifest(sample.directory, sample.manifestPath),
+      /级别与版本不一致/u,
     );
   } finally {
     await rm(sample.directory, { recursive: true, force: true });

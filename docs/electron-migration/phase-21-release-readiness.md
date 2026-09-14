@@ -1,14 +1,19 @@
 # Phase 21: release-readiness evidence binding
 
+> Current policy note: Phase 25 keeps the evidence binding introduced here but
+> allows Authenticode to be `not_present` for prereleases. Stable versions still
+> require valid Authenticode.
+
 Phase 21 turns the separate signed-package and live-AI checks into one fail-closed
 release-review input. It does not publish a release and does not enable automatic
 updates.
 
 ## Source-bound candidate
 
-Every protected packaging run now requires both Ed25519 release-metadata keys
-and the Windows Authenticode credential, including manually dispatched runs.
-The complete Git object ID is embedded in the schema-3 manifest before its exact
+Every protected packaging run requires Ed25519 release-metadata keys. The
+Windows Authenticode credential is optional for prereleases and required for
+stable versions, including manually dispatched runs.
+The complete Git object ID is embedded in the schema-4 manifest before its exact
 bytes are signed. Unsigned local rehearsals may remain unbound, but they cannot
 pass the clean-client or final readiness gates.
 
@@ -25,7 +30,7 @@ prose.
 
 `release-readiness-gate.mjs` requires exactly one passing connection, check,
 expansion, continuation, and memory case. Writing and memory generation must
-remain review-first, and the report must match the signed candidate's version
+remain review-first, and the report must match the trust-bound candidate's version
 and source commit.
 
 ## Human authority boundary
@@ -37,8 +42,8 @@ approve distribution.
 
 ## Exit criteria
 
-- [x] Protected manual and tagged packaging runs fail closed without both
-  metadata-signing and Authenticode credentials.
+- [x] Protected manual and tagged packaging runs fail closed without metadata
+  signing; stable versions additionally fail closed without Authenticode.
 - [x] Signed manifests bind version, artifacts, release key, and source commit.
 - [x] Clean Windows reports preserve and compare the source commit.
 - [x] Live synthetic DSH reports preserve app version and source commit.

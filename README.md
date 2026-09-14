@@ -4,9 +4,9 @@
 
 Novalist 是一款面向长篇小说创作的本地桌面工具。当前源码工作区以 Electron 作为唯一普通入口，通过受限的本地 Python Sidecar 复用领域能力，并可通过 `dsh` 的 `headless` 模式调用 DeepSeek Harness。旧 PySide6 源码仅保留作维护者回退和回归比较，不再由用户启动脚本调用。
 
-> Electron 迁移已完成阶段二十四的最新源码绑定 Windows 打包演练，但本地演练产物未签名，不等同于新的公开发行版。实施与验收边界见 [阶段二十四说明](docs/electron-migration/phase-24-release-candidate-and-quality.md)。
+> Electron 迁移已完成阶段二十四的最新源码绑定 Windows 打包演练。阶段二十五将发布门禁分为预发布与稳定版：Beta 必须使用 Ed25519 绑定发布清单，但可以暂不提供 Windows Authenticode；稳定版继续强制两类签名。实施边界见 [阶段二十五说明](docs/electron-migration/phase-25-tiered-release-security.md)。
 
-阶段十九已提供签名预发布和干净 Windows 10/11 验收流水线。正式切换前请遵循
+当前已提供受保护预发布和干净 Windows 10/11 验收流水线。正式切换前请遵循
 [Electron 迁移、备份与恢复指南](docs/ELECTRON_TRANSITION_GUIDE.md)；目前仍未启用 Electron 自动更新。
 
 > **第三方项目声明**：Novalist 是独立开发的第三方开源工具，不是 DeepSeek 或 DeepSeek Harness 的官方产品，与其不存在隶属、合作、授权、认证或背书关系。“DeepSeek Harness”仅用于说明兼容性和所依赖的外部工具。
@@ -69,7 +69,7 @@ Electron 源码启动器会优先使用仓库中的 `.venv\Scripts\python.exe` �
 
 ## Windows 打包
 
-Electron Windows 包内置独立 Python Sidecar，最终用户无需预装 Python 或 Node.js。开发者安装构建依赖后可运行 `scripts/build_electron_windows.ps1`，生成 NSIS 安装包与便携恢复 ZIP；未签名的本地产物仅用于演练，正式候选必须通过签名及干净 Windows 10/11 门禁。
+Electron Windows 包内置独立 Python Sidecar，最终用户无需预装 Python 或 Node.js。开发者安装构建依赖后可运行 `scripts/build_electron_windows.ps1`，生成 NSIS 安装包与便携恢复 ZIP。无 Ed25519 元数据签名的本地产物仅用于演练；受保护 Beta 候选可以不含 Authenticode，但必须通过 Ed25519、SHA-256、安装恢复和干净 Windows 10/11 门禁。无预发布后缀的稳定版仍强制 Authenticode。
 
 ## 配置 DeepSeek Harness
 

@@ -1,5 +1,8 @@
 # Phase 22C: source-bound local candidate
 
+> Current policy note: Phase 25 makes Authenticode optional for prereleases.
+> The protected Ed25519 release identity remains required.
+
 Phase 22C repeats the complete Windows rehearsal from the committed Phase 22A/B
 baseline and carries the exact Git identity through the manifest and independent
 candidate report. It validates release provenance mechanics without pretending
@@ -47,6 +50,7 @@ These files replace the earlier Phase 22B local outputs under
 - [x] Preserve that identity in the independent candidate report.
 - [x] Bind the recorded hashes to the same version and source.
 - [x] Pass full source, package, install, recovery, and project-integrity checks.
-- [ ] Provision protected Ed25519 and Authenticode credentials.
-- [ ] Rebuild the same chosen release commit as an officially signed candidate.
+- [ ] Provision protected Ed25519 credentials; Authenticode may be deferred for
+  a prerelease.
+- [ ] Rebuild the same chosen release commit as a metadata-signed candidate.
 - [ ] Pass Windows 10/11 and live synthetic DSH release-readiness gates.

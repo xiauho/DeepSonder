@@ -9,7 +9,8 @@ param(
     [switch]$RequireCodeSigning,
     [string]$CodeSigningCertificatePath = "",
     [string]$CodeSigningCertificatePassword = "",
-    [string]$SourceCommit = ""
+    [string]$SourceCommit = "",
+    [string]$ReleaseTier = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -83,6 +84,12 @@ $ElectronPackage = Get-Content -LiteralPath (Join-Path $ElectronRoot "package.js
 if ($ElectronPackage.version -ne $Version) {
     throw "VERSION ($Version) and electron/package.json ($($ElectronPackage.version)) differ."
 }
+$ExpectedReleaseTier = if ($Version.Contains("-")) { "prerelease" } else { "stable" }
+if (-not $ReleaseTier) { $ReleaseTier = $ExpectedReleaseTier }
+$ReleaseTier = $ReleaseTier.Trim().ToLowerInvariant()
+if ($ReleaseTier -notin @("prerelease", "stable") -or $ReleaseTier -ne $ExpectedReleaseTier) {
+    throw "ReleaseTier must match VERSION: expected $ExpectedReleaseTier for $Version."
+}
 $PythonVersion = & $PythonExecutable -c "import sys; print('.'.join(map(str, sys.version_info[:3])))"
 if ($LASTEXITCODE -ne 0 -or -not $PythonVersion.StartsWith("3.12.")) {
     throw "Python 3.12 is required; found $PythonVersion"
@@ -98,6 +105,9 @@ if ($SourceCommit -and $SourceCommit -notmatch '^(?:[0-9a-f]{40}|[0-9a-f]{64})$'
 }
 if ($SigningRequested -and -not $SourceCommit) {
     throw "Signed release metadata requires SourceCommit."
+}
+if ($SigningRequested -and $ReleaseTier -eq "stable" -and -not $RequireCodeSigning) {
+    throw "Stable release metadata requires Windows Authenticode code signing."
 }
 $ReleaseKeyFingerprint = $null
 if ($SigningRequested) {
@@ -286,8 +296,9 @@ $Artifacts = @(
     }
 )
 $Manifest = [ordered]@{
-    schema_version = 3
+    schema_version = 4
     package_kind = "electron-only"
+    release_tier = $ReleaseTier
     version = $Version
     platform = "windows"
     architecture = "x64"
@@ -324,9 +335,10 @@ $ChecksumFiles | ForEach-Object {
 } | Set-Content -LiteralPath (Join-Path $PublishRoot "SHA256SUMS.txt") -Encoding ascii
 
 $Report = [ordered]@{
-    schema_version = 1
+    schema_version = 2
     version = $Version
     package_kind = "electron-only"
+    release_tier = $ReleaseTier
     source_commit = $(if ($SourceCommit) { $SourceCommit } else { $null })
     generated_at_utc = [DateTime]::UtcNow.ToString("o")
     python = $PythonVersion
@@ -339,6 +351,8 @@ $Report = [ordered]@{
     schema_v2_ai_review_surface = "passed"
     metadata_signature = $SignatureMetadata.algorithm
     embedded_release_key_id = $ReleaseKeyFingerprint
+    authenticode = $(if ($RequireCodeSigning) { "passed" } else { "not_present" })
+    authenticode_policy = $(if ($ReleaseTier -eq "stable") { "required" } else { "optional" })
     authenticode_required = [bool]$RequireCodeSigning
 }
 $Report | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $PublishRoot "rehearsal-report.json") -Encoding utf8

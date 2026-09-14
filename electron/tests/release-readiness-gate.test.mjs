@@ -7,17 +7,20 @@ const sourceCommit = "1".repeat(40);
 
 function candidateGate() {
   return {
-    schema_version: 1,
+    schema_version: 2,
     result: "passed",
     package_kind: "electron-only",
+    release_tier: "prerelease",
     version: "2.1.0-beta",
     source_commit: sourceCommit,
     release_key_id: "a".repeat(64),
     installer_sha256: "b".repeat(64),
     portable_sha256: "c".repeat(64),
+    authenticode: "not_present",
     clients: [{ client: "windows-10" }, { client: "windows-11" }],
     gates: {
-      signatures: "passed",
+      metadata_signature: "passed",
+      authenticode: "not_present",
       install_and_uninstall: "passed",
       schema_v2_read_only_open: "passed",
       schema_v2_workflow_surface: "passed",
@@ -44,11 +47,13 @@ function aiGate() {
   };
 }
 
-test("release readiness binds signed candidate and live AI to one source", () => {
+test("release readiness binds a metadata-signed prerelease and live AI to one source", () => {
   const report = buildReleaseReadiness(candidateGate(), aiGate());
   assert.equal(report.result, "passed");
   assert.equal(report.decision, "eligible_for_manual_release_review");
   assert.equal(report.source_commit, sourceCommit);
+  assert.equal(report.release_tier, "prerelease");
+  assert.equal(report.evidence.authenticode, "not_present");
   assert.equal(report.evidence.automatic_publication_authorized, false);
 });
 
@@ -65,5 +70,13 @@ test("release readiness rejects a different source or bypassed AI review", () =>
   assert.throws(
     () => buildReleaseReadiness(candidateGate(), unreviewedAi),
     /审核优先边界/u,
+  );
+
+  const invalidAuthenticode = candidateGate();
+  invalidAuthenticode.authenticode = "invalid";
+  invalidAuthenticode.gates.authenticode = "invalid";
+  assert.throws(
+    () => buildReleaseReadiness(invalidAuthenticode, aiGate()),
+    /Authenticode/u,
   );
 });
