@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
+import { rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -70,6 +70,9 @@ const preloadPath = path.join(
 );
 const selfTestMode = process.argv.includes("--self-test");
 const capturePreview = process.argv.includes("--capture-preview");
+const performanceReportPath = process.argv
+  .find((argument) => argument.startsWith("--performance-report="))
+  ?.slice("--performance-report=".length);
 const selfTestProjectPath = process.argv
   .find((argument) => argument.startsWith("--self-test-project="))
   ?.slice("--self-test-project=".length);
@@ -1918,6 +1921,16 @@ async function runSelfTest(): Promise<void> {
         (releaseTrust?.mode !== "production" || releaseTrust.keyId !== expectedReleaseKeyId)) {
       throw new Error("打包应用内嵌的发布公钥指纹与验收值不一致。");
     }
+    if (performanceReportPath !== undefined) {
+      if (performanceReportPath.trim().length === 0) {
+        throw new Error("性能报告路径不能为空。");
+      }
+      await runRendererPerformanceProbe(mainWindow, performanceReportPath);
+      console.log("electron-renderer-performance-probe: ok");
+      allowWindowClose = true;
+      mainWindow.close();
+      return;
+    }
     if (selfTestProjectPath !== undefined) {
       if (selfTestProjectPath.trim().length === 0) {
         throw new Error("打包自检项目路径不能为空。");
@@ -2138,6 +2151,133 @@ async function runSelfTest(): Promise<void> {
     await sidecar.stop();
     app.exit(1);
   }
+}
+
+async function runRendererPerformanceProbe(
+  window: BrowserWindow,
+  outputPath: string,
+): Promise<void> {
+  const sourcePath = path.join(
+    repositoryRoot,
+    "tests",
+    "fixtures",
+    "electron_migration",
+    "golden_project",
+  );
+  const scanned = await sidecar.request<{ plan: ManuscriptImportPlan }>(
+    "manuscript.scanImport",
+    { sourcePath },
+  );
+  const projectName = `phase-23b-renderer-${process.pid}`;
+  const created = await sidecar.request<{ opened: OpenedProjectV2 }>("project.createV2", {
+    parentDirectory: app.getPath("temp"),
+    name: projectName,
+    author: "Novalist renderer performance probe",
+    planDigest: scanned.plan.digest,
+  });
+  try {
+    const initialRendered = await waitForRendererCondition(
+      window,
+      `document.querySelector(".project-heading strong")?.textContent === ${JSON.stringify(projectName)} && document.querySelector(".codemirror-editor .cm-editor") !== null`,
+      10_000,
+    );
+    if (!initialRendered) throw new Error("性能探针项目未完成初始渲染。");
+    const initialMemory = rendererMemoryInfo(window);
+    const initial = await sidecar.request<{ document: DocumentSnapshot }>("manuscript.open", {
+      chapterId: "chapter_0001",
+    });
+    const content = createPerformanceManuscript(1_000_000);
+    const saved = await sidecar.request<{ document: DocumentSnapshot }>("manuscript.save", {
+      chapterId: "chapter_0001",
+      content,
+      expectedRevision: initial.document.revision,
+    });
+    const switchedAway = await clickRendererChapter(window, "chapter_0002");
+    if (!switchedAway || !await waitForRendererCondition(
+      window,
+      `document.querySelector(".document-row.active small")?.textContent === "chapter_0002"`,
+      10_000,
+    )) throw new Error("性能探针无法切换到对照章节。");
+    const startedAt = performance.now();
+    const switchedBack = await clickRendererChapter(window, "chapter_0001");
+    if (!switchedBack || !await waitForRendererCondition(
+      window,
+      `document.querySelector(".document-row.active small")?.textContent === "chapter_0001" && document.querySelector(".codemirror-editor")?.getAttribute("data-document-length") === ${JSON.stringify(String(saved.document.content.length))} && document.querySelector(".codemirror-editor .cm-editor") !== null`,
+      15_000,
+    )) throw new Error("百万字符章节未在性能预算窗口内完成渲染。");
+    const editorReadyMs = Number((performance.now() - startedAt).toFixed(2));
+    const finalMemory = rendererMemoryInfo(window);
+    const editorReadyBudgetMs = 3_000;
+    const rendererPrivateDeltaBudgetKb = 256 * 1024;
+    const privateDeltaKb = initialMemory.privateBytes === undefined || finalMemory.privateBytes === undefined
+      ? null
+      : Math.max(0, finalMemory.privateBytes - initialMemory.privateBytes);
+    if (editorReadyMs > editorReadyBudgetMs) {
+      throw new Error(`百万字符编辑器就绪耗时超出预算：${editorReadyMs} ms。`);
+    }
+    if (privateDeltaKb !== null && privateDeltaKb > rendererPrivateDeltaBudgetKb) {
+      throw new Error(`百万字符 renderer 私有内存增量超出预算：${privateDeltaKb} KiB。`);
+    }
+    const report = {
+      schemaVersion: 1,
+      result: "passed",
+      generatedAtUtc: new Date().toISOString(),
+      applicationVersion: app.getVersion(),
+      manuscriptCharacters: saved.document.content.length,
+      editorReadyMs,
+      budgets: {
+        editorReadyMs: editorReadyBudgetMs,
+        rendererPrivateDeltaKb: rendererPrivateDeltaBudgetKb,
+      },
+      rendererMemory: {
+        initialPrivateKb: initialMemory.privateBytes ?? null,
+        finalPrivateKb: finalMemory.privateBytes ?? null,
+        privateDeltaKb,
+        initialWorkingSetKb: initialMemory.workingSetSize,
+        finalWorkingSetKb: finalMemory.workingSetSize,
+        workingSetDeltaKb: Math.max(0, finalMemory.workingSetSize - initialMemory.workingSetSize),
+      },
+    };
+    const resolvedOutput = path.resolve(electronRoot, outputPath);
+    await writeFile(resolvedOutput, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  } finally {
+    await rm(created.opened.root, { recursive: true, force: true });
+  }
+}
+
+function rendererMemoryInfo(window: BrowserWindow): Electron.MemoryInfo {
+  const rendererPid = window.webContents.getOSProcessId();
+  const metric = app.getAppMetrics().find((item) => item.pid === rendererPid);
+  if (metric === undefined) {
+    throw new Error("无法读取 Electron renderer 进程内存指标。");
+  }
+  return metric.memory;
+}
+
+function createPerformanceManuscript(targetCharacters: number): string {
+  const paragraph = "林砚沿着雾港潮湿的石阶前行，记录潮声、灯塔与人物关系的细微变化。".repeat(6);
+  const sections: string[] = [];
+  let length = 0;
+  for (let index = 1; length < targetCharacters; index += 1) {
+    const section = `## 场景 ${index}\n\n${paragraph}\n\n`;
+    sections.push(section);
+    length += section.length;
+  }
+  return sections.join("").slice(0, targetCharacters);
+}
+
+async function clickRendererChapter(window: BrowserWindow, chapterId: string): Promise<boolean> {
+  return window.webContents.executeJavaScript(
+    `(() => {
+      const row = Array.from(document.querySelectorAll(".document-row"))
+        .find((item) => item.querySelector("small")?.textContent === ${JSON.stringify(chapterId)});
+      const button = row?.querySelector(".document-item");
+      if (!(button instanceof HTMLButtonElement)) return false;
+      button.click();
+      return true;
+    })()`,
+    true,
+  ) as Promise<boolean>;
 }
 
 async function verifyV2WorkflowSurface(window: BrowserWindow): Promise<void> {

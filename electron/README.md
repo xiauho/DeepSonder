@@ -22,6 +22,8 @@ npm install
 npm run typecheck
 npm test
 npm run check:bundles
+npm run benchmark:workspace
+npm run benchmark:renderer
 npm run self-test
 npm start
 npm run package:win
@@ -114,3 +116,10 @@ product actually uses, preserves the lazy editor boundary, and enforces a 480
 KiB renderer-chunk budget during every production build. The measured bundle
 results and release boundary are recorded in
 [`phase-23a-renderer-bundle-budget.md`](../docs/electron-migration/phase-23a-renderer-bundle-budget.md).
+
+Phase 23B adds an explicit large-workspace benchmark. It verifies a
+million-character schema-v2 save/open round trip and a 500-node/2,000-edge graph
+without adding that machine-sensitive timing workload to every unit-test run.
+Graphs above 200 nodes use a complete, non-truncating fast grid layout; ordinary
+graphs retain the `cose` layout. See
+[`phase-23b-large-workspace-performance.md`](../docs/electron-migration/phase-23b-large-workspace-performance.md).

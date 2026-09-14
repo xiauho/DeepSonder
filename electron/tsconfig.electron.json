@@ -16,6 +16,6 @@
   "include": [
     "src/main/**/*.ts",
     "src/preload/**/*.cts",
-    "src/shared/contracts.ts"
+    "src/shared/**/*.ts"
   ]
 }

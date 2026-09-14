@@ -6,6 +6,10 @@ import type {
   RelationshipGraphSnapshot,
   RpcError,
 } from "../../../shared/contracts";
+import {
+  chooseGraphLayoutName,
+  usesLargeGraphLayout,
+} from "../../../shared/graph-layout-policy";
 
 interface GraphViewProps {
   projectRoot: string;
@@ -76,6 +80,7 @@ export function GraphView({
         },
       })),
     ];
+    const layoutName = chooseGraphLayoutName(snapshot.nodes.length);
     const graph = cytoscape({
       container,
       elements,
@@ -158,14 +163,21 @@ export function GraphView({
         },
         { selector: ".filtered-out", style: { display: "none" } },
       ],
-      layout: {
-        name: snapshot.nodes.length < 3 ? "circle" : "cose",
-        animate: false,
-        fit: true,
-        padding: 48,
-        nodeRepulsion: () => 5600,
-        idealEdgeLength: () => 130,
-      },
+      layout: layoutName === "cose"
+        ? {
+          name: "cose",
+          animate: false,
+          fit: true,
+          padding: 48,
+          nodeRepulsion: () => 5600,
+          idealEdgeLength: () => 130,
+        }
+        : {
+          name: layoutName,
+          animate: false,
+          fit: true,
+          padding: 48,
+        },
     });
     graph.on("tap", "node", (event) => {
       setSelection({ kind: "node", id: event.target.id() });
@@ -242,7 +254,7 @@ export function GraphView({
 
   return <section className="relationship-graph">
     <header className="graph-toolbar">
-      <div><span className="eyebrow">REVIEWED SEMANTIC PROJECTION</span><h1>故事知识图谱</h1><p>{snapshot?.projectName ?? "正在读取项目知识…"}</p></div>
+      <div><span className="eyebrow">REVIEWED SEMANTIC PROJECTION</span><h1>故事知识图谱</h1><p>{snapshot?.projectName ?? "正在读取项目知识…"}{snapshot !== null && usesLargeGraphLayout(snapshot.nodes.length) ? " · 大型图谱使用快速布局" : ""}</p></div>
       <div className="graph-filters">
         <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索人物、世界观或事件…" aria-label="搜索知识图谱" />
         <select value={nodeKind} onChange={(event) => setNodeKind(event.target.value as "" | GraphNode["nodeKind"])} aria-label="筛选节点类型"><option value="">全部节点</option><option value="character">人物</option><option value="world">世界观</option><option value="event">事件</option></select>

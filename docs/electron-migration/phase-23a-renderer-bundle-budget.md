@@ -58,12 +58,26 @@ existing revision-safe autosave path.
 - the Electron self-test waited for `.codemirror-editor .cm-editor`, confirming
   that the split editor runtime loaded and rendered before testing later views.
 
-## Release boundary and follow-up
+## Source-bound candidate
 
-The source-bound Phase 22C installer and portable ZIP were built from commit
-`f20808020d6637bb6152318161811c5a879e0925`; they do not contain this uncommitted
-Phase 23A optimization. A new candidate must be built after these changes are
-committed before it can represent the optimized renderer.
+The optimization was committed as
+`07c9cd248cadc4d16160040a4452297f01ccb097` and rebuilt through the full local
+Windows rehearsal. The manifest and independent validation report carry that
+exact source identity.
+
+| Artifact | Size | SHA-256 |
+| --- | ---: | --- |
+| `Novalist-v2.1.0-beta-windows-x64-setup.exe` | 125,567,139 | `71dc93d248848390a340e46a631fd1b3131d22f3854d8e90405ebd2032fe7847` |
+| `Novalist-v2.1.0-beta-windows-x64.zip` | 168,710,258 | `7c806bf364dc3d4148357d5874eb95e9830906fe1b1b6ce3ac0c510c11d5a768` |
+
+The independent report is stored locally at
+`build/phase-23a-source-bound-validation.json`. It passed NSIS
+install/uninstall, portable recovery, backup restore, schema-v2 workflow and AI
+review surfaces, and project zero-write opening.
+
+The candidate remains explicitly unsigned local-rehearsal output. It is not an
+officially distributable build, and later uncommitted Phase 23B work is not
+contained in these artifacts.
 
 Phase 23B should exercise large manuscripts and dense relationship graphs,
 record responsiveness and memory baselines, and add targeted virtualization or

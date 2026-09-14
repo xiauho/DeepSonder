@@ -613,11 +613,25 @@ hashes and exact source identity.
 - [x] Enforce renderer and editor-shell size budgets during every production
   build.
 - [x] Pass type checking, Electron tests, preview self-test, and visual capture.
-- [ ] Commit the optimization and rebuild a source-bound candidate containing
+- [x] Commit the optimization and rebuild a source-bound candidate containing
   it.
 
 See [Phase 23A](phase-23a-renderer-bundle-budget.md) for the before/after sizes,
 feature-preservation scope, and next performance slice.
+
+## Phase 23B exit criteria
+
+- [x] Add a reproducible million-character schema-v2 persistence benchmark.
+- [x] Measure a 500-node/2,000-edge graph with the installed Cytoscape runtime.
+- [x] Preserve `cose` for ordinary graphs and select a bounded fast layout above
+  the measured scale cliff.
+- [x] Add layout-policy tests and explicit time/memory budgets.
+- [x] Measure CodeMirror DOM readiness and renderer-process memory in Electron.
+- [x] Measure complete-collection graph filter mutation with the installed graph
+  runtime.
+
+See [Phase 23B](phase-23b-large-workspace-performance.md) for the measurements,
+layout threshold, budget rationale, and remaining renderer-level probe.
 
 ## Working rules for later phases
 

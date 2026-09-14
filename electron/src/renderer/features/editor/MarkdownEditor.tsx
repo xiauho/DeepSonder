@@ -89,6 +89,7 @@ export function MarkdownEditor({
       ref={hostRef}
       className={`markdown-editor codemirror-editor${showLineNumbers ? "" : " hide-line-numbers"}`}
       aria-label="Markdown 编辑器"
+      data-document-length={value.length}
     />
   );
 }
