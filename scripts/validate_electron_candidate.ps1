@@ -213,6 +213,8 @@ try {
         authenticode = $(if ($AllowUnsignedLocalRehearsal) { "not_required" } else { "passed" })
         nsis_install_and_uninstall = "passed"
         schema_v2_open_was_read_only = $true
+        schema_v2_workflow_surface = "passed"
+        schema_v2_ai_review_surface = "passed"
         portable_recovery = "passed"
         project_backup_restore = "passed"
         installer_sha256 = (Get-FileHash -LiteralPath $InstallerPath -Algorithm SHA256).Hash.ToLowerInvariant()

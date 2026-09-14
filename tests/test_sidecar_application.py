@@ -327,6 +327,96 @@ class SidecarApplicationTests(unittest.TestCase):
             finally:
                 app.shutdown()
 
+    def test_v2_manuscript_structure_and_trash_round_trip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "source.md"
+            source.write_text("# 第一章\n\n原文。\n", encoding="utf-8")
+            output = Path(tmp) / "output"
+            output.mkdir()
+            app = SidecarApplication()
+            try:
+                plan = app.dispatch(
+                    _request("manuscript.scanImport", {"sourcePath": str(source)})
+                ).result["plan"]
+                app.dispatch(_request("project.createV2", {
+                    "parentDirectory": str(output), "name": "章节管理",
+                    "planDigest": plan["digest"],
+                }))
+
+                created = app.dispatch(_request("manuscript.create", {
+                    "title": "第二章", "afterChapterId": "chapter_0001",
+                }))
+                self.assertEqual(created.events[0].name, "manuscript.structureChanged")
+                self.assertEqual(created.result["snapshot"]["itemCount"], 2)
+                chapter = created.result["document"]
+
+                renamed = app.dispatch(_request("manuscript.rename", {
+                    "chapterId": "chapter_0002", "title": "第二章：回声",
+                    "expectedRevision": chapter["revision"],
+                }))
+                self.assertEqual(renamed.result["document"]["title"], "第二章：回声")
+
+                reordered = app.dispatch(_request("manuscript.reorder", {
+                    "chapterIds": ["chapter_0002", "chapter_0001"],
+                }))
+                self.assertEqual(
+                    [item["chapterId"] for item in reordered.result["snapshot"]["chapters"]],
+                    ["chapter_0002", "chapter_0001"],
+                )
+
+                deleted = app.dispatch(_request("manuscript.delete", {
+                    "chapterId": "chapter_0001",
+                }))
+                trash_id = deleted.result["deletedTrashId"]
+                listed = app.dispatch(_request("manuscript.trashList")).result["trash"]
+                self.assertEqual(listed["items"][0]["trashId"], trash_id)
+
+                restored = app.dispatch(_request("manuscript.trashRestore", {
+                    "trashId": trash_id,
+                }))
+                self.assertEqual(restored.result["trash"]["items"], [])
+                self.assertEqual(restored.result["document"]["relativePath"], "manuscript/chapter_0001.md")
+            finally:
+                app.shutdown()
+
+    def test_v2_append_import_and_export_round_trip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first = root / "first.md"
+            first.write_text("# 第一章\n\n第一章正文。\n", encoding="utf-8")
+            second = root / "second.md"
+            second.write_text("# 第二章\n\n第二章正文。\n", encoding="utf-8")
+            output = root / "output"
+            output.mkdir()
+            app = SidecarApplication()
+            try:
+                initial = app.dispatch(_request("manuscript.scanImport", {
+                    "sourcePath": str(first),
+                })).result["plan"]
+                app.dispatch(_request("project.createV2", {
+                    "parentDirectory": str(output), "name": "追加导入",
+                    "planDigest": initial["digest"],
+                }))
+                appended_plan = app.dispatch(_request("manuscript.scanImport", {
+                    "sourcePath": str(second),
+                })).result["plan"]
+                appended = app.dispatch(_request("manuscript.appendImport", {
+                    "planDigest": appended_plan["digest"],
+                    "afterChapterId": "chapter_0001",
+                }))
+                self.assertEqual(appended.result["snapshot"]["itemCount"], 2)
+                self.assertEqual(appended.events[0].data["action"], "imported")
+
+                destination = root / "export.md"
+                exported = app.dispatch(_request("manuscript.export", {
+                    "destination": str(destination), "format": "md",
+                })).result["exported"]
+                self.assertEqual(exported["chapterCount"], 2)
+                self.assertEqual(len(exported["sha256"]), 64)
+                self.assertIn("第二章正文。", destination.read_text(encoding="utf-8-sig"))
+            finally:
+                app.shutdown()
+
     def test_v2_reconstruction_review_graph_and_invalidation_round_trip(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             source = Path(tmp) / "legacy"

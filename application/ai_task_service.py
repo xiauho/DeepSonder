@@ -13,20 +13,34 @@ from uuid import uuid4
 from core.ai_result_service import AIResultService
 from core.ai_workflow import AIWorkflowService
 from core.config import get_chapter_target_chars, load_config, normalize_config
+from core.continuation import continuation_target_chars
 from core.context_report import PromptContextReport
 from core.dsh_client import DSHClient
+from core.length_policy import assess_length
 from core.project import NovelProject
+from core.project_v2_schema import ProjectV2Descriptor
 from core.task_context import AIContextSnapshot
 from core.task_controller import AITaskCancelled
+from core.text_metrics import count_content_chars
 
 from .document_service import DocumentService, DocumentSnapshot
+from .document_v2_service import DocumentV2Service
+from .reconstruction_service import ReconstructionService
+from .ai_v2_context import (
+    AIV2ContextSnapshot,
+    build_v2_prompt,
+    commit_v2_memory,
+    parse_v2_memory,
+    prepare_v2_context,
+    replace_v2_chapter_body,
+)
 
 
 AI_KINDS = {"expand", "continuation", "check", "memory", "connection"}
 TERMINAL_STATES = {"succeeded", "failed", "cancelled", "applied", "discarded"}
 EventSink = Callable[[str, dict[str, Any]], None]
 ExecutionFactory = Callable[
-    [str, NovelProject | None, str, dict[str, Any], threading.Event, Callable[[PromptContextReport], None]],
+    [str, NovelProject | ProjectV2Descriptor | None, str, dict[str, Any], threading.Event, Callable[[PromptContextReport], None]],
     tuple[dict[str, Any], object | None],
 ]
 
@@ -38,7 +52,7 @@ class AITaskRecord:
     chapter_id: str
     project_root: str
     source_revision: str | None
-    context_snapshot: AIContextSnapshot | None
+    context_snapshot: AIContextSnapshot | AIV2ContextSnapshot | None
     status: str = "queued"
     stage: str = "等待执行"
     progress: int = 0
@@ -61,10 +75,14 @@ class AITaskService:
         event_sink: EventSink | None = None,
         execution_factory: ExecutionFactory | None = None,
         config_loader: Callable[[], dict] = load_config,
+        document_v2_service: DocumentV2Service | None = None,
+        reconstruction_service: ReconstructionService | None = None,
     ) -> None:
         self._event_sink = event_sink or (lambda _name, _data: None)
         self._execution_factory = execution_factory or self._execute_production
         self._config_loader = config_loader
+        self._document_v2_service = document_v2_service or DocumentV2Service()
+        self._reconstruction_service = reconstruction_service or ReconstructionService()
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="novalist-ai")
         self._lock = threading.RLock()
         self._tasks: dict[str, AITaskRecord] = {}
@@ -74,12 +92,19 @@ class AITaskService:
     def set_event_sink(self, sink: EventSink) -> None:
         self._event_sink = sink
 
-    def status(self) -> dict[str, Any]:
+    def status(self, *, project_root: str | Path | None = None) -> dict[str, Any]:
         with self._lock:
             active = self._tasks.get(self._active_task_id or "")
-            recent = sorted(self._tasks.values(), key=lambda item: item.started_at, reverse=True)
+            scoped = [
+                item for item in self._tasks.values()
+                if project_root is None or _task_in_project(item, project_root)
+            ]
+            recent = sorted(scoped, key=lambda item: item.started_at, reverse=True)
             return {
-                "active": task_dto(active) if active and active.status not in TERMINAL_STATES else None,
+                "active": task_dto(active)
+                if active and active.status not in TERMINAL_STATES
+                and (project_root is None or _task_in_project(active, project_root))
+                else None,
                 "recent": [task_dto(item) for item in recent[: self.RESULT_LIMIT]],
                 "supportedKinds": sorted(AI_KINDS),
             }
@@ -91,7 +116,7 @@ class AITaskService:
 
     def start(
         self,
-        project: NovelProject | None,
+        project: NovelProject | ProjectV2Descriptor | None,
         kind: str,
         chapter_id: str = "",
         *,
@@ -107,19 +132,31 @@ class AITaskService:
         if kind != "connection" and project is None:
             raise ValueError("AI 创作任务需要一个已打开的项目。")
         chapter_id = str(chapter_id or "").strip()
-        context: AIContextSnapshot | None = None
+        context: AIContextSnapshot | AIV2ContextSnapshot | None = None
         project_root = ""
         if kind != "connection":
             assert project is not None
             if not chapter_id:
                 raise ValueError("AI 创作任务缺少章节标识。")
-            chapter_path = project.chapters_dir / f"{chapter_id}.md"
-            if not chapter_path.is_file():
-                raise FileNotFoundError(chapter_path)
-            actual_revision = DocumentService.revision_for_path(chapter_path)
+            if isinstance(project, ProjectV2Descriptor):
+                document = self._document_v2_service.open_document(project, chapter_id)
+                actual_revision = document.revision
+            else:
+                chapter_path = project.chapters_dir / f"{chapter_id}.md"
+                if not chapter_path.is_file():
+                    raise FileNotFoundError(chapter_path)
+                actual_revision = DocumentService.revision_for_path(chapter_path)
             if not source_revision or source_revision != actual_revision:
                 raise ValueError("章节版本已经变化，请保存并重新打开后再启动 AI 任务。")
-            context = AIContextSnapshot.capture(project, chapter_id, None, task_kind=kind)
+            if isinstance(project, ProjectV2Descriptor):
+                context = AIV2ContextSnapshot.capture(
+                    project,
+                    chapter_id,
+                    documents=self._document_v2_service,
+                    reconstruction=self._reconstruction_service,
+                )
+            else:
+                context = AIContextSnapshot.capture(project, chapter_id, None, task_kind=kind)
             project_root = str(project.root.resolve())
         with self._lock:
             if self._closed:
@@ -141,8 +178,10 @@ class AITaskService:
         self._executor.submit(self._run, task, project, dict(options or {}))
         return task_dto(task)
 
-    def cancel(self, task_id: str) -> dict[str, Any]:
-        task = self._task(task_id)
+    def cancel(
+        self, task_id: str, *, project_root: str | Path | None = None
+    ) -> dict[str, Any]:
+        task = self._scoped_task(task_id, project_root)
         with self._lock:
             if task.status in TERMINAL_STATES:
                 return task_dto(task)
@@ -153,14 +192,18 @@ class AITaskService:
         self._emit(task)
         return task_dto(task)
 
-    def result(self, task_id: str) -> dict[str, Any]:
-        task = self._task(task_id)
+    def result(
+        self, task_id: str, *, project_root: str | Path | None = None
+    ) -> dict[str, Any]:
+        task = self._scoped_task(task_id, project_root)
         if task.status not in {"succeeded", "applied"} or task.result is None:
             raise ValueError("该任务尚无可审阅结果。")
         return {"task": task_dto(task), "result": task.result}
 
-    def discard(self, task_id: str) -> dict[str, Any]:
-        task = self._task(task_id)
+    def discard(
+        self, task_id: str, *, project_root: str | Path | None = None
+    ) -> dict[str, Any]:
+        task = self._scoped_task(task_id, project_root)
         with self._lock:
             if task.status != "succeeded":
                 raise ValueError("只能放弃等待审阅的 AI 结果。")
@@ -173,12 +216,35 @@ class AITaskService:
 
     def apply_writing_result(
         self,
-        project: NovelProject,
-        document_service: DocumentService,
+        project: NovelProject | ProjectV2Descriptor,
+        document_service: DocumentService | DocumentV2Service,
         task_id: str,
     ) -> DocumentSnapshot:
         task = self._review_task(project, task_id, {"expand", "continuation"})
         assert task.result is not None
+        if isinstance(project, ProjectV2Descriptor):
+            if not isinstance(document_service, DocumentV2Service):
+                raise TypeError("schema-v2 项目需要 DocumentV2Service。")
+            document = document_service.open_document(project, task.chapter_id)
+            generated = str(task.result.get("text") or "").strip()
+            if task.kind == "expand":
+                updated = replace_v2_chapter_body(document.content, generated)
+            else:
+                lines = document.content.replace("\r\n", "\n").replace("\r", "\n").splitlines()
+                heading = lines[0] if lines and lines[0].startswith("# ") else ""
+                existing = "\n".join(lines[1:] if heading else lines).strip()
+                updated = replace_v2_chapter_body(
+                    document.content,
+                    "\n\n".join(part for part in (existing, generated) if part),
+                )
+            saved = document_service.save_document(
+                project,
+                task.chapter_id,
+                updated,
+                expected_revision=task.source_revision,
+            )
+            self._mark_applied(task)
+            return saved
         chapter_path = project.chapters_dir / f"{task.chapter_id}.md"
         raw = chapter_path.read_text(encoding="utf-8")
         chapter = project.load_chapter(task.chapter_id)
@@ -197,10 +263,27 @@ class AITaskService:
         self._mark_applied(task)
         return saved
 
-    def commit_memory_result(self, project: NovelProject, task_id: str) -> dict[str, Any]:
+    def commit_memory_result(
+        self, project: NovelProject | ProjectV2Descriptor, task_id: str
+    ) -> dict[str, Any]:
         task = self._review_task(project, task_id, {"memory"})
         if task.internal_result is None:
             raise ValueError("记忆提案不可用。")
+        if isinstance(project, ProjectV2Descriptor):
+            assert isinstance(task.context_snapshot, AIV2ContextSnapshot)
+            committed = commit_v2_memory(
+                project,
+                task.internal_result,
+                source_revision=str(task.source_revision or ""),
+                context_fingerprint=task.context_snapshot.fingerprint,
+            )
+            self._mark_applied(task)
+            return {
+                "chapterId": task.chapter_id,
+                "sourceRevision": committed["source_revision"],
+                "reviewedAt": committed["reviewed_at"],
+                "invalidatedChapters": [],
+            }
         committed = AIResultService.commit_memory_proposal(
             project, task.chapter_id, task.internal_result
         )
@@ -219,7 +302,12 @@ class AITaskService:
                 task.cancel_event.set()
         self._executor.shutdown(wait=True, cancel_futures=False)
 
-    def _run(self, task: AITaskRecord, project: NovelProject | None, options: dict[str, Any]) -> None:
+    def _run(
+        self,
+        task: AITaskRecord,
+        project: NovelProject | ProjectV2Descriptor | None,
+        options: dict[str, Any],
+    ) -> None:
         self._update(task, "running", "正在准备上下文", 10)
         try:
             public, internal = self._execution_factory(
@@ -245,7 +333,7 @@ class AITaskService:
     def _execute_production(
         self,
         kind: str,
-        project: NovelProject | None,
+        project: NovelProject | ProjectV2Descriptor | None,
         chapter_id: str,
         options: dict[str, Any],
         cancel_event: threading.Event,
@@ -274,6 +362,66 @@ class AITaskService:
                     "message": client.check_connection(cancel_event=cancel_event),
                 }, None
             assert project is not None
+            if isinstance(project, ProjectV2Descriptor):
+                context = prepare_v2_context(
+                    project,
+                    chapter_id,
+                    documents=self._document_v2_service,
+                    reconstruction=self._reconstruction_service,
+                )
+                target_chars = get_chapter_target_chars(config)
+                requested_chars = target_chars
+                current_chars = 0
+                if kind == "continuation":
+                    lines = context.current_content.replace("\r\n", "\n").replace("\r", "\n").splitlines()
+                    current_body = "\n".join(lines[1:] if lines and lines[0].startswith("# ") else lines)
+                    current_chars = count_content_chars(current_body)
+                    requested_chars = continuation_target_chars(current_chars, target_chars)
+                system, user, prompt_report = build_v2_prompt(
+                    context,
+                    kind,
+                    target_chars=requested_chars,
+                    prompt_budget=client.prompt_build_budget(),
+                )
+                raw = client.generate(
+                    system,
+                    user,
+                    cancel_event=cancel_event,
+                    context_report=prompt_report,
+                )
+                if kind == "expand":
+                    parsed = AIResultService.parse_expansion(
+                        raw, target_chars, chapter_id=chapter_id
+                    )
+                    assessment = assess_length(parsed.char_count, target_chars)
+                    return _v2_writing_result("replace", parsed.text, parsed.char_count, assessment), parsed
+                if kind == "continuation":
+                    parsed = AIResultService.parse_continuation(raw, requested_chars)
+                    assessment = assess_length(
+                        current_chars + parsed.char_count,
+                        current_chars + requested_chars,
+                    )
+                    return _v2_writing_result("append", parsed.text, parsed.char_count, assessment), parsed
+                if kind == "check":
+                    report, formatted = AIResultService.parse_consistency(
+                        raw, expected_chapter_id=chapter_id
+                    )
+                    return {"type": "consistency", "report": report, "formatted": formatted}, report
+                proposal = parse_v2_memory(raw, chapter_id)
+                preview_lines = [proposal["summary"]]
+                if proposal["facts"]:
+                    preview_lines.extend(["", "明确事实：", *[f"- {item}" for item in proposal["facts"]]])
+                if proposal["open_threads"]:
+                    preview_lines.extend(["", "未解决线索：", *[f"- {item}" for item in proposal["open_threads"]]])
+                return {
+                    "type": "memory",
+                    "summary": proposal["summary"],
+                    "preview": "\n".join(preview_lines),
+                    "hasBlockers": False,
+                    "conflictCount": 0,
+                    "patchCount": len(proposal["facts"]) + len(proposal["open_threads"]),
+                    "cacheHit": False,
+                }, proposal
             workflow = AIWorkflowService(
                 client,
                 input_token_budget=config["ai_input_token_budget"],
@@ -332,15 +480,29 @@ class AITaskService:
         finally:
             client.cleanup()
 
-    def _review_task(self, project: NovelProject, task_id: str, kinds: set[str]) -> AITaskRecord:
+    def _review_task(
+        self,
+        project: NovelProject | ProjectV2Descriptor,
+        task_id: str,
+        kinds: set[str],
+    ) -> AITaskRecord:
         task = self._task(task_id)
         if task.kind not in kinds or task.status != "succeeded" or task.result is None:
             raise ValueError("该 AI 结果不能执行此采用操作。")
         if str(project.root.resolve()).casefold() != task.project_root.casefold():
             raise ValueError("AI 结果不属于当前项目。")
-        if task.context_snapshot is None or not task.context_snapshot.matches(
-            project, task.chapter_id, None, task_kind=task.kind
-        ):
+        if isinstance(project, ProjectV2Descriptor):
+            matches = isinstance(task.context_snapshot, AIV2ContextSnapshot) and task.context_snapshot.matches(
+                project,
+                task.chapter_id,
+                documents=self._document_v2_service,
+                reconstruction=self._reconstruction_service,
+            )
+        else:
+            matches = isinstance(task.context_snapshot, AIContextSnapshot) and task.context_snapshot.matches(
+                project, task.chapter_id, None, task_kind=task.kind
+            )
+        if not matches:
             raise ValueError("任务完成后项目上下文已经变化，请重新生成。")
         return task
 
@@ -384,6 +546,14 @@ class AITaskService:
             raise ValueError("AI 任务不存在。")
         return task
 
+    def _scoped_task(
+        self, task_id: str, project_root: str | Path | None
+    ) -> AITaskRecord:
+        task = self._task(task_id)
+        if project_root is not None and not _task_in_project(task, project_root):
+            raise ValueError("AI 任务不属于当前项目。")
+        return task
+
     def _trim_results(self) -> None:
         if len(self._tasks) <= self.RESULT_LIMIT:
             return
@@ -412,6 +582,19 @@ def task_dto(task: AITaskRecord | None) -> dict[str, Any] | None:
     }
 
 
+def _task_in_project(task: AITaskRecord, project_root: str | Path) -> bool:
+    scope = str(project_root or "").strip()
+    if not task.project_root:
+        return not scope or task.kind == "connection"
+    if not scope:
+        return False
+    try:
+        normalized = str(Path(scope).expanduser().resolve())
+    except OSError:
+        normalized = scope
+    return task.project_root.casefold() == normalized.casefold()
+
+
 def _writing_result(mode: str, text: str, char_count: int, run: object) -> dict[str, Any]:
     return {
         "type": "writing",
@@ -425,6 +608,22 @@ def _writing_result(mode: str, text: str, char_count: int, run: object) -> dict[
         "reviewMaxChars": int(getattr(run, "review_max_chars", 0)),
         "lengthStatus": str(getattr(run, "length_status", "qualified")),
         "warning": str(getattr(run, "supplement_warning", "")),
+    }
+
+
+def _v2_writing_result(mode: str, text: str, char_count: int, assessment) -> dict[str, Any]:
+    return {
+        "type": "writing",
+        "mode": mode,
+        "text": text,
+        "charCount": char_count,
+        "targetChars": assessment.target_chars,
+        "minChars": assessment.preferred_min,
+        "maxChars": assessment.preferred_max,
+        "reviewMinChars": assessment.review_min,
+        "reviewMaxChars": assessment.review_max,
+        "lengthStatus": assessment.status,
+        "warning": "" if assessment.is_qualified else "生成篇幅不在理想范围内，请审阅后再采用。",
     }
 
 

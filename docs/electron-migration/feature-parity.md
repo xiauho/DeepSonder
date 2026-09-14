@@ -70,8 +70,8 @@ Priorities:
 
 | ID | Capability | Current implementation | Target owner | Parity gate | Priority | Status |
 |---|---|---|---|---|---|---|
-| DATA-01 | Create/delete/restore chapters | `ProjectDataStore`, `TrashDialog` | Python `ProjectService` + React dialogs | IDs, ordering, neighbors, and trash metadata match. | P0 | Preview |
-| DATA-02 | Import Markdown chapters | `MainWindow`, `ProjectDataStore` | Python import use case + native file dialog | Conflicts are reported without overwrites. | P1 | Preview |
+| DATA-01 | Create/rename/reorder/delete/restore chapters | schema-v2 `DocumentV2Service`, typed Electron IPC, React chapter list | Python `DocumentV2Service` + React dialogs | Stable IDs, ordering, revision guards, neighbors, and trash metadata round-trip. | P0 | Candidate |
+| DATA-02 | Import Markdown chapters | schema-v2 import plan, append transaction journal, native source dialog | Python `ManuscriptImportService` + `DocumentV2Service` | Sources are rescanned, duplicates are rejected, provenance is retained, and partial imports recover. | P1 | Candidate |
 | DATA-03 | Create/delete/restore character cards | `ProjectDataStore`, `TrashDialog` | Python `CanonService` | Character template markers remain valid. | P0 | Preview |
 | DATA-04 | Create/delete/restore world entries | `ProjectDataStore`, `TrashDialog` | Python `CanonService` | Author text and trash metadata round-trip. | P1 | Preview |
 | DATA-05 | Create/delete/restore power systems | `ProjectDataStore`, `TrashDialog` | Python `CanonService` | Registry metadata round-trips with the file. | P1 | Preview |
@@ -90,7 +90,7 @@ Priorities:
 | MEM-04 | Sanitized AI context report | `Inspector`, context report core | Python AI events + React inspector | No prompt body, credentials, or absolute private paths are exposed. | P0 | Preview |
 | MEM-05 | Story-memory overview and chapter summaries | `StoryMemoryPage` | Python `MemoryService` + React page | Golden summaries and state render correctly. | P1 | Baseline |
 | MEM-06 | Foreshadowing create/edit/status/delete/restore | `ForeshadowingStore`, dialogs/page | Python `MemoryService` + React forms | IDs, appearances, status, and timestamps remain valid. | P1 | Baseline |
-| MEM-07 | Generate and explicitly adopt memory proposal | `AIWorkflowController`, chapter memory core | Python `AITaskService`/`MemoryService` | No durable state changes before explicit commit. | P0 | Preview |
+| MEM-07 | Generate and explicitly adopt memory proposal | schema-v2 reviewed chapter memory | Python `AITaskService` + v2 context adapter | No durable state changes before explicit commit; stale records never re-enter context. | P0 | Candidate |
 | MEM-08 | Character-card synchronization preview and selected commit | sync core and Qt dialogs | Python `CharacterService` + React review dialog | Only selected managed fields change; backup is created. | P0 | Baseline |
 
 ## AI workflows and consistency
@@ -99,10 +99,10 @@ Priorities:
 |---|---|---|---|---|---|---|
 | AI-01 | DSH configuration and connection test | `AIEngineController`, settings | Python `AIEngineService` | Test runs off the UI thread and returns sanitized diagnostics. | P0 | Preview |
 | AI-02 | First-use data-processing notice | `AIWorkflowController` | React dialog + Python config | No AI task starts before acknowledgement. | P0 | Preview |
-| AI-03 | Expansion with context selection and length correction | expansion workflow/core | Python `AITaskService` + React review | Context, correction budget, and adoption choices match. | P0 | Preview |
-| AI-04 | Continuation with target-length rules | continuation workflow/core | Python `AITaskService` + React review | Empty/complete/too-small remainder guards match. | P0 | Preview |
+| AI-03 | Expansion with context selection and length review | schema-v2 manuscript + reviewed knowledge adapter | Python `AITaskService` + React review | No legacy structured data enters context; adoption is context/revision guarded. | P0 | Candidate |
+| AI-04 | Continuation with target-length rules | schema-v2 manuscript + reviewed knowledge adapter | Python `AITaskService` + React review | Only the generated fragment is appended after fresh context/revision validation. | P0 | Candidate |
 | AI-05 | Long task progress, cancellation, and terminal state | `AITaskRunner`, task controllers | Sidecar task manager + renderer events | Every task ends once as succeeded/failed/cancelled. | P0 | Preview |
-| AI-06 | Consistency check and severity/category rendering | consistency core, `ReportsPage` | Python `ConsistencyService` + React page | Counts and localized labels match validated output. | P0 | Preview |
+| AI-06 | Consistency check and severity/category rendering | reviewed schema-v2 knowledge + manuscript history | Python protocol validation + React review | Pending/rejected knowledge is excluded and output enums are validated. | P0 | Candidate |
 | AI-07 | Jump from issue to unique source anchor | workflow/editor | Python anchor result + CodeMirror | Only uniquely resolved anchors enable jumping. | P1 | Baseline |
 | AI-08 | AI repair proposal and guarded replacement | result coordinator/core | Python `AITaskService` + React review | Original range and expected text are revalidated at commit. | P0 | Baseline |
 | AI-09 | AI output history for current session | `AITaskViewController` | React session store | Copy/clear/collapse work; no durable prompt log is added. | P1 | Baseline |
@@ -111,7 +111,7 @@ Priorities:
 
 | ID | Capability | Current implementation | Target owner | Parity gate | Priority | Status |
 |---|---|---|---|---|---|---|
-| SYS-01 | Markdown and plain-text whole-book export | export core/controller/page | Python `ExportService` + native save dialog | Golden fixture output matches current ordering and options. | P0 | Baseline |
+| SYS-01 | Markdown and plain-text whole-book export | schema-v2 ordered renderer + Electron native save dialog | Python `DocumentV2Service` + Electron main | Ordered title, contents, separators, encoding, and digest pass golden tests. | P0 | Candidate |
 | SYS-02 | Settings validation, defaults, and persistence | config core/controller/page | Python `ConfigService` + React forms | Config schema remains 6 until an explicit migration is needed. | P0 | Preview |
 | SYS-03 | Update check and release-channel preference | update core/controllers | Transition adapter, later Electron main | Stable/beta selection and skip behavior remain clear. | P1 | Baseline |
 | SYS-04 | Verified download | update download core | Transition adapter, later Electron main | Platform, size, digest, archive, and manifest checks pass. | P1 | Baseline |

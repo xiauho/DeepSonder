@@ -22,7 +22,10 @@ import type {
   KnowledgeCardDocument,
   KnowledgeSnapshot,
   ManuscriptImportPlan,
+  ManuscriptExportResult,
+  ManuscriptMutationResult,
   ManuscriptSnapshot,
+  ManuscriptTrashSnapshot,
   MutationResult,
   OpenedProject,
   OpenedProjectV2,
@@ -433,6 +436,152 @@ function registerIpcHandlers(): void {
         );
         documentDirty = false;
         return response.document;
+      });
+    },
+  );
+
+  ipcMain.handle(
+    "novalist:create-manuscript",
+    async (_event, title: unknown, afterChapterId: unknown): Promise<OperationResult<ManuscriptMutationResult>> => {
+      if (!isNonBlankString(title) || title.length > 200 ||
+          (afterChapterId !== undefined && (!isNonBlankString(afterChapterId) || afterChapterId.length > 100))) {
+        return failure(new Error("新章节参数无效。"));
+      }
+      return invoke(async () => {
+        const response = await sidecar.request<ManuscriptMutationResult>("manuscript.create", {
+          title: title.trim(),
+          ...(afterChapterId === undefined ? {} : { afterChapterId }),
+        });
+        if (!isManuscriptMutationResult(response)) throw new Error("Sidecar 返回了无效的章节创建结果。");
+        documentDirty = false;
+        return response;
+      });
+    },
+  );
+
+  ipcMain.handle(
+    "novalist:rename-manuscript",
+    async (_event, chapterId: unknown, title: unknown, expectedRevision: unknown): Promise<OperationResult<ManuscriptMutationResult>> => {
+      if (!isNonBlankString(chapterId) || chapterId.length > 100 || !isNonBlankString(title) || title.length > 200 || !isNonBlankString(expectedRevision)) {
+        return failure(new Error("章节重命名参数无效。"));
+      }
+      return invoke(async () => {
+        const response = await sidecar.request<ManuscriptMutationResult>("manuscript.rename", {
+          chapterId, title: title.trim(), expectedRevision,
+        });
+        if (!isManuscriptMutationResult(response)) throw new Error("Sidecar 返回了无效的章节重命名结果。");
+        documentDirty = false;
+        return response;
+      });
+    },
+  );
+
+  ipcMain.handle(
+    "novalist:reorder-manuscript",
+    async (_event, chapterIds: unknown): Promise<OperationResult<ManuscriptMutationResult>> => {
+      if (!Array.isArray(chapterIds) || chapterIds.length > 10_000 ||
+          !chapterIds.every((value) => isNonBlankString(value) && value.length <= 100)) {
+        return failure(new Error("章节排序参数无效。"));
+      }
+      return invoke(async () => {
+        const response = await sidecar.request<ManuscriptMutationResult>("manuscript.reorder", { chapterIds });
+        if (!isManuscriptMutationResult(response)) throw new Error("Sidecar 返回了无效的章节排序结果。");
+        return response;
+      });
+    },
+  );
+
+  ipcMain.handle(
+    "novalist:delete-manuscript",
+    async (_event, chapterId: unknown): Promise<OperationResult<ManuscriptMutationResult>> => {
+      if (!isNonBlankString(chapterId) || chapterId.length > 100) return failure(new Error("章节 ID 无效。"));
+      return invoke(async () => {
+        const response = await sidecar.request<ManuscriptMutationResult>("manuscript.delete", { chapterId });
+        if (!isManuscriptMutationResult(response)) throw new Error("Sidecar 返回了无效的章节删除结果。");
+        documentDirty = false;
+        return response;
+      });
+    },
+  );
+
+  ipcMain.handle(
+    "novalist:get-manuscript-trash",
+    async (): Promise<OperationResult<ManuscriptTrashSnapshot>> => invoke(async () => {
+      const response = await sidecar.request<{ trash: ManuscriptTrashSnapshot }>("manuscript.trashList");
+      if (!isManuscriptTrashSnapshot(response.trash)) throw new Error("Sidecar 返回了无效的正文回收站。");
+      return response.trash;
+    }),
+  );
+
+  ipcMain.handle(
+    "novalist:restore-manuscript-trash",
+    async (_event, trashId: unknown): Promise<OperationResult<ManuscriptMutationResult>> => {
+      if (!isNonBlankString(trashId) || trashId.length > 100) return failure(new Error("回收站条目 ID 无效。"));
+      return invoke(async () => {
+        const response = await sidecar.request<ManuscriptMutationResult>("manuscript.trashRestore", { trashId });
+        if (!isManuscriptMutationResult(response)) throw new Error("Sidecar 返回了无效的章节恢复结果。");
+        documentDirty = false;
+        return response;
+      });
+    },
+  );
+
+  ipcMain.handle(
+    "novalist:delete-manuscript-trash-forever",
+    async (_event, trashId: unknown): Promise<OperationResult<ManuscriptTrashSnapshot>> => {
+      if (!isNonBlankString(trashId) || trashId.length > 100) return failure(new Error("回收站条目 ID 无效。"));
+      return invoke(async () => {
+        const response = await sidecar.request<{ trash: ManuscriptTrashSnapshot }>("manuscript.trashDeleteForever", { trashId });
+        if (!isManuscriptTrashSnapshot(response.trash)) throw new Error("Sidecar 返回了无效的正文回收站。");
+        return response.trash;
+      });
+    },
+  );
+
+  ipcMain.handle(
+    "novalist:append-manuscript",
+    async (_event, planDigest: unknown, afterChapterId: unknown): Promise<OperationResult<ManuscriptMutationResult>> => {
+      if (!isNonBlankString(planDigest) || planDigest.length > 100 ||
+          (afterChapterId !== undefined && (!isNonBlankString(afterChapterId) || afterChapterId.length > 100))) {
+        return failure(new Error("正文追加导入参数无效。"));
+      }
+      return invoke(async () => {
+        const response = await sidecar.request<ManuscriptMutationResult>("manuscript.appendImport", {
+          planDigest,
+          ...(afterChapterId === undefined ? {} : { afterChapterId }),
+        });
+        if (!isManuscriptMutationResult(response)) throw new Error("Sidecar 返回了无效的正文追加结果。");
+        documentDirty = false;
+        return response;
+      });
+    },
+  );
+
+  ipcMain.handle(
+    "novalist:export-manuscript",
+    async (event, format: unknown): Promise<OperationResult<ManuscriptExportResult | null>> => {
+      if (format !== "md" && format !== "txt") return failure(new Error("正文导出格式无效。"));
+      if (activeProjectRoot === null) return failure(new Error("当前没有打开的项目。"));
+      const extension = format;
+      const options = {
+        title: "导出全书",
+        buttonLabel: "导出",
+        defaultPath: path.join(activeProjectRoot, `${path.basename(activeProjectRoot)}-全书.${extension}`),
+        filters: [{ name: format === "md" ? "Markdown" : "纯文本", extensions: [extension] }],
+        properties: ["showOverwriteConfirmation"] as Array<"showOverwriteConfirmation">,
+      };
+      const owner = ownerWindow(event);
+      const selected = owner === null
+        ? await dialog.showSaveDialog(options)
+        : await dialog.showSaveDialog(owner, options);
+      if (selected.canceled || selected.filePath === undefined) return success(null);
+      return invoke(async () => {
+        const response = await sidecar.request<{ exported: ManuscriptExportResult }>("manuscript.export", {
+          destination: selected.filePath,
+          format,
+        });
+        if (!isManuscriptExportResult(response.exported)) throw new Error("Sidecar 返回了无效的正文导出结果。");
+        return response.exported;
       });
     },
   );
@@ -1193,6 +1342,20 @@ function translateEvent(event: TransportEvent): AppEvent | null {
       },
     };
   }
+  if (
+    event.event === "manuscript.structureChanged" &&
+    ["created", "renamed", "reordered", "deleted", "restored", "imported"].includes(String(data.action)) &&
+    typeof data.chapterId === "string"
+  ) {
+    return {
+      event: "manuscript.structureChanged",
+      data: {
+        action: data.action as "created" | "renamed" | "reordered" | "deleted" | "restored" | "imported",
+        chapterId: data.chapterId,
+        reconstructionInvalidated: data.reconstructionInvalidated === true,
+      },
+    };
+  }
   if (event.event === "reconstruction.updated" && typeof data.batchId === "string") {
     return { event: "reconstruction.updated", data: { batchId: data.batchId } };
   }
@@ -1304,6 +1467,30 @@ function isManuscriptSnapshot(value: unknown): value is ManuscriptSnapshot {
     value.chapters.every((item) => isRecord(item) && isNonBlankString(item.chapterId) &&
       Number.isInteger(item.sequence) && isNonBlankString(item.title) &&
       isNonBlankString(item.path) && isNonBlankString(item.relativePath));
+}
+
+function isManuscriptTrashSnapshot(value: unknown): value is ManuscriptTrashSnapshot {
+  return isRecord(value) && Array.isArray(value.items) && value.items.every((item) =>
+    isRecord(item) && isNonBlankString(item.trashId) && isNonBlankString(item.chapterId) &&
+    isNonBlankString(item.title) && Number.isInteger(item.sequence) && typeof item.deletedAt === "string");
+}
+
+function isManuscriptMutationResult(value: unknown): value is ManuscriptMutationResult {
+  return isRecord(value) && isManuscriptSnapshot(value.snapshot) &&
+    typeof value.reconstructionInvalidated === "boolean" &&
+    (value.document === undefined || (isRecord(value.document) &&
+      isNonBlankString(value.document.path) && isNonBlankString(value.document.relativePath) &&
+      typeof value.document.category === "string" && isNonBlankString(value.document.title) &&
+      typeof value.document.content === "string" && isNonBlankString(value.document.revision))) &&
+    (value.trash === undefined || isManuscriptTrashSnapshot(value.trash)) &&
+    (value.deletedTrashId === undefined || isNonBlankString(value.deletedTrashId));
+}
+
+function isManuscriptExportResult(value: unknown): value is ManuscriptExportResult {
+  return isRecord(value) && isNonBlankString(value.path) &&
+    (value.format === "md" || value.format === "txt") &&
+    Number.isInteger(value.chapterCount) && Number.isInteger(value.characterCount) &&
+    typeof value.sha256 === "string" && /^[0-9a-f]{64}$/u.test(value.sha256);
 }
 
 function isSaveManuscriptInput(value: unknown): value is SaveManuscriptInput {
@@ -1748,6 +1935,7 @@ async function runSelfTest(): Promise<void> {
       if (!isManuscriptSnapshot(manuscript.snapshot) || manuscript.snapshot.itemCount < 1) {
         throw new Error("打包自检项目没有可读取的正文。");
       }
+      await verifyV2WorkflowSurface(mainWindow);
     }
     if (capturePreview) {
       mainWindow.showInactive();
@@ -1774,6 +1962,7 @@ async function runSelfTest(): Promise<void> {
         `document.querySelector(".project-heading strong")?.textContent === "electron-v2-preview-${process.pid}" && document.querySelector(".codemirror-editor .cm-editor") !== null && document.querySelector(".panel-footer")?.textContent?.includes("Schema v2")`,
       );
       if (!projectRendered) throw new Error("预览项目或首篇文档未完成渲染。");
+      await verifyV2WorkflowSurface(mainWindow);
       const seededChapter = await sidecar.request<{ document: DocumentSnapshot }>("manuscript.open", {
         chapterId: "chapter_0001",
       });
@@ -1949,6 +2138,49 @@ async function runSelfTest(): Promise<void> {
     await sidecar.stop();
     app.exit(1);
   }
+}
+
+async function verifyV2WorkflowSurface(window: BrowserWindow): Promise<void> {
+  const rendered = await waitForRendererCondition(
+    window,
+    `document.querySelector(".panel-footer")?.textContent?.includes("Schema v2") === true && document.querySelector(".document-row") !== null`,
+  );
+  if (!rendered) throw new Error("schema-v2 工作区未完成渲染。");
+  const controlsReady = await window.webContents.executeJavaScript(
+    `(() => {
+      const quickLabels = Array.from(document.querySelectorAll(".quick-actions button"))
+        .map((item) => item.textContent?.trim());
+      const rowTitles = Array.from(document.querySelectorAll(".chapter-row-actions button"))
+        .map((item) => item.getAttribute("title"));
+      const create = document.querySelector(".panel-heading .icon-button");
+      return create instanceof HTMLButtonElement && !create.disabled &&
+        ["追加导入", "导出 MD", "导出 TXT"].every((label) => quickLabels.includes(label)) &&
+        ["下移", "重命名", "移入正文回收站"].every((title) => rowTitles.includes(title));
+    })()`,
+    true,
+  );
+  if (controlsReady !== true) {
+    throw new Error("schema-v2 章节、追加导入或导出入口不完整。");
+  }
+  const aiOpened = await window.webContents.executeJavaScript(
+    `(() => {
+      const button = Array.from(document.querySelectorAll(".rail-item"))
+        .find((item) => item.textContent?.includes("AI"));
+      if (!(button instanceof HTMLButtonElement) || button.disabled) return false;
+      button.click();
+      return true;
+    })()`,
+    true,
+  );
+  const aiReady = aiOpened === true && await waitForRendererCondition(
+    window,
+    `document.querySelector(".ai-scope")?.textContent?.includes("已审核的 v2 知识") === true && Array.from(document.querySelectorAll(".ai-actions button")).filter((item) => !item.disabled).length === 5`,
+  );
+  if (!aiReady) throw new Error("schema-v2 AI 入口或上下文告知未完成渲染。");
+  await window.webContents.executeJavaScript(
+    `document.querySelector(".ai-drawer .icon-button")?.click()`,
+    true,
+  );
 }
 
 async function waitForRendererCondition(

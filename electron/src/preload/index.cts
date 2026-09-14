@@ -11,7 +11,10 @@ import type {
   KnowledgeSnapshot,
   MutationResult,
   ManuscriptImportPlan,
+  ManuscriptExportResult,
+  ManuscriptMutationResult,
   ManuscriptSnapshot,
+  ManuscriptTrashSnapshot,
   NovalistBridge,
   OpenedProject,
   OpenedProjectV2,
@@ -65,6 +68,42 @@ const bridge: NovalistBridge = {
   saveManuscript: (input: SaveManuscriptInput) =>
     ipcRenderer.invoke("novalist:save-manuscript", input) as Promise<
       OperationResult<DocumentSnapshot>
+    >,
+  createManuscript: (title, afterChapterId) =>
+    ipcRenderer.invoke("novalist:create-manuscript", title, afterChapterId) as Promise<
+      OperationResult<ManuscriptMutationResult>
+    >,
+  renameManuscript: (chapterId, title, expectedRevision) =>
+    ipcRenderer.invoke("novalist:rename-manuscript", chapterId, title, expectedRevision) as Promise<
+      OperationResult<ManuscriptMutationResult>
+    >,
+  reorderManuscript: (chapterIds) =>
+    ipcRenderer.invoke("novalist:reorder-manuscript", chapterIds) as Promise<
+      OperationResult<ManuscriptMutationResult>
+    >,
+  deleteManuscript: (chapterId) =>
+    ipcRenderer.invoke("novalist:delete-manuscript", chapterId) as Promise<
+      OperationResult<ManuscriptMutationResult>
+    >,
+  getManuscriptTrash: () =>
+    ipcRenderer.invoke("novalist:get-manuscript-trash") as Promise<
+      OperationResult<ManuscriptTrashSnapshot>
+    >,
+  restoreManuscriptTrash: (trashId) =>
+    ipcRenderer.invoke("novalist:restore-manuscript-trash", trashId) as Promise<
+      OperationResult<ManuscriptMutationResult>
+    >,
+  deleteManuscriptTrashForever: (trashId) =>
+    ipcRenderer.invoke("novalist:delete-manuscript-trash-forever", trashId) as Promise<
+      OperationResult<ManuscriptTrashSnapshot>
+    >,
+  appendManuscript: (planDigest, afterChapterId) =>
+    ipcRenderer.invoke("novalist:append-manuscript", planDigest, afterChapterId) as Promise<
+      OperationResult<ManuscriptMutationResult>
+    >,
+  exportManuscript: (format) =>
+    ipcRenderer.invoke("novalist:export-manuscript", format) as Promise<
+      OperationResult<ManuscriptExportResult | null>
     >,
   getReconstructionSnapshot: () =>
     ipcRenderer.invoke("novalist:get-reconstruction-snapshot") as Promise<

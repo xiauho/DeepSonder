@@ -53,3 +53,32 @@ jobs:
           name: novalist-${{ matrix.client }}-candidate-report
           path: candidate-validation-report.json
           if-no-files-found: error
+
+  release-gate:
+    name: Bind clean-client reports
+    needs: clean-machine
+    runs-on: windows-latest
+    environment: electron-prerelease
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Download both clean-client reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: novalist-*-candidate-report
+          path: reports
+      - name: Verify both reports belong to the exact signed candidate
+        shell: pwsh
+        run: |
+          node ./electron/scripts/candidate-report-gate.mjs `
+            ./reports/novalist-windows-10-candidate-report/candidate-validation-report.json `
+            ./reports/novalist-windows-11-candidate-report/candidate-validation-report.json `
+            ./candidate-release-gate.json
+      - name: Upload bound release-gate report
+        uses: actions/upload-artifact@v4
+        with:
+          name: novalist-candidate-release-gate
+          path: candidate-release-gate.json
+          if-no-files-found: error

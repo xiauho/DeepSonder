@@ -18,6 +18,7 @@ from .project_content_service import (
     TrashSnapshot,
 )
 from .ai_task_service import AITaskService, AITaskRecord
+from .ai_v2_context import AIV2ContextSnapshot, AIV2PreparedContext
 from .relationship_graph_service import (
     GraphEdge,
     GraphEvidence,
@@ -39,12 +40,21 @@ from .reconstruction_service import KnowledgeSnapshot, ReconstructionCancelled, 
 from .structured_extraction_service import StructuredExtractionError, StructuredExtractionResult, StructuredExtractionService
 from .reconstruction_evaluation_service import EvaluationReport, ReconstructionEvaluationError, ReconstructionEvaluationService
 from .reconstruction_task_service import ReconstructionTaskRecord, ReconstructionTaskService
-from .document_v2_service import DocumentV2Service, ManuscriptItem, ManuscriptSnapshot
+from .document_v2_service import (
+    DocumentV2Service,
+    ManuscriptExportResult,
+    ManuscriptItem,
+    ManuscriptSnapshot,
+    ManuscriptTrashItem,
+    ManuscriptTrashSnapshot,
+)
 
 __all__ = [
     "DocumentMutation",
     "AITaskRecord",
     "AITaskService",
+    "AIV2ContextSnapshot",
+    "AIV2PreparedContext",
     "DocumentNotFoundError",
     "DocumentPathError",
     "DocumentRevisionConflict",
@@ -61,8 +71,11 @@ __all__ = [
     "ManuscriptImportError",
     "ManuscriptImportPlan",
     "ManuscriptImportService",
+    "ManuscriptExportResult",
     "ManuscriptItem",
     "ManuscriptSnapshot",
+    "ManuscriptTrashItem",
+    "ManuscriptTrashSnapshot",
     "OpenedProject",
     "PreferencesService",
     "PreferencesSnapshot",

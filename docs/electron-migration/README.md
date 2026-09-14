@@ -531,6 +531,27 @@ Phase 19 deliverables:
 - [ ] Official metadata/Authenticode credentials are provisioned.
 - [ ] One signed packaging run and both clean-client reports pass.
 
+## Phase 20 exit criteria
+
+- [x] Schema-v2 chapters can be created, renamed, reordered, deleted, restored,
+  and permanently removed without changing stable chapter IDs.
+- [x] Chapter structure changes invalidate stale reconstruction output and
+  remain behind typed IPC operations.
+- [x] Open projects support provenance-preserving, duplicate-guarded append
+  import and ordered Markdown/plain-text whole-book export.
+- [x] Review-first AI writing, consistency, and memory actions use schema-v2
+  manuscript and reviewed knowledge instead of the legacy project store.
+
+See [Phase 20](phase-20-v2-writing-closure.md) for the slice plan and current
+status.
+
+Phase 20D adds packaged checks for the complete v2 workflow surface, an
+explicit-consent synthetic live-DSH verifier, and an automated gate that binds
+the Windows 10/11 clean-client reports to one exact signed candidate. Real DSH,
+signing credentials, and clean-client runs remain release-environment gates.
+The live verifier is also available as the protected, manually dispatched
+`validate-v2-ai-dsh.yml` workflow on a `novalist-dsh` Windows runner.
+
 ## Working rules for later phases
 
 1. Do not add Electron-specific imports to `core/`.

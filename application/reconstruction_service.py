@@ -365,6 +365,18 @@ class ReconstructionService:
             self._rebuild_knowledge(project)
         return changed
 
+    def invalidate_manuscript(self, project: ProjectV2Descriptor) -> bool:
+        """Invalidate all active reconstruction batches after structural edits."""
+        index_path = project.root / "proposals" / "index.json"
+        index = self._read_collection(index_path, "batches")
+        changed = any(item.get("status") != "stale" for item in index["batches"])
+        if changed:
+            self._mark_all_stale(project, index)
+            self._write_json(index_path, index)
+            self._rebuild_knowledge(project)
+        self._checkpoint_path(project).unlink(missing_ok=True)
+        return changed
+
     def graph_snapshot(self, project: ProjectV2Descriptor):
         from .relationship_graph_service import (
             GraphEdge, GraphEvidence, GraphNode, GraphWarning, RelationshipGraphSnapshot,

@@ -28,7 +28,12 @@ from application.relationship_graph_service import (
     RelationshipGraphSnapshot,
 )
 from application.preferences_service import PreferencesService, PreferencesSnapshot
-from application.document_v2_service import DocumentV2Service, ManuscriptSnapshot
+from application.document_v2_service import (
+    DocumentV2Service,
+    ManuscriptExportResult,
+    ManuscriptSnapshot,
+    ManuscriptTrashSnapshot,
+)
 from application.manuscript_import_service import (
     ManuscriptImportError,
     ManuscriptImportPlan,
@@ -90,6 +95,15 @@ class SidecarApplication:
         "manuscript.snapshot",
         "manuscript.open",
         "manuscript.save",
+        "manuscript.create",
+        "manuscript.rename",
+        "manuscript.reorder",
+        "manuscript.delete",
+        "manuscript.trashList",
+        "manuscript.trashRestore",
+        "manuscript.trashDeleteForever",
+        "manuscript.appendImport",
+        "manuscript.export",
         "reconstruction.snapshot",
         "reconstruction.generate",
         "reconstruction.batch",
@@ -160,7 +174,6 @@ class SidecarApplication:
         self.project_service = project_service or ProjectService()
         self.document_service = document_service or DocumentService()
         self.content_service = content_service or ProjectContentService()
-        self.ai_task_service = ai_task_service or AITaskService()
         self.graph_service = graph_service or RelationshipGraphService()
         self.preferences_service = preferences_service or PreferencesService(
             project_service=self.project_service
@@ -169,6 +182,10 @@ class SidecarApplication:
         self.project_v2_service = project_v2_service or ProjectV2Service()
         self.document_v2_service = document_v2_service or DocumentV2Service()
         self.reconstruction_service = reconstruction_service or ReconstructionService()
+        self.ai_task_service = ai_task_service or AITaskService(
+            document_v2_service=self.document_v2_service,
+            reconstruction_service=self.reconstruction_service,
+        )
         self.reconstruction_task_service = reconstruction_task_service or ReconstructionTaskService(
             reconstruction_service=self.reconstruction_service
         )
@@ -192,6 +209,15 @@ class SidecarApplication:
             "manuscript.snapshot": self._manuscript_snapshot,
             "manuscript.open": self._open_manuscript,
             "manuscript.save": self._save_manuscript,
+            "manuscript.create": self._create_manuscript,
+            "manuscript.rename": self._rename_manuscript,
+            "manuscript.reorder": self._reorder_manuscript,
+            "manuscript.delete": self._delete_manuscript,
+            "manuscript.trashList": self._manuscript_trash_list,
+            "manuscript.trashRestore": self._restore_manuscript_trash,
+            "manuscript.trashDeleteForever": self._delete_manuscript_trash_forever,
+            "manuscript.appendImport": self._append_manuscript_import,
+            "manuscript.export": self._export_manuscript,
             "reconstruction.snapshot": self._reconstruction_snapshot,
             "reconstruction.generate": self._reconstruction_generate,
             "reconstruction.batch": self._reconstruction_batch,
@@ -466,6 +492,159 @@ class SidecarApplication:
                 "reconstructionInvalidated": invalidated,
             }),),
         )
+
+    def _create_manuscript(self, params: dict[str, Any]) -> ApplicationResult:
+        _only_keys(params, {"title", "afterChapterId"})
+        self._require_reconstruction_idle()
+        project = self._require_project_v2()
+        after_chapter_id = _optional_string(params, "afterChapterId", max_length=100)
+        snapshot, document = self.document_v2_service.create_chapter(
+            project,
+            _required_string(params, "title", max_length=200),
+            after_chapter_id=after_chapter_id or None,
+        )
+        invalidated = self.reconstruction_service.invalidate_manuscript(project)
+        return ApplicationResult(
+            {
+                "snapshot": manuscript_snapshot_dto(snapshot),
+                "document": document_snapshot_dto(document),
+                "reconstructionInvalidated": invalidated,
+            },
+            (self._manuscript_structure_event("created", Path(document.relative_path).stem, invalidated),),
+        )
+
+    def _rename_manuscript(self, params: dict[str, Any]) -> ApplicationResult:
+        _only_keys(params, {"chapterId", "title", "expectedRevision"})
+        self._require_reconstruction_idle()
+        expected_revision = params.get("expectedRevision")
+        if expected_revision is not None and not isinstance(expected_revision, str):
+            raise ProtocolFault("INVALID_PARAMS", "expectedRevision 必须是字符串或 null。")
+        project = self._require_project_v2()
+        chapter_id = _required_string(params, "chapterId", max_length=100)
+        snapshot, document = self.document_v2_service.rename_chapter(
+            project,
+            chapter_id,
+            _required_string(params, "title", max_length=200),
+            expected_revision=expected_revision,
+        )
+        invalidated = self.reconstruction_service.invalidate_chapter(project, chapter_id)
+        return ApplicationResult(
+            {
+                "snapshot": manuscript_snapshot_dto(snapshot),
+                "document": document_snapshot_dto(document),
+                "reconstructionInvalidated": invalidated,
+            },
+            (self._manuscript_structure_event("renamed", chapter_id, invalidated),),
+        )
+
+    def _reorder_manuscript(self, params: dict[str, Any]) -> ApplicationResult:
+        _only_keys(params, {"chapterIds"})
+        self._require_reconstruction_idle()
+        chapter_ids = params.get("chapterIds")
+        if (
+            not isinstance(chapter_ids, list)
+            or len(chapter_ids) > 10_000
+            or not all(isinstance(value, str) and 0 < len(value) <= 100 for value in chapter_ids)
+        ):
+            raise ProtocolFault("INVALID_PARAMS", "章节排序参数无效。")
+        project = self._require_project_v2()
+        snapshot = self.document_v2_service.reorder_chapters(project, chapter_ids)
+        invalidated = self.reconstruction_service.invalidate_manuscript(project)
+        return ApplicationResult(
+            {"snapshot": manuscript_snapshot_dto(snapshot), "reconstructionInvalidated": invalidated},
+            (self._manuscript_structure_event("reordered", "", invalidated),),
+        )
+
+    def _delete_manuscript(self, params: dict[str, Any]) -> ApplicationResult:
+        _only_keys(params, {"chapterId"})
+        self._require_reconstruction_idle()
+        project = self._require_project_v2()
+        chapter_id = _required_string(params, "chapterId", max_length=100)
+        snapshot, trash, deleted = self.document_v2_service.delete_chapter(project, chapter_id)
+        invalidated = self.reconstruction_service.invalidate_chapter(project, chapter_id)
+        return ApplicationResult(
+            {
+                "snapshot": manuscript_snapshot_dto(snapshot),
+                "trash": manuscript_trash_snapshot_dto(trash),
+                "deletedTrashId": deleted.trash_id,
+                "reconstructionInvalidated": invalidated,
+            },
+            (self._manuscript_structure_event("deleted", chapter_id, invalidated),),
+        )
+
+    def _manuscript_trash_list(self, params: dict[str, Any]) -> ApplicationResult:
+        _only_keys(params, set())
+        trash = self.document_v2_service.trash_snapshot(self._require_project_v2())
+        return ApplicationResult({"trash": manuscript_trash_snapshot_dto(trash)})
+
+    def _restore_manuscript_trash(self, params: dict[str, Any]) -> ApplicationResult:
+        _only_keys(params, {"trashId"})
+        self._require_reconstruction_idle()
+        project = self._require_project_v2()
+        snapshot, trash, document = self.document_v2_service.restore_chapter(
+            project, _required_string(params, "trashId", max_length=100)
+        )
+        invalidated = self.reconstruction_service.invalidate_manuscript(project)
+        return ApplicationResult(
+            {
+                "snapshot": manuscript_snapshot_dto(snapshot),
+                "trash": manuscript_trash_snapshot_dto(trash),
+                "document": document_snapshot_dto(document),
+                "reconstructionInvalidated": invalidated,
+            },
+            (self._manuscript_structure_event("restored", Path(document.relative_path).stem, invalidated),),
+        )
+
+    def _delete_manuscript_trash_forever(self, params: dict[str, Any]) -> ApplicationResult:
+        _only_keys(params, {"trashId"})
+        trash = self.document_v2_service.delete_trash_forever(
+            self._require_project_v2(), _required_string(params, "trashId", max_length=100)
+        )
+        return ApplicationResult({"trash": manuscript_trash_snapshot_dto(trash)})
+
+    def _append_manuscript_import(self, params: dict[str, Any]) -> ApplicationResult:
+        _only_keys(params, {"planDigest", "afterChapterId"})
+        self._require_reconstruction_idle()
+        plan_digest = _required_string(params, "planDigest", max_length=100)
+        cached = self._import_plans.get(plan_digest)
+        if cached is None:
+            raise ProtocolFault("IMPORT_PLAN_EXPIRED", "正文导入计划已过期，请重新扫描。")
+        rescanned = self.manuscript_import_service.scan(cached.source_path)
+        if rescanned.digest != cached.digest:
+            self._import_plans.pop(plan_digest, None)
+            raise ProtocolFault("IMPORT_SOURCE_CHANGED", "正文来源已发生变化，请重新预览。")
+        project = self._require_project_v2()
+        after_chapter_id = _optional_string(params, "afterChapterId", max_length=100)
+        snapshot, document = self.document_v2_service.append_import(
+            project, rescanned, after_chapter_id=after_chapter_id or None,
+        )
+        self._import_plans.pop(plan_digest, None)
+        invalidated = self.reconstruction_service.invalidate_manuscript(project)
+        return ApplicationResult(
+            {
+                "snapshot": manuscript_snapshot_dto(snapshot),
+                "document": document_snapshot_dto(document),
+                "reconstructionInvalidated": invalidated,
+            },
+            (self._manuscript_structure_event("imported", Path(document.relative_path).stem, invalidated),),
+        )
+
+    def _export_manuscript(self, params: dict[str, Any]) -> ApplicationResult:
+        _only_keys(params, {"destination", "format"})
+        exported = self.document_v2_service.export_manuscript(
+            self._require_project_v2(),
+            _required_string(params, "destination", max_length=32_767),
+            format_name=_required_string(params, "format", max_length=10),
+        )
+        return ApplicationResult({"exported": manuscript_export_dto(exported)})
+
+    @staticmethod
+    def _manuscript_structure_event(action: str, chapter_id: str, invalidated: bool) -> EventMessage:
+        return EventMessage("manuscript.structureChanged", {
+            "action": action,
+            "chapterId": chapter_id,
+            "reconstructionInvalidated": invalidated,
+        })
 
     def _reconstruction_snapshot(self, params: dict[str, Any]) -> ApplicationResult:
         _only_keys(params, set())
@@ -1012,7 +1191,9 @@ class SidecarApplication:
 
     def _ai_status(self, params: dict[str, Any]) -> ApplicationResult:
         _only_keys(params, set())
-        return ApplicationResult({"ai": self.ai_task_service.status()})
+        return ApplicationResult({
+            "ai": self.ai_task_service.status(project_root=self._ai_project_root())
+        })
 
     def _ai_start(self, params: dict[str, Any]) -> ApplicationResult:
         _only_keys(
@@ -1031,7 +1212,12 @@ class SidecarApplication:
         source_revision = params.get("sourceRevision")
         if source_revision is not None and not isinstance(source_revision, str):
             raise ProtocolFault("INVALID_PARAMS", "sourceRevision 必须是字符串或 null。")
-        project = None if kind == "connection" else self._require_project().project
+        if kind == "connection":
+            project = None
+        elif self._opened_v2 is not None:
+            project = self._opened_v2
+        else:
+            project = self._require_project().project
         task = self.ai_task_service.start(
             project,
             kind,
@@ -1045,28 +1231,57 @@ class SidecarApplication:
     def _ai_cancel(self, params: dict[str, Any]) -> ApplicationResult:
         _only_keys(params, {"taskId"})
         return ApplicationResult(
-            {"task": self.ai_task_service.cancel(_required_string(params, "taskId"))}
+            {"task": self.ai_task_service.cancel(
+                _required_string(params, "taskId"),
+                project_root=self._ai_project_root(),
+            )}
         )
 
     def _ai_result(self, params: dict[str, Any]) -> ApplicationResult:
         _only_keys(params, {"taskId"})
         return ApplicationResult(
-            self.ai_task_service.result(_required_string(params, "taskId"))
+            self.ai_task_service.result(
+                _required_string(params, "taskId"),
+                project_root=self._ai_project_root(),
+            )
         )
 
     def _ai_discard_result(self, params: dict[str, Any]) -> ApplicationResult:
         _only_keys(params, {"taskId"})
         return ApplicationResult(
-            {"task": self.ai_task_service.discard(_required_string(params, "taskId"))}
+            {"task": self.ai_task_service.discard(
+                _required_string(params, "taskId"),
+                project_root=self._ai_project_root(),
+            )}
         )
 
     def _ai_apply_writing_result(self, params: dict[str, Any]) -> ApplicationResult:
         _only_keys(params, {"taskId"})
+        task_id = _required_string(params, "taskId")
+        if self._opened_v2 is not None:
+            document = self.ai_task_service.apply_writing_result(
+                self._opened_v2,
+                self.document_v2_service,
+                task_id,
+            )
+            invalidated = self.reconstruction_service.invalidate_chapter(
+                self._opened_v2,
+                Path(document.relative_path).stem,
+            )
+            return ApplicationResult(
+                {"document": document_snapshot_dto(document)},
+                (EventMessage("manuscript.changed", {
+                    "chapterId": Path(document.relative_path).stem,
+                    "relativePath": document.relative_path,
+                    "revision": document.revision,
+                    "reconstructionInvalidated": invalidated,
+                }),),
+            )
         opened = self._require_project()
         document = self.ai_task_service.apply_writing_result(
             opened.project,
             self.document_service,
-            _required_string(params, "taskId"),
+            task_id,
         )
         dto = document_snapshot_dto(document)
         return ApplicationResult(
@@ -1086,9 +1301,18 @@ class SidecarApplication:
 
     def _ai_commit_memory_result(self, params: dict[str, Any]) -> ApplicationResult:
         _only_keys(params, {"taskId"})
+        task_id = _required_string(params, "taskId")
+        if self._opened_v2 is not None:
+            committed = self.ai_task_service.commit_memory_result(
+                self._opened_v2, task_id
+            )
+            return ApplicationResult(
+                {"committed": committed},
+                (EventMessage("knowledge.updated", {"kind": "ai_memory.commit"}),),
+            )
         opened = self._require_project()
         committed = self.ai_task_service.commit_memory_result(
-            opened.project, _required_string(params, "taskId")
+            opened.project, task_id
         )
         return ApplicationResult(
             {"committed": committed},
@@ -1154,6 +1378,13 @@ class SidecarApplication:
                 "AI 任务运行期间不能切换或关闭项目，请先取消任务。",
             )
         self._require_reconstruction_idle()
+
+    def _ai_project_root(self) -> str:
+        if self._opened_v2 is not None:
+            return str(self._opened_v2.root)
+        if self._opened is not None:
+            return str(self._opened.project.root)
+        return ""
 
     def _require_reconstruction_idle(self) -> None:
         if self.reconstruction_task_service.is_running():
@@ -1244,6 +1475,31 @@ def manuscript_snapshot_dto(snapshot: ManuscriptSnapshot) -> dict[str, Any]:
             for item in snapshot.chapters
         ],
         "itemCount": snapshot.item_count,
+    }
+
+
+def manuscript_trash_snapshot_dto(snapshot: ManuscriptTrashSnapshot) -> dict[str, Any]:
+    return {
+        "items": [
+            {
+                "trashId": item.trash_id,
+                "chapterId": item.chapter_id,
+                "title": item.title,
+                "sequence": item.sequence,
+                "deletedAt": item.deleted_at,
+            }
+            for item in snapshot.items
+        ]
+    }
+
+
+def manuscript_export_dto(result: ManuscriptExportResult) -> dict[str, Any]:
+    return {
+        "path": result.path,
+        "format": result.format,
+        "chapterCount": result.chapter_count,
+        "characterCount": result.character_count,
+        "sha256": result.sha256,
     }
 
 

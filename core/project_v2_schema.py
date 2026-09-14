@@ -160,9 +160,12 @@ def _validate_chapter_index(root: Path, chapters: list) -> None:
         if not isinstance(item, dict):
             raise ProjectV2ValidationError("正文索引条目必须是对象。")
         chapter_id = item.get("id")
-        expected_id = f"chapter_{sequence:04d}"
-        if chapter_id != expected_id or chapter_id in seen:
-            raise ProjectV2ValidationError("正文索引 ID 必须连续且唯一。")
+        if (
+            not isinstance(chapter_id, str)
+            or re.fullmatch(r"chapter_[0-9]{4,}", chapter_id) is None
+            or chapter_id in seen
+        ):
+            raise ProjectV2ValidationError("正文索引 ID 必须稳定且唯一。")
         seen.add(chapter_id)
         if item.get("sequence") != sequence:
             raise ProjectV2ValidationError("正文索引顺序无效。")

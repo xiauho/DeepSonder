@@ -91,6 +91,34 @@ export interface ManuscriptSnapshot {
   itemCount: number;
 }
 
+export interface ManuscriptTrashItem {
+  trashId: string;
+  chapterId: string;
+  title: string;
+  sequence: number;
+  deletedAt: string;
+}
+
+export interface ManuscriptTrashSnapshot {
+  items: ManuscriptTrashItem[];
+}
+
+export interface ManuscriptMutationResult {
+  snapshot: ManuscriptSnapshot;
+  document?: DocumentSnapshot;
+  trash?: ManuscriptTrashSnapshot;
+  deletedTrashId?: string;
+  reconstructionInvalidated: boolean;
+}
+
+export interface ManuscriptExportResult {
+  path: string;
+  format: "md" | "txt";
+  chapterCount: number;
+  characterCount: number;
+  sha256: string;
+}
+
 export interface SaveManuscriptInput {
   chapterId: string;
   content: string;
@@ -534,6 +562,7 @@ export type AppEvent =
   | { event: "ai.taskUpdated"; data: { task: AITask } }
   | { event: "ai.contextReport"; data: { taskId: string; report: Record<string, unknown> } }
   | { event: "manuscript.changed"; data: { chapterId: string; relativePath: string; revision: string; reconstructionInvalidated: boolean } }
+  | { event: "manuscript.structureChanged"; data: { action: "created" | "renamed" | "reordered" | "deleted" | "restored" | "imported"; chapterId: string; reconstructionInvalidated: boolean } }
   | { event: "reconstruction.updated"; data: { batchId: string } }
   | { event: "reconstruction.taskUpdated"; data: { task: ReconstructionTask } }
   | { event: "knowledge.updated"; data: { kind: string } };
@@ -557,6 +586,15 @@ export interface NovalistBridge {
   getManuscriptSnapshot(): Promise<OperationResult<ManuscriptSnapshot>>;
   openManuscript(chapterId: string): Promise<OperationResult<DocumentSnapshot>>;
   saveManuscript(input: SaveManuscriptInput): Promise<OperationResult<DocumentSnapshot>>;
+  createManuscript(title: string, afterChapterId?: string): Promise<OperationResult<ManuscriptMutationResult>>;
+  renameManuscript(chapterId: string, title: string, expectedRevision: string): Promise<OperationResult<ManuscriptMutationResult>>;
+  reorderManuscript(chapterIds: string[]): Promise<OperationResult<ManuscriptMutationResult>>;
+  deleteManuscript(chapterId: string): Promise<OperationResult<ManuscriptMutationResult>>;
+  getManuscriptTrash(): Promise<OperationResult<ManuscriptTrashSnapshot>>;
+  restoreManuscriptTrash(trashId: string): Promise<OperationResult<ManuscriptMutationResult>>;
+  deleteManuscriptTrashForever(trashId: string): Promise<OperationResult<ManuscriptTrashSnapshot>>;
+  appendManuscript(planDigest: string, afterChapterId?: string): Promise<OperationResult<ManuscriptMutationResult>>;
+  exportManuscript(format: "md" | "txt"): Promise<OperationResult<ManuscriptExportResult | null>>;
   getReconstructionSnapshot(): Promise<OperationResult<ReconstructionSnapshot>>;
   generateReconstruction(): Promise<OperationResult<ReconstructionBatch>>;
   getReconstructionTaskStatus(): Promise<OperationResult<ReconstructionTaskStatus>>;

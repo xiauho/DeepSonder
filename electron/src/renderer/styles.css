@@ -64,6 +64,12 @@ button:disabled { cursor: default; opacity: .48; }
 .document-row:hover .importance, .document-row:hover .row-delete, .importance.core { opacity: 1; }
 .importance.core { color: #c28b35; }
 .row-delete:hover { color: #a64c43; }
+.chapter-row-actions { display: flex; align-items: center; padding-right: 4px; opacity: 0; transition: opacity .12s ease; }
+.document-row:hover .chapter-row-actions, .document-row:focus-within .chapter-row-actions { opacity: 1; }
+.chapter-row-actions button { width: 20px; height: 26px; padding: 0; border: 0; color: #8f887f; background: transparent; font-size: 10px; }
+.chapter-row-actions button:hover:not(:disabled) { color: #315f52; }
+.chapter-row-actions button:disabled { opacity: .28; }
+.chapter-row-actions .row-delete { opacity: 1; color: #a56b65; }
 .create-timeline { width: calc(100% - 12px); margin: 4px 6px; padding: 8px; }
 .search-empty { padding: 22px 8px; color: #9a9289; text-align: center; font-size: 11px; }
 .panel-empty { align-self: start; margin: 12px 20px; padding: 18px; border: 1px dashed #d5cfc5; border-radius: 12px; color: #948d84; font-size: 12px; line-height: 1.8; }

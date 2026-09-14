@@ -142,6 +142,7 @@ class ProjectV2Service:
         from .reconstruction_service import ReconstructionService
 
         DocumentV2Service.recover_interrupted_save(path)
+        DocumentV2Service.recover_interrupted_import(path)
         project = validate_project_v2(path)
         ReconstructionService().reconcile(project)
         return validate_project_v2(path)

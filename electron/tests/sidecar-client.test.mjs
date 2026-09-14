@@ -126,6 +126,74 @@ test("Electron main client manages project content and typed trash", async () =>
   }
 });
 
+test("Electron main client manages schema-v2 chapter structure and trash", async () => {
+  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "novalist-electron-v2-structure-"));
+  const manuscriptPath = path.join(temporaryRoot, "source.md");
+  await writeFile(manuscriptPath, "# 第一章\n\n原始正文。\n", "utf8");
+  const client = new SidecarClient({
+    command: python,
+    args: ["-m", "sidecar"],
+    cwd: repositoryRoot,
+    requestTimeoutMs: 5_000,
+  });
+  try {
+    const handshake = await client.start();
+    assert.ok(handshake.supportedMethods.includes("manuscript.trashRestore"));
+    const scanned = await client.request("manuscript.scanImport", { sourcePath: manuscriptPath });
+    await client.request("project.createV2", {
+      parentDirectory: temporaryRoot,
+      name: "章节结构测试",
+      author: "",
+      planDigest: scanned.plan.digest,
+    });
+    const created = await client.request("manuscript.create", {
+      title: "第二章",
+      afterChapterId: "chapter_0001",
+    });
+    assert.equal(created.document.relativePath, "manuscript/chapter_0002.md");
+    const renamed = await client.request("manuscript.rename", {
+      chapterId: "chapter_0002",
+      title: "第二章：回声",
+      expectedRevision: created.document.revision,
+    });
+    assert.equal(renamed.document.title, "第二章：回声");
+    const reordered = await client.request("manuscript.reorder", {
+      chapterIds: ["chapter_0002", "chapter_0001"],
+    });
+    assert.deepEqual(reordered.snapshot.chapters.map((item) => item.chapterId), [
+      "chapter_0002", "chapter_0001",
+    ]);
+    const deleted = await client.request("manuscript.delete", { chapterId: "chapter_0001" });
+    assert.equal(deleted.trash.items.length, 1);
+    const restored = await client.request("manuscript.trashRestore", {
+      trashId: deleted.deletedTrashId,
+    });
+    assert.equal(restored.trash.items.length, 0);
+    assert.equal(restored.snapshot.itemCount, 2);
+
+    const appendPath = path.join(temporaryRoot, "append.md");
+    await writeFile(appendPath, "# 第三章\n\n追加正文。\n", "utf8");
+    const appendPlan = await client.request("manuscript.scanImport", { sourcePath: appendPath });
+    const appended = await client.request("manuscript.appendImport", {
+      planDigest: appendPlan.plan.digest,
+      afterChapterId: "chapter_0002",
+    });
+    assert.equal(appended.snapshot.itemCount, 3);
+    assert.equal(appended.document.relativePath, "manuscript/chapter_0003.md");
+
+    const exportPath = path.join(temporaryRoot, "whole-book.md");
+    const exported = await client.request("manuscript.export", {
+      destination: exportPath,
+      format: "md",
+    });
+    assert.equal(exported.exported.chapterCount, 3);
+    assert.equal(exported.exported.sha256.length, 64);
+  } finally {
+    await client.stop();
+    await rm(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
 test("Electron main client imports and edits a schema-v2 manuscript", async () => {
   const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "novalist-electron-v2-"));
   const manuscriptPath = path.join(temporaryRoot, "source.md");

@@ -30,6 +30,18 @@ Electron window, verifies the context-isolated preload bridge and Sidecar ping,
 then exits. `npm run capture` additionally writes an ignored visual-QA screenshot
 to `dist/electron-preview.png`.
 
+The self-test also checks that an opened schema-v2 project exposes chapter
+lifecycle, append/export, and reviewed-only AI controls. A live AI acceptance
+run is intentionally separate and uses only disposable synthetic prose:
+
+```powershell
+python ..\scripts\verify_v2_ai_workflows.py --acknowledge-synthetic-remote --report ..\build\v2-ai-smoke.json
+```
+
+The acknowledgement is mandatory because the configured DSH may invoke a
+remote provider and incur cost. The report contains no prompt or generated
+novel text.
+
 ## Security model
 
 - renderer `nodeIntegration` is disabled;
@@ -76,3 +88,11 @@ Phase 19 embeds the protected release public key in production packages and
 provides a clean Windows 10/11 candidate-validation matrix. Provisioning the
 official keys/runners and collecting both signed reports remain release-owner
 actions; automatic updating stays disabled.
+
+Phase 20A adds the schema-v2 daily chapter lifecycle: create after the current
+chapter, revision-safe rename, stable-ID reordering, recoverable deletion, and
+permanent trash removal. Phase 20B adds duplicate-guarded append import with
+durable provenance and transaction recovery, plus ordered Markdown/plain-text
+whole-book export through a native save dialog. Phase 20C enables review-first
+schema-v2 expansion, continuation, consistency checks, and adopted chapter
+memory using only manuscript content and reviewed v2 knowledge.

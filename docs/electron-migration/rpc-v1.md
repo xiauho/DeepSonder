@@ -69,6 +69,8 @@ process may terminate an unresponsive process after its own bounded grace period
 | `project.restoreLast` | none | Opens the valid configured last project or returns `opened: null`. |
 | `project.close` | none | Clears the active Sidecar project. Unsaved-document decisions stay in the frontend workflow. |
 | `project.current` | none | Returns the active opened-project DTO or `null`. |
+| `project.openV2` | `path` | Validates and activates an Electron-first schema-v2 project. |
+| `project.createV2` | `parentDirectory`, `name`, optional `author`, optional `planDigest` | Creates a manuscript-first project, optionally from a freshly validated import plan. |
 | `project.snapshot` | none | Returns grouped chapters, outlines, characters, world entries, power systems, timeline, protected/importance metadata, and the next chapter ID. |
 | `project.setSystemImportance` | `path`, `importance` | Updates one ordinary power system to `core` or `non_core` and returns a fresh project snapshot. |
 | `preferences.get` | none | Returns the frontend-safe normalized preference subset. |
@@ -80,6 +82,19 @@ process may terminate an unresponsive process after its own bounded grace period
 | `document.createTimeline` | none | Creates the singleton timeline or returns `ALREADY_EXISTS`. |
 | `document.importMarkdown` | `sources` | Imports 1–100 native-dialog-selected Markdown files as conflict-free chapters. |
 | `document.delete` | `kind`, `itemId`, `path` | Moves one deletable project document to its typed project trash. |
+| `manuscript.scanImport` | `sourcePath` | Scans a main-process-selected file/directory and returns a redacted, expiring manuscript import plan. |
+| `manuscript.snapshot` | none | Returns the ordered schema-v2 chapter index with stable IDs. |
+| `manuscript.open` | `chapterId` | Opens one schema-v2 manuscript chapter with an opaque revision. |
+| `manuscript.save` | `chapterId`, `content`, `expectedRevision`, optional `force` | Saves one chapter transactionally and invalidates reconstruction derived from its earlier revision. |
+| `manuscript.create` | `title`, optional `afterChapterId` | Creates a stable-ID chapter at the requested position. |
+| `manuscript.rename` | `chapterId`, `title`, `expectedRevision` | Renames the chapter and its H1 through the revision-safe save transaction. |
+| `manuscript.reorder` | complete ordered `chapterIds` | Changes display order without rewriting stable chapter IDs. |
+| `manuscript.delete` | `chapterId` | Moves one chapter and its index metadata to schema-v2 manuscript trash. |
+| `manuscript.trashList` | none | Returns schema-v2 deleted-chapter metadata without exposing stored content. |
+| `manuscript.trashRestore` | `trashId` | Restores one deleted chapter at its bounded former position. |
+| `manuscript.trashDeleteForever` | `trashId` | Permanently deletes one validated manuscript-trash record. |
+| `manuscript.appendImport` | `planDigest`, optional `afterChapterId` | Rescans an expiring plan, rejects duplicate source hashes, appends transactionally, and records provenance. |
+| `manuscript.export` | `destination`, `format` (`md` or `txt`) | Atomically writes the ordered manuscript to a main-process-selected destination and returns count/digest metadata. |
 | `trash.list` | none | Returns the combined typed project recycle-bin snapshot. |
 | `trash.restore` | `kind`, `trashId`, optional `conflictPolicy` | Restores an item; policy is `error` or explicit `rename`. |
 | `trash.deleteForever` | `kind`, `trashId` | Permanently deletes one validated typed trash item. |
@@ -108,12 +123,16 @@ process may terminate an unresponsive process after its own bounded grace period
 | `reconstruction.start` | optional `mode` (`local` or `dsh`), `remoteConsent` | Starts background extraction. `dsh` requires `remoteConsent: true` for that invocation and safely falls back to local rules on remote failure. |
 | `reconstruction.reviewMany` | `batchId`, 1–200 unique `decisions` (`proposalId`, `decision`) | Validates the complete pending set, applies accepted/rejected decisions together, and rebuilds projected knowledge once. |
 | `ai.status` | none | Returns the active task and bounded session task history. |
-| `ai.start` | `kind`, `chapterId`, `sourceRevision`, `noticeAccepted`, optional `options` | Starts one background `expand`, `continuation`, `check`, `memory`, or `connection` task and returns immediately. |
+| `ai.start` | `kind`, `chapterId`, `sourceRevision`, `noticeAccepted`, optional `options` | Starts one background `expand`, `continuation`, `check`, `memory`, or `connection` task and returns immediately. For schema v2, `chapterId` is the stable manuscript ID and context is restricted to manuscript, reviewed knowledge, and current adopted v2 memory. |
 | `ai.cancel` | `taskId` | Requests cooperative cancellation through the existing DSH cancel event. |
 | `ai.result` | `taskId` | Returns a validated, review-safe result after successful completion. |
 | `ai.discardResult` | `taskId` | Releases one uncommitted review result. |
 | `ai.applyWritingResult` | `taskId` | Revalidates task context and revision, then applies expansion or continuation to the chapter. |
 | `ai.commitMemoryResult` | `taskId` | Revalidates and explicitly commits a blocker-free memory proposal. |
+
+AI status and task-ID operations are scoped to the active project. Connection
+tests are project-neutral; manuscript-bearing previews are not returned after a
+project switch.
 
 All ordinary application calls execute serially in one worker so project
 mutations cannot overlap. The input reader handles cancellation and shutdown
@@ -230,6 +249,9 @@ stdout.
 - AI start requires an explicit data-processing acknowledgement and a current
   chapter revision. Generated writing and memory remain non-durable until a
   separate apply/commit call passes a fresh project-context check.
+- Schema-v2 AI context never scans legacy canon, outline, or memory paths. It
+  excludes pending/rejected reconstruction proposals and ignores adopted
+  chapter-memory records after their source revision becomes stale.
 - Context reports contain counts, allocation states, token estimates, and
   transport diagnostics only; prompt and manuscript bodies are excluded.
 - Graph RPC is read-only. Current story state takes precedence over character

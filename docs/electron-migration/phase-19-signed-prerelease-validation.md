@@ -64,6 +64,12 @@ Revert the runner snapshot after every validation job.
 7. restores the project backup to a separate directory and opens it again;
 8. emits an OS/version, artifact-digest, signature, install, and recovery report.
 
+Phase 20D extends the packaged self-test with schema-v2 chapter/import/export and
+AI-review surface checks. After both matrix jobs finish,
+`electron/scripts/candidate-report-gate.mjs` now fails unless the Windows 10 and
+Windows 11 reports identify the same version, embedded release key, installer,
+and portable artifact and every required gate passed.
+
 The validator exposed and fixed one additional data invariant: reconstruction
 projection files are no longer rewritten merely because a valid external tool
 used different JSON whitespace or line endings. Writes occur only when parsed
@@ -89,14 +95,16 @@ This evidence validates the workflow mechanics, not production signatures.
 - [x] A Python-free full-cycle candidate validator produces a machine report.
 - [x] Windows 10/11 clean-client jobs and protected release environment are
   encoded in workflows.
+- [x] Windows 10/11 reports are automatically bound to one exact signed
+  candidate before the release-gate artifact is emitted.
 - [x] User-facing manuscript-only transition and backup guidance exists.
 - [x] Local Windows 11 full-cycle install/backup/recovery rehearsal passes.
 - [ ] Repository administrators configure and protect `electron-prerelease`.
 - [ ] The official Ed25519 and Authenticode credentials are provisioned.
 - [ ] One signed prerelease packaging run passes its fail-closed gates.
 - [ ] Clean Windows 10 and Windows 11 reports both pass for that exact run ID.
-- [ ] A release reviewer compares both reports' version, key ID, and artifact
-  digests before approving public distribution.
+- [ ] A release reviewer verifies the bound report and approves public
+  distribution.
 
 ## Recommended next step
 
