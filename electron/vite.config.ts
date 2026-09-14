@@ -8,5 +8,23 @@ export default defineConfig({
     outDir: "dist/renderer",
     emptyOutDir: false,
     sourcemap: true,
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          groups: [
+            {
+              name: "editor-core",
+              test: /node_modules[\\/](?:@codemirror[\\/](?:autocomplete|commands|language|search|state|view)|@lezer[\\/](?:common|highlight|lr))[\\/]/,
+              priority: 20,
+            },
+            {
+              name: "markdown-language",
+              test: /node_modules[\\/](?:@codemirror|@lezer)[\\/]/,
+              priority: 10,
+            },
+          ],
+        },
+      },
+    },
   },
 });

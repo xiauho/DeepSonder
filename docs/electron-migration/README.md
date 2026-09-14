@@ -587,10 +587,37 @@ maintainer rollback boundary.
 - [x] Pass full source, packaged, install/uninstall, backup, and recovery checks.
 - [x] Record the local artifact hashes and keep unsigned output in the rehearsal
   channel.
-- [ ] Commit the cutover and produce a source-bound signed candidate.
+- [x] Commit the cutover and produce a source-bound local candidate.
+- [ ] Produce a source-bound signed candidate in the protected environment.
 
 See [Phase 22B](phase-22b-local-package-rehearsal.md) for local artifact hashes,
 test evidence, and the remaining release boundary.
+
+## Phase 22C exit criteria
+
+- [x] Rebuild from the committed Phase 22A/B baseline.
+- [x] Carry the complete source commit through the manifest and validator report.
+- [x] Pass full local source-bound candidate validation.
+- [ ] Replace local-rehearsal metadata with protected signatures and collect the
+  external release evidence.
+
+See [Phase 22C](phase-22c-source-bound-rehearsal.md) for the current artifact
+hashes and exact source identity.
+
+## Phase 23A exit criteria
+
+- [x] Replace the broad CodeMirror convenience setup with the editor extensions
+  used by Novalist.
+- [x] Preserve the lazy editor boundary and split reusable editor runtime and
+  Markdown language support into stable chunks.
+- [x] Enforce renderer and editor-shell size budgets during every production
+  build.
+- [x] Pass type checking, Electron tests, preview self-test, and visual capture.
+- [ ] Commit the optimization and rebuild a source-bound candidate containing
+  it.
+
+See [Phase 23A](phase-23a-renderer-bundle-budget.md) for the before/after sizes,
+feature-preservation scope, and next performance slice.
 
 ## Working rules for later phases
 

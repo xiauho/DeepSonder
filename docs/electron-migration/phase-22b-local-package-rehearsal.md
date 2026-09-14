@@ -1,8 +1,9 @@
 # Phase 22B: local Electron package rehearsal
 
-Phase 22B rebuilds the Windows artifacts after the source-entry cutover and
-executes both the build-time and independent candidate validators. This is local
-unsigned evidence only; it does not satisfy the protected release gate.
+Phase 22B rebuilt the Windows artifacts after the source-entry cutover and
+executed both the build-time and independent candidate validators. This was the
+first local unsigned rehearsal and has since been superseded by the source-bound
+Phase 22C artifacts; its hashes remain recorded as historical evidence.
 
 ## Build input and environment
 
@@ -61,7 +62,7 @@ Its machine-readable report is stored locally at
 - [x] Pass unpacked, installed, and portable schema-v2 self-tests.
 - [x] Pass independent backup/restore and zero-write candidate validation.
 - [x] Record artifact sizes and SHA-256 digests.
-- [ ] Commit the Phase 22A/22B source and documentation so a signed candidate can
-  bind an exact source identity.
+- [x] Commit the Phase 22A/22B source and documentation so a signed candidate can
+  bind an exact source identity (`f20808020d6637bb6152318161811c5a879e0925`).
 - [ ] Produce an officially signed candidate from that commit.
 - [ ] Pass protected Windows 10/11 and live synthetic DSH gates.

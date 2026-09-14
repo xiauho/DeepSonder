@@ -1,5 +1,15 @@
-import { basicSetup, EditorView } from "codemirror";
+import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
+import { defaultHighlightStyle, syntaxHighlighting } from "@codemirror/language";
+import { highlightSelectionMatches, searchKeymap } from "@codemirror/search";
+import {
+  drawSelection,
+  EditorView,
+  highlightActiveLine,
+  highlightActiveLineGutter,
+  keymap,
+  lineNumbers,
+} from "@codemirror/view";
 import { useEffect, useRef } from "react";
 
 interface MarkdownEditorProps {
@@ -26,8 +36,14 @@ export function MarkdownEditor({
       parent: hostRef.current,
       doc: value,
       extensions: [
-        basicSetup,
+        ...(showLineNumbers ? [lineNumbers(), highlightActiveLineGutter()] : []),
+        history(),
+        drawSelection(),
         markdown(),
+        syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+        highlightActiveLine(),
+        highlightSelectionMatches(),
+        keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
         EditorView.lineWrapping,
         EditorView.updateListener.of((update) => {
           if (update.docChanged) onChangeRef.current(update.state.doc.toString());

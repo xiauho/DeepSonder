@@ -21,6 +21,7 @@ needed.
 npm install
 npm run typecheck
 npm test
+npm run check:bundles
 npm run self-test
 npm start
 npm run package:win
@@ -29,7 +30,9 @@ npm run package:win
 `npm start` builds and opens the desktop shell. `npm run self-test` starts a hidden
 Electron window, verifies the context-isolated preload bridge and Sidecar ping,
 then exits. `npm run capture` additionally writes an ignored visual-QA screenshot
-to `dist/electron-preview.png`.
+to `dist/electron-preview.png`. A normal `npm run build` invokes
+`npm run check:bundles` automatically; the standalone command can re-check an
+existing `dist/renderer/assets` directory without rebuilding.
 
 On Windows, the repository-root `run.bat` is the normal source entry. It creates
 the Sidecar environment, verifies Node.js 24+, repairs an incomplete npm install
@@ -70,8 +73,8 @@ portable recovery checks, run from the repository root:
 Unsigned output is explicitly local-only. Tagged CI packaging additionally
 requires Ed25519 release-metadata keys and a Windows Authenticode certificate.
 
-The latest post-cutover local rehearsal and artifact hashes are recorded in
-[`phase-22b-local-package-rehearsal.md`](../docs/electron-migration/phase-22b-local-package-rehearsal.md).
+The latest source-bound post-cutover rehearsal and artifact hashes are recorded
+in [`phase-22c-source-bound-rehearsal.md`](../docs/electron-migration/phase-22c-source-bound-rehearsal.md).
 
 ## Current slice
 
@@ -105,3 +108,9 @@ durable provenance and transaction recovery, plus ordered Markdown/plain-text
 whole-book export through a native save dialog. Phase 20C enables review-first
 schema-v2 expansion, continuation, consistency checks, and adopted chapter
 memory using only manuscript content and reviewed v2 knowledge.
+
+Phase 23A replaces CodeMirror's broad convenience setup with the extensions the
+product actually uses, preserves the lazy editor boundary, and enforces a 480
+KiB renderer-chunk budget during every production build. The measured bundle
+results and release boundary are recorded in
+[`phase-23a-renderer-bundle-budget.md`](../docs/electron-migration/phase-23a-renderer-bundle-budget.md).

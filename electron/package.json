@@ -9,7 +9,8 @@
   "scripts": {
     "clean": "node scripts/clean.mjs",
     "typecheck": "tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
-    "build": "npm run clean && npm run typecheck && tsc -p tsconfig.electron.json && vite build",
+    "build": "npm run clean && npm run typecheck && tsc -p tsconfig.electron.json && vite build && npm run check:bundles",
+    "check:bundles": "node scripts/check-renderer-bundles.mjs",
     "start": "npm run build && electron .",
     "self-test": "npm run build && electron . --self-test",
     "capture": "npm run build && electron . --self-test --capture-preview",
@@ -18,8 +19,11 @@
     "package:win": "npm run build && electron-builder --win nsis zip --x64 --publish never"
   },
   "dependencies": {
+    "@codemirror/commands": "6.11.0",
     "@codemirror/lang-markdown": "6.5.2",
-    "codemirror": "6.0.2",
+    "@codemirror/language": "6.12.4",
+    "@codemirror/search": "6.7.2",
+    "@codemirror/view": "6.43.11",
     "cytoscape": "3.34.3",
     "react": "19.3.0",
     "react-dom": "19.3.0"
