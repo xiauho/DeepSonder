@@ -35,6 +35,7 @@ async function fixture(signature) {
     version: "2.1.0-beta",
     platform: "windows",
     architecture: "x64",
+    source_commit: "1".repeat(40),
     entrypoint: "Novalist.exe",
     sidecar: "resources/sidecar/NovalistSidecar.exe",
     artifacts,
@@ -78,6 +79,27 @@ test("Ed25519 metadata signature binds the exact release manifest", async () => 
     await assert.rejects(
       verifyReleaseSignature(sample.manifestPath, publicPath, signaturePath),
       /签名验证失败/u,
+    );
+  } finally {
+    await rm(sample.directory, { recursive: true, force: true });
+  }
+});
+
+test("signed metadata rejects a missing source commit", async () => {
+  const { publicKey } = generateKeyPairSync("ed25519");
+  const publicPem = publicKey.export({ type: "spki", format: "pem" });
+  const sample = await fixture({
+    algorithm: "ed25519",
+    key_id: publicKeyFingerprint(publicPem),
+    file: "release-manifest.sig",
+  });
+  try {
+    const manifest = JSON.parse(await readFile(sample.manifestPath, "utf8"));
+    delete manifest.source_commit;
+    await writeFile(sample.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    await assert.rejects(
+      validateReleaseManifest(sample.directory, sample.manifestPath),
+      /签名元数据无效/u,
     );
   } finally {
     await rm(sample.directory, { recursive: true, force: true });

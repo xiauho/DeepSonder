@@ -29,6 +29,7 @@ jobs:
           python ./scripts/verify_v2_ai_workflows.py `
             --acknowledge-synthetic-remote `
             --target-chars $env:TARGET_CHARS `
+            --source-commit "${{ github.sha }}" `
             --report ./v2-ai-dsh-validation.json
       - name: Upload redacted live-DSH report
         uses: actions/upload-artifact@v4

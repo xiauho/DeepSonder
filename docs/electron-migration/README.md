@@ -552,6 +552,21 @@ signing credentials, and clean-client runs remain release-environment gates.
 The live verifier is also available as the protected, manually dispatched
 `validate-v2-ai-dsh.yml` workflow on a `novalist-dsh` Windows runner.
 
+## Phase 21 exit criteria
+
+- [x] Protected candidate packaging always requires metadata and Windows code
+  signing, whether started by a tag or manually.
+- [x] Signed manifests, clean-client reports, and live DSH reports carry the
+  complete source commit.
+- [x] The final readiness gate binds version, source, release key, artifacts,
+  Windows 10/11 checks, and all live schema-v2 AI paths.
+- [x] Passing automation means eligible for manual review, never automatic
+  publication approval.
+- [ ] Execute the protected workflows and approve one exact candidate.
+
+See [Phase 21](phase-21-release-readiness.md) for the evidence contract and
+operator sequence.
+
 ## Working rules for later phases
 
 1. Do not add Electron-specific imports to `core/`.

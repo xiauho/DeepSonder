@@ -5,6 +5,7 @@ import { compareCandidateReports } from "../scripts/candidate-report-gate.mjs";
 
 const digest = "a".repeat(64);
 const keyId = "b".repeat(64);
+const sourceCommit = "1".repeat(40);
 
 function report(client) {
   return {
@@ -12,6 +13,7 @@ function report(client) {
     result: "passed",
     package_kind: "electron-only",
     version: "2.1.0-beta",
+    source_commit: sourceCommit,
     release_key_id: keyId,
     unsigned_local_rehearsal: false,
     os_caption: `Microsoft ${client.replace("-", " ")} Pro`,
@@ -34,6 +36,7 @@ test("candidate report gate binds Windows 10 and 11 to one signed build", () => 
   const gate = compareCandidateReports(report("windows-10"), report("windows-11"));
   assert.equal(gate.result, "passed");
   assert.equal(gate.release_key_id, keyId);
+  assert.equal(gate.source_commit, sourceCommit);
   assert.equal(gate.clients.length, 2);
   assert.equal(gate.gates.schema_v2_ai_review_surface, "passed");
 });
@@ -51,5 +54,11 @@ test("candidate report gate rejects mismatched artifacts and missing v2 AI proof
   assert.throws(
     () => compareCandidateReports(windows10, windows11),
     /schema_v2_ai_review_surface/u,
+  );
+  windows11.schema_v2_ai_review_surface = "passed";
+  windows11.source_commit = "2".repeat(40);
+  assert.throws(
+    () => compareCandidateReports(windows10, windows11),
+    /不属于同一候选/u,
   );
 });

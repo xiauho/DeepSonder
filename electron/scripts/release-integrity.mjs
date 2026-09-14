@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const SHA256 = /^[0-9a-f]{64}$/u;
 const VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u;
+const SOURCE_COMMIT = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u;
 
 export async function sha256File(filePath) {
   return createHash("sha256").update(await readFile(filePath)).digest("hex");
@@ -57,7 +58,8 @@ export async function validateReleaseManifest(releaseDirectory, manifestPath) {
     throw new Error("发布清单签名声明无效。");
   }
   if (signature.algorithm === "ed25519" &&
-      (!SHA256.test(signature.key_id) || signature.file !== "release-manifest.sig")) {
+      (!SHA256.test(signature.key_id) || signature.file !== "release-manifest.sig" ||
+       !SOURCE_COMMIT.test(value.source_commit))) {
     throw new Error("Ed25519 签名元数据无效。");
   }
   if (signature.algorithm === "none" && signature.reason !== "local-rehearsal") {

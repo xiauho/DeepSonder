@@ -7,6 +7,10 @@ on:
         description: "Run ID of the signed Package Electron Windows workflow"
         required: true
         type: string
+      ai_run_id:
+        description: "Run ID of the live schema-v2 DSH validation workflow"
+        required: true
+        type: string
 
 permissions:
   actions: read
@@ -76,9 +80,29 @@ jobs:
             ./reports/novalist-windows-10-candidate-report/candidate-validation-report.json `
             ./reports/novalist-windows-11-candidate-report/candidate-validation-report.json `
             ./candidate-release-gate.json
+      - name: Download live schema-v2 DSH report
+        uses: actions/download-artifact@v4
+        with:
+          name: novalist-v2-ai-dsh-validation
+          path: ai-report
+          run-id: ${{ inputs.ai_run_id }}
+          github-token: ${{ github.token }}
+      - name: Bind signed candidate and live AI evidence to one source
+        shell: pwsh
+        run: |
+          node ./electron/scripts/release-readiness-gate.mjs `
+            ./candidate-release-gate.json `
+            ./ai-report/v2-ai-dsh-validation.json `
+            ./release-readiness-report.json
       - name: Upload bound release-gate report
         uses: actions/upload-artifact@v4
         with:
           name: novalist-candidate-release-gate
           path: candidate-release-gate.json
+          if-no-files-found: error
+      - name: Upload manual release-review evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: novalist-release-readiness-review
+          path: release-readiness-report.json
           if-no-files-found: error

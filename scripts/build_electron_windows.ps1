@@ -8,7 +8,8 @@ param(
     [string]$ReleasePublicKeyPath = "",
     [switch]$RequireCodeSigning,
     [string]$CodeSigningCertificatePath = "",
-    [string]$CodeSigningCertificatePassword = ""
+    [string]$CodeSigningCertificatePassword = "",
+    [string]$SourceCommit = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -91,6 +92,13 @@ if ($LASTEXITCODE -ne 0 -or [int]($NodeVersion.Split(".")[0]) -lt 24) {
     throw "Node.js 24 or newer is required; found $NodeVersion"
 }
 $SigningRequested = [bool]($RequireMetadataSignature -or $ReleasePrivateKeyPath -or $ReleasePublicKeyPath)
+$SourceCommit = $SourceCommit.Trim().ToLowerInvariant()
+if ($SourceCommit -and $SourceCommit -notmatch '^(?:[0-9a-f]{40}|[0-9a-f]{64})$') {
+    throw "SourceCommit must be a complete Git object ID."
+}
+if ($SigningRequested -and -not $SourceCommit) {
+    throw "Signed release metadata requires SourceCommit."
+}
 $ReleaseKeyFingerprint = $null
 if ($SigningRequested) {
     if (-not (Test-Path -LiteralPath $ReleasePrivateKeyPath -PathType Leaf) -or
@@ -283,6 +291,7 @@ $Manifest = [ordered]@{
     version = $Version
     platform = "windows"
     architecture = "x64"
+    source_commit = $(if ($SourceCommit) { $SourceCommit } else { $null })
     entrypoint = "Novalist.exe"
     sidecar = "resources/sidecar/NovalistSidecar.exe"
     artifacts = $Artifacts
@@ -318,6 +327,7 @@ $Report = [ordered]@{
     schema_version = 1
     version = $Version
     package_kind = "electron-only"
+    source_commit = $(if ($SourceCommit) { $SourceCommit } else { $null })
     generated_at_utc = [DateTime]::UtcNow.ToString("o")
     python = $PythonVersion
     node = $NodeVersion

@@ -19,6 +19,7 @@ from typing import Any
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+APP_VERSION = (PROJECT_ROOT / "VERSION").read_text(encoding="utf-8").strip()
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -96,7 +97,9 @@ def _create_synthetic_project(parent: Path):
     return project, reconstruction
 
 
-def run_verification(config: dict[str, Any], *, target_chars: int) -> dict[str, Any]:
+def run_verification(
+    config: dict[str, Any], *, target_chars: int, source_commit: str | None = None
+) -> dict[str, Any]:
     normalized = normalize_config(config)
     normalized["chapter_target_chars"] = max(300, min(2_000, int(target_chars)))
     cases: list[dict[str, Any]] = []
@@ -183,6 +186,8 @@ def run_verification(config: dict[str, Any], *, target_chars: int) -> dict[str, 
 
     return {
         "schema_version": 1,
+        "app_version": APP_VERSION,
+        "source_commit": source_commit,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "data_scope": "disposable_synthetic_manuscript_only",
         "passed": all(case["passed"] for case in cases),
@@ -206,12 +211,23 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="确认合成正文会发送给已配置的 DSH，并可能产生远程调用成本。",
     )
     parser.add_argument("--target-chars", type=int, default=600)
+    parser.add_argument(
+        "--source-commit",
+        default="",
+        help="生成被验收程序的完整 Git 对象 ID；正式发布门禁必填。",
+    )
     parser.add_argument("--report", type=Path)
     args = parser.parse_args(argv)
     if not args.acknowledge_synthetic_remote:
         parser.error("必须显式传入 --acknowledge-synthetic-remote。")
     if not 300 <= args.target_chars <= 2_000:
         parser.error("--target-chars 必须在 300 到 2000 之间。")
+    args.source_commit = args.source_commit.strip().lower()
+    if args.source_commit and (
+        len(args.source_commit) not in {40, 64}
+        or any(character not in "0123456789abcdef" for character in args.source_commit)
+    ):
+        parser.error("--source-commit 必须是完整的 Git 对象 ID。")
     return args
 
 
@@ -219,7 +235,11 @@ def main(argv: list[str] | None = None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
     args = _parse_args(argv)
-    report = run_verification(load_config(), target_chars=args.target_chars)
+    report = run_verification(
+        load_config(),
+        target_chars=args.target_chars,
+        source_commit=args.source_commit or None,
+    )
     rendered = json.dumps(report, ensure_ascii=False, indent=2)
     if args.report is not None:
         atomic_write_text(args.report.resolve(), rendered + "\n", encoding="utf-8")

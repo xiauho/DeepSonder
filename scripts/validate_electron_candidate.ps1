@@ -203,6 +203,7 @@ try {
         result = "passed"
         package_kind = "electron-only"
         version = $Manifest.version
+        source_commit = $Manifest.source_commit
         release_key_id = $(if ($KeyId) { $KeyId } else { $null })
         unsigned_local_rehearsal = [bool]$AllowUnsignedLocalRehearsal
         os_caption = $Os.Caption

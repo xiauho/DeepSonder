@@ -4,13 +4,15 @@ import { fileURLToPath } from "node:url";
 
 const SHA256 = /^[0-9a-f]{64}$/u;
 const VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u;
+const SOURCE_COMMIT = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u;
 
 function assertReport(report, expectedClient) {
   if (report?.schema_version !== 1 || report.result !== "passed" ||
       report.package_kind !== "electron-only" || report.unsigned_local_rehearsal !== false) {
     throw new Error(`${expectedClient} 验收报告不是通过的正式 Electron 候选。`);
   }
-  if (!VERSION.test(report.version) || !SHA256.test(report.release_key_id) ||
+  if (!VERSION.test(report.version) || !SOURCE_COMMIT.test(report.source_commit) ||
+      !SHA256.test(report.release_key_id) ||
       !SHA256.test(report.installer_sha256) || !SHA256.test(report.portable_sha256)) {
     throw new Error(`${expectedClient} 验收报告的版本、密钥或产物摘要无效。`);
   }
@@ -39,7 +41,7 @@ function assertReport(report, expectedClient) {
 export function compareCandidateReports(windows10, windows11) {
   assertReport(windows10, "windows-10");
   assertReport(windows11, "windows-11");
-  for (const key of ["version", "release_key_id", "installer_sha256", "portable_sha256"]) {
+  for (const key of ["version", "source_commit", "release_key_id", "installer_sha256", "portable_sha256"]) {
     if (windows10[key] !== windows11[key]) {
       throw new Error(`Windows 10/11 验收报告不属于同一候选：${key}。`);
     }
@@ -49,6 +51,7 @@ export function compareCandidateReports(windows10, windows11) {
     result: "passed",
     package_kind: "electron-only",
     version: windows10.version,
+    source_commit: windows10.source_commit,
     release_key_id: windows10.release_key_id,
     installer_sha256: windows10.installer_sha256,
     portable_sha256: windows10.portable_sha256,

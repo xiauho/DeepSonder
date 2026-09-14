@@ -17,6 +17,19 @@ class V2AIWorkflowVerifierTests(unittest.TestCase):
         args = _parse_args(["--acknowledge-synthetic-remote", "--target-chars", "450"])
         self.assertTrue(args.acknowledge_synthetic_remote)
         self.assertEqual(args.target_chars, 450)
+        self.assertEqual(args.source_commit, "")
+        bound = _parse_args([
+            "--acknowledge-synthetic-remote",
+            "--source-commit",
+            "A" * 40,
+        ])
+        self.assertEqual(bound.source_commit, "a" * 40)
+        with self.assertRaises(SystemExit):
+            _parse_args([
+                "--acknowledge-synthetic-remote",
+                "--source-commit",
+                "not-a-commit",
+            ])
 
     def test_synthetic_fixture_has_two_v2_chapters_and_reviewed_knowledge(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
