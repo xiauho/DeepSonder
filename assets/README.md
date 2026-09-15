@@ -1,6 +1,6 @@
 # Application assets
 
-`app_icon.png` is the canonical Novalist application icon. `app_icon.ico` is
+`app_icon.png` is the canonical DeepSonder application icon. `app_icon.ico` is
 the Windows-compatible icon generated from the same artwork.
 
 The `fonts/` directory contains the WOFF2 files required by the native Qt

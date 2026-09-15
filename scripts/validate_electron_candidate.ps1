@@ -15,9 +15,9 @@ $ReleaseRoot = (Resolve-Path -LiteralPath $ReleaseDirectory).Path
 if (-not $ReportPath) {
     $ReportPath = Join-Path $ReleaseRoot "candidate-validation-report.json"
 }
-$WorkRoot = Join-Path ([IO.Path]::GetTempPath()) ("novalist-candidate-" + [guid]::NewGuid().ToString("N"))
+$WorkRoot = Join-Path ([IO.Path]::GetTempPath()) ("deepsonder-candidate-" + [guid]::NewGuid().ToString("N"))
 $InstallRoot = Join-Path $WorkRoot "installed"
-$Uninstaller = Join-Path $InstallRoot "Uninstall Novalist.exe"
+$Uninstaller = Join-Path $InstallRoot "Uninstall DeepSonder.exe"
 
 function Write-JsonFile([string]$Path, [object]$Value) {
     $Value | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $Path -Encoding utf8
@@ -88,7 +88,7 @@ function New-CandidateProject([string]$Parent) {
         project_kind = "novalist-manuscript-reconstruction"
         project_id = $projectId
         name = "Phase 19 clean-machine candidate"
-        author = "Novalist release validation"
+        author = "DeepSonder release validation"
         created_at = $now
         updated_at = $now
         content_policy = [ordered]@{
@@ -175,7 +175,7 @@ try {
 
     $RecoveryRoot = Join-Path $WorkRoot "portable-recovery"
     Expand-Archive -LiteralPath $PortablePath -DestinationPath $RecoveryRoot -Force
-    $RecoveryExecutable = Join-Path $RecoveryRoot "Novalist.exe"
+    $RecoveryExecutable = Join-Path $RecoveryRoot "DeepSonder.exe"
     $RecoverySidecar = Join-Path $RecoveryRoot "resources\sidecar\NovalistSidecar.exe"
     $AuthenticodeState = if ($AllowUnsignedLocalRehearsal) {
         "not_required"
@@ -194,7 +194,7 @@ try {
     try {
         $install = Start-Process -FilePath $InstallerPath -ArgumentList @("/S", "/D=$InstallRoot") -WindowStyle Hidden -Wait -PassThru
         if ($install.ExitCode -ne 0) { throw "NSIS install failed with exit code $($install.ExitCode)." }
-        $InstalledExecutable = Join-Path $InstallRoot "Novalist.exe"
+        $InstalledExecutable = Join-Path $InstallRoot "DeepSonder.exe"
         if (-not $AllowUnsignedLocalRehearsal) {
             $InstalledAuthenticode = Get-AuthenticodeState @(
                 $InstalledExecutable,
@@ -254,7 +254,7 @@ try {
     Write-Host "Electron release candidate validation passed: $ReportPath"
 } finally {
     if (-not $KeepWorkDirectory -and (Test-Path -LiteralPath $WorkRoot)) {
-        $tempPrefix = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd("\") + "\novalist-candidate-"
+        $tempPrefix = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd("\") + "\deepsonder-candidate-"
         $resolvedWork = [IO.Path]::GetFullPath($WorkRoot)
         if (-not $resolvedWork.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase)) {
             throw "Refusing to clean an unexpected validation path: $resolvedWork"

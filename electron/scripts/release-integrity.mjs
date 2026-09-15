@@ -30,7 +30,7 @@ export async function validateReleaseManifest(releaseDirectory, manifestPath) {
   if (value.release_tier !== expectedTier) {
     throw new Error("发布清单级别与版本不一致。");
   }
-  if (value.entrypoint !== "Novalist.exe" || value.sidecar !== "resources/sidecar/NovalistSidecar.exe") {
+  if (value.entrypoint !== "DeepSonder.exe" || value.sidecar !== "resources/sidecar/NovalistSidecar.exe") {
     throw new Error("发布清单入口或 Sidecar 路径无效。");
   }
   if (!Array.isArray(value.artifacts) || value.artifacts.length !== 2) {

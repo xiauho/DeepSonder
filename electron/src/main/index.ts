@@ -133,7 +133,7 @@ async function startDesktop(): Promise<void> {
       );
     }
   } catch (error) {
-    dialog.showErrorBox("Novalist", publicError(error).message);
+    dialog.showErrorBox("DeepSonder", publicError(error).message);
     app.quit();
     return;
   }
@@ -149,7 +149,7 @@ async function startDesktop(): Promise<void> {
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
-    title: "Novalist",
+    title: "DeepSonder",
     width: 1440,
     height: 920,
     minWidth: 1040,
@@ -226,7 +226,7 @@ function registerIpcHandlers(): void {
     async (event): Promise<OperationResult<OpenedProject | null>> => {
       const owner = ownerWindow(event);
       const options: OpenDialogOptions = {
-        title: "打开 Novalist 项目",
+        title: "打开 DeepSonder 项目",
         buttonLabel: "打开项目",
         properties: ["openDirectory"],
       };
@@ -387,7 +387,7 @@ function registerIpcHandlers(): void {
     async (event): Promise<OperationResult<OpenedProjectV2 | null>> => {
       const owner = ownerWindow(event);
       const options: OpenDialogOptions = {
-        title: "打开 Novalist v2 项目",
+        title: "打开 DeepSonder v2 项目",
         buttonLabel: "打开项目",
         properties: ["openDirectory"],
       };
@@ -1967,7 +1967,7 @@ async function runSelfTest(): Promise<void> {
       await sidecar.request<{ opened: OpenedProjectV2 }>("project.createV2", {
         parentDirectory: path.join(electronRoot, "dist"),
         name: `electron-v2-preview-${process.pid}`,
-        author: "Novalist self-test",
+        author: "DeepSonder self-test",
         planDigest: scanned.plan.digest,
       });
       const projectRendered = await waitForRendererCondition(
@@ -2172,7 +2172,7 @@ async function runRendererPerformanceProbe(
   const created = await sidecar.request<{ opened: OpenedProjectV2 }>("project.createV2", {
     parentDirectory: app.getPath("temp"),
     name: projectName,
-    author: "Novalist renderer performance probe",
+    author: "DeepSonder renderer performance probe",
     planDigest: scanned.plan.digest,
   });
   try {

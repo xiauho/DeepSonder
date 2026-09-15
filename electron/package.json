@@ -1,9 +1,9 @@
 {
-  "name": "novalist-electron",
+  "name": "deepsonder-electron",
   "version": "2.1.0-beta",
   "private": true,
-  "description": "Novalist Electron desktop shell",
-  "author": "Novalist contributors",
+  "description": "DeepSonder Electron desktop shell",
+  "author": "DeepSonder contributors",
   "type": "module",
   "main": "dist/electron/main/index.js",
   "scripts": {
@@ -44,8 +44,8 @@
     "node": ">=24.0.0"
   },
   "build": {
-    "appId": "io.github.xiauho.novalist",
-    "productName": "Novalist",
+    "appId": "io.github.xiauho.deepsonder",
+    "productName": "DeepSonder",
     "asar": true,
     "directories": {
       "output": "release",
@@ -82,7 +82,7 @@
         "to": "legal/licenses"
       }
     ],
-    "artifactName": "Novalist-v${version}-windows-${arch}.${ext}",
+    "artifactName": "DeepSonder-v${version}-windows-${arch}.${ext}",
     "win": {
       "icon": "../assets/app_icon.ico",
       "target": [
@@ -91,7 +91,7 @@
       ]
     },
     "nsis": {
-      "artifactName": "Novalist-v${version}-windows-${arch}-setup.${ext}",
+      "artifactName": "DeepSonder-v${version}-windows-${arch}-setup.${ext}",
       "oneClick": false,
       "perMachine": false,
       "allowElevation": false,

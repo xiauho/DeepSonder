@@ -15,8 +15,8 @@ import {
 
 async function fixture(signature) {
   const directory = await mkdtemp(path.join(os.tmpdir(), "novalist-release-integrity-"));
-  const installer = "Novalist-v2.1.0-beta-windows-x64-setup.exe";
-  const portable = "Novalist-v2.1.0-beta-windows-x64.zip";
+  const installer = "DeepSonder-v2.1.0-beta-windows-x64-setup.exe";
+  const portable = "DeepSonder-v2.1.0-beta-windows-x64.zip";
   await writeFile(path.join(directory, installer), "installer fixture");
   await writeFile(path.join(directory, portable), "portable fixture");
   const artifacts = await Promise.all([
@@ -37,7 +37,7 @@ async function fixture(signature) {
     platform: "windows",
     architecture: "x64",
     source_commit: "1".repeat(40),
-    entrypoint: "Novalist.exe",
+    entrypoint: "DeepSonder.exe",
     sidecar: "resources/sidecar/NovalistSidecar.exe",
     artifacts,
     signature,

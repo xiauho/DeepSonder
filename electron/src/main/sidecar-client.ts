@@ -98,7 +98,7 @@ export class SidecarClient {
     spawned.stderr.on("data", (chunk: Buffer) => {
       const diagnostic = chunk.toString("utf8").trim();
       if (diagnostic) {
-        console.error(`[Novalist Sidecar] ${diagnostic}`);
+        console.error(`[DeepSonder Sidecar] ${diagnostic}`);
       }
     });
     spawned.once("error", (error) => this.failProcess(error));
@@ -126,7 +126,7 @@ export class SidecarClient {
 
     try {
       const handshake = await this.request<Handshake>("system.handshake", {
-        clientName: "Novalist Electron",
+        clientName: "DeepSonder Electron",
         clientVersion: "preview-1",
       });
       validateHandshake(handshake);

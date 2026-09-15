@@ -196,7 +196,7 @@ try {
     Pop-Location
 }
 
-$UnpackedExecutable = Join-Path $ReleaseRoot "win-unpacked\Novalist.exe"
+$UnpackedExecutable = Join-Path $ReleaseRoot "win-unpacked\DeepSonder.exe"
 $UnpackedSidecar = Join-Path $ReleaseRoot "win-unpacked\resources\sidecar\NovalistSidecar.exe"
 foreach ($required in @(
     $UnpackedExecutable,
@@ -212,8 +212,8 @@ foreach ($required in @(
         throw "Packaged Electron layout is incomplete: $required"
     }
 }
-$Installer = @(Get-ChildItem -LiteralPath $ReleaseRoot -File -Filter "Novalist-v$Version-windows-x64-setup.exe")
-$PortableZip = @(Get-ChildItem -LiteralPath $ReleaseRoot -File -Filter "Novalist-v$Version-windows-x64.zip")
+$Installer = @(Get-ChildItem -LiteralPath $ReleaseRoot -File -Filter "DeepSonder-v$Version-windows-x64-setup.exe")
+$PortableZip = @(Get-ChildItem -LiteralPath $ReleaseRoot -File -Filter "DeepSonder-v$Version-windows-x64.zip")
 if ($Installer.Count -ne 1 -or $PortableZip.Count -ne 1) {
     throw "Expected exactly one NSIS installer and one portable ZIP."
 }
@@ -231,9 +231,9 @@ Invoke-PackagedSelfTest $UnpackedExecutable $ProjectPath "Clean-profile unpacked
 $RecoveryRoot = Join-Path $BuildRoot "portable-recovery"
 Reset-WorkspaceDirectory $RecoveryRoot
 Expand-Archive -LiteralPath $PortableZip[0].FullName -DestinationPath $RecoveryRoot -Force
-$RecoveryExecutable = Join-Path $RecoveryRoot "Novalist.exe"
+$RecoveryExecutable = Join-Path $RecoveryRoot "DeepSonder.exe"
 if (-not (Test-Path -LiteralPath $RecoveryExecutable -PathType Leaf)) {
-    throw "The portable recovery ZIP does not contain Novalist.exe at its root."
+    throw "The portable recovery ZIP does not contain DeepSonder.exe at its root."
 }
 Invoke-PackagedSelfTest $RecoveryExecutable $ProjectPath "Portable recovery/schema-v2 smoke test"
 
@@ -246,10 +246,10 @@ if ($ExerciseInstaller) {
         if ($install.ExitCode -ne 0) {
             throw "NSIS installer rehearsal failed with exit code $($install.ExitCode)"
         }
-        $InstalledExecutable = Join-Path $InstallRoot "Novalist.exe"
+        $InstalledExecutable = Join-Path $InstallRoot "DeepSonder.exe"
         Invoke-PackagedSelfTest $InstalledExecutable $ProjectPath "Installed clean-profile/schema-v2 smoke test"
     } finally {
-        $Uninstaller = Join-Path $InstallRoot "Uninstall Novalist.exe"
+        $Uninstaller = Join-Path $InstallRoot "Uninstall DeepSonder.exe"
         if (Test-Path -LiteralPath $Uninstaller -PathType Leaf) {
             $uninstall = Start-Process -FilePath $Uninstaller -ArgumentList "/S" -WindowStyle Hidden -Wait -PassThru
             if ($uninstall.ExitCode -ne 0) {
@@ -303,7 +303,7 @@ $Manifest = [ordered]@{
     platform = "windows"
     architecture = "x64"
     source_commit = $(if ($SourceCommit) { $SourceCommit } else { $null })
-    entrypoint = "Novalist.exe"
+    entrypoint = "DeepSonder.exe"
     sidecar = "resources/sidecar/NovalistSidecar.exe"
     artifacts = $Artifacts
     signature = $SignatureMetadata
