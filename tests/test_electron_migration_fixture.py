@@ -34,6 +34,34 @@ class ElectronMigrationFixtureTests(unittest.TestCase):
             raise ValueError("Unsupported Electron migration fixture schema")
         cls.expected = cls.manifest["expected"]
 
+    def test_fixture_bytes_match_locked_manifest(self) -> None:
+        self.assertEqual(
+            _file_digests(GOLDEN_PROJECT),
+            self.manifest["locked_files_sha256"],
+        )
+
+    def test_legacy_import_contract_is_minimal_and_self_contained(self) -> None:
+        contract = self.manifest["legacy_import_contract"]
+        locked = self.manifest["locked_files_sha256"]
+        chapter_sources = contract["chapter_sources"]
+
+        self.assertEqual(contract["import_project_fields"], ["name", "author"])
+        self.assertEqual(
+            chapter_sources,
+            [
+                "outline/chapters/chapter_01.md",
+                "outline/chapters/chapter_02.md",
+            ],
+        )
+        self.assertTrue(all(path in locked for path in chapter_sources))
+        self.assertTrue(
+            all(
+                not source.startswith(tuple(contract["excluded_prefixes"]))
+                and source not in contract["excluded_files"]
+                for source in chapter_sources
+            )
+        )
+
     def test_fixture_is_a_current_project_and_requires_no_migration(self) -> None:
         with TemporaryDirectory() as tmp:
             copied = Path(tmp) / "golden_project"
