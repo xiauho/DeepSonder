@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -41,6 +42,8 @@ class ManuscriptImportPlan:
     source_path: str
     source_root: str
     source_kind: str
+    suggested_name: str
+    suggested_author: str
     chapters: tuple[ImportChapterCandidate, ...]
     warnings: tuple[ImportWarning, ...]
     total_source_bytes: int
@@ -53,6 +56,7 @@ class ManuscriptImportService:
     MAX_CHAPTERS = 2_000
     MAX_FILE_BYTES = 16 * 1024 * 1024
     MAX_TOTAL_BYTES = 512 * 1024 * 1024
+    MAX_METADATA_BYTES = 1024 * 1024
 
     def scan(self, source: Path | str) -> ManuscriptImportPlan:
         source_path = Path(source).expanduser().resolve()
@@ -63,14 +67,17 @@ class ManuscriptImportService:
         if legacy:
             source_root = source_path
             source_kind = "novalist_v1_manuscript"
+            suggested_name, suggested_author = self._legacy_identity(source_root)
             files = list((source_path / "outline" / "chapters").glob("*.md"))
         elif source_path.is_file():
             source_root = source_path.parent
             source_kind = "external_manuscript"
+            suggested_name, suggested_author = source_path.stem, ""
             files = [source_path]
         elif source_path.is_dir():
             source_root = source_path
             source_kind = "external_manuscript"
+            suggested_name, suggested_author = source_path.name, ""
             files = [
                 path for path in source_path.rglob("*")
                 if path.is_file() and path.suffix.casefold() in ALLOWED_MANUSCRIPT_SUFFIXES
@@ -131,11 +138,31 @@ class ManuscriptImportService:
             source_path=str(source_path),
             source_root=str(source_root),
             source_kind=source_kind,
+            suggested_name=suggested_name,
+            suggested_author=suggested_author,
             chapters=tuple(chapters),
             warnings=tuple(warnings),
             total_source_bytes=total_bytes,
             digest=digest,
         )
+
+    @classmethod
+    def _legacy_identity(cls, source_root: Path) -> tuple[str, str]:
+        path = source_root / "project.json"
+        try:
+            payload = path.read_bytes()
+            if len(payload) > cls.MAX_METADATA_BYTES:
+                raise ManuscriptImportError("旧项目元数据超过 1 MiB 上限。")
+            value = json.loads(payload.decode("utf-8-sig"))
+        except ManuscriptImportError:
+            raise
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise ManuscriptImportError("旧项目的 project.json 无法安全读取。") from exc
+        if not isinstance(value, dict):
+            raise ManuscriptImportError("旧项目的 project.json 必须是 JSON 对象。")
+        name = str(value.get("name") or source_root.name).strip()[:200]
+        author = str(value.get("author") or "").strip()[:500]
+        return name or source_root.name, author
 
     @staticmethod
     def plan_digest(

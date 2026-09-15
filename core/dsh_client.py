@@ -5,7 +5,7 @@ as shown in dsh's own help:
 
     dsh --profile headless "run the tests"
 
-Every business prompt is stored in Novalist's isolated workspace after a live
+Every business prompt is stored in DeepSonder's isolated workspace after a live
 file-read probe succeeds. The command line carries only a short loader task.
 """
 
@@ -219,7 +219,7 @@ class DSHClient:
                 raise AITaskCancelled()
             if not self.token_budget.accepts(estimated_input_tokens):
                 raise RuntimeError(
-                    "Novalist 业务提示词超过输入 token 安全上限"
+                    "DeepSonder 业务提示词超过输入 token 安全上限"
                     f"（估算 {estimated_input_tokens} > {self.input_token_budget}）。"
                     "请缩减上下文、降低分块大小或先执行摘要后重试。"
                 )
@@ -229,7 +229,7 @@ class DSHClient:
             ):
                 transport = "file_unavailable"
                 raise RuntimeError(
-                    "DeepSeek Harness 无法验证读取 Novalist 的临时任务文件。"
+                    "DeepSeek Harness 无法验证读取 DeepSonder 的临时任务文件。"
                     "为避免提示词截断，本次任务已停止；请检查 headless 的文件读取能力。"
                 )
             task_file = self._write_task_file(combined)
@@ -359,7 +359,7 @@ class DSHClient:
             raise RuntimeError("dsh 返回了空内容。")
         if self._looks_like_empty_task(output):
             raise RuntimeError(
-                "dsh 已启动，但没有收到 Novalist 的实际任务参数。"
+                "dsh 已启动，但没有收到 DeepSonder 的实际任务参数。"
                 f"（入口：{command}；提示词长度：{submitted_prompt_length}）"
             )
         return output
@@ -431,7 +431,7 @@ class DSHClient:
             raise RuntimeError("dsh 返回了空内容。")
         if self._looks_like_empty_task(output):
             raise RuntimeError(
-                "dsh 已启动，但没有收到 Novalist 的实际任务参数。"
+                "dsh 已启动，但没有收到 DeepSonder 的实际任务参数。"
                 f"（入口：{cmd[0]}；提示词长度：{submitted_prompt_length}）"
             )
         return output
@@ -507,7 +507,7 @@ class DSHClient:
         marker = DSH_FILE_PROBE_PREFIX + uuid.uuid4().hex.upper()
         probe_payload = (
             "NOVALIST_TASK_START\n"
-            "这是 Novalist 的本地任务文件传输测试。\n"
+            "这是 DeepSonder 的本地任务文件传输测试。\n"
             f"请只回复这一行标记：{marker}\n"
             "NOVALIST_TASK_END\n"
         )
@@ -538,7 +538,7 @@ class DSHClient:
             self.use_isolated_workspace()
         workspace = self._isolated_workspace
         if workspace is None:
-            raise RuntimeError("无法创建 Novalist 的隔离 AI 工作目录。")
+            raise RuntimeError("无法创建 DeepSonder 的隔离 AI 工作目录。")
         self.working_directory = workspace
         task_id = uuid.uuid4().hex
         nonce_head = uuid.uuid4().hex.upper()
@@ -574,7 +574,7 @@ class DSHClient:
         encoded = envelope.encode("utf-8")
         if len(encoded) > self.task_file_max_bytes:
             raise RuntimeError(
-                "Novalist 任务文件超过安全上限"
+                "DeepSonder 任务文件超过安全上限"
                 f"（{len(encoded)} > {self.task_file_max_bytes} 字节）。"
                 "请缩减任务上下文后重试。"
             )
@@ -584,10 +584,10 @@ class DSHClient:
             persisted = path.read_bytes()
         except OSError as exc:
             path.unlink(missing_ok=True)
-            raise RuntimeError("Novalist 无法回读临时任务文件。") from exc
+            raise RuntimeError("DeepSonder 无法回读临时任务文件。") from exc
         if persisted != encoded:
             path.unlink(missing_ok=True)
-            raise RuntimeError("Novalist 临时任务文件写入校验失败。")
+            raise RuntimeError("DeepSonder 临时任务文件写入校验失败。")
         try:
             path.chmod(0o600)
         except OSError:
@@ -832,7 +832,7 @@ class DSHClient:
         try:
             probe = self.generate(
                 "",
-                f"这是 Novalist 的连接测试。请只回复 {DSH_PROBE_MARKER}。",
+                f"这是 DeepSonder 的连接测试。请只回复 {DSH_PROBE_MARKER}。",
                 timeout_override=min(self.timeout, 15),
                 cancel_event=cancel_event,
             )

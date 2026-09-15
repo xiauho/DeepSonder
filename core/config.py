@@ -8,7 +8,7 @@ from typing import Any
 
 from copy import deepcopy
 
-from .app_paths import app_config_dir, legacy_application_root, update_cache_dir
+from .app_paths import app_config_dir
 from .theme_tokens import DARK_COLORS, LIGHT_COLORS
 from .storage import atomic_write_text
 from .token_budget import (
@@ -73,11 +73,6 @@ DEFAULT_CONFIG = {
     "ai_history_remote_enabled": True,
     "show_line_numbers": False,
     "ai_notice_acknowledged": False,
-    # Update preferences and non-sensitive check metadata
-    "update_channel": "beta",
-    "auto_check_updates": False,
-    "last_update_check_at": "",
-    "skipped_update_version": "",
     "recent_projects": [],
     "last_project": "",
 }
@@ -88,18 +83,8 @@ def get_config_path() -> Path:
     return app_config_dir() / "config.json"
 
 
-def get_legacy_config_path() -> Path:
-    """Return the pre-migration config path beside the application source."""
-    return legacy_application_root() / "config.json"
-
-
-def get_update_cache_path() -> Path:
-    """Return the directory reserved for future update downloads."""
-    return update_cache_dir()
-
-
 def load_config() -> dict:
-    """Load user settings, migrating a legacy root config when necessary."""
+    """Load settings from the isolated DeepSonder-PySide6 profile."""
     config = deepcopy(DEFAULT_CONFIG)
     config_path = get_config_path()
     if config_path.exists():
@@ -113,16 +98,7 @@ def load_config() -> dict:
                 pass
         return config
 
-    legacy_path = get_legacy_config_path()
-    migrated = legacy_path != config_path and _merge_config(config, legacy_path)
     _normalize_config(config)
-    if migrated:
-        try:
-            _write_config(config_path, config)
-        except OSError:
-            # A read-only or unavailable user-data directory must not prevent
-            # the application from starting with the successfully loaded data.
-            pass
     return config
 
 
@@ -293,17 +269,13 @@ def _normalize_config(config: dict[str, Any]) -> None:
     config.pop("expand_target_chars", None)
     config["auto_save"] = bool(config.get("auto_save", True))
     config["ai_notice_acknowledged"] = bool(config.get("ai_notice_acknowledged", False))
-    update_channel = str(config.get("update_channel") or "beta").strip().lower()
-    config["update_channel"] = (
-        update_channel if update_channel in {"stable", "beta"} else "beta"
-    )
-    config["auto_check_updates"] = bool(config.get("auto_check_updates", False))
-    config["last_update_check_at"] = str(
-        config.get("last_update_check_at") or ""
-    ).strip()
-    config["skipped_update_version"] = str(
-        config.get("skipped_update_version") or ""
-    ).strip()
+    for retired_key in (
+        "update_channel",
+        "auto_check_updates",
+        "last_update_check_at",
+        "skipped_update_version",
+    ):
+        config.pop(retired_key, None)
     config["recent_projects"] = _string_list(config.get("recent_projects"))
     config["last_project"] = str(config.get("last_project") or "")
     config["config_schema_version"] = CONFIG_SCHEMA_VERSION

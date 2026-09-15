@@ -2,7 +2,6 @@
 
 from pathlib import Path
 
-
 project_root = Path(SPECPATH).resolve()
 runtime_data = [
     (str(project_root / "assets" / "fonts"), "assets/fonts"),
@@ -32,16 +31,15 @@ a = Analysis(
     runtime_hooks=[],
     excludes=["tkinter"],
     noarchive=False,
-    optimize=0,
+    optimize=1,
 )
 pyz = PYZ(a.pure)
-
 exe = EXE(
     pyz,
     a.scripts,
     [],
     exclude_binaries=True,
-    name="Novalist",
+    name="DeepSonder-PySide6",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -54,7 +52,6 @@ exe = EXE(
     entitlements_file=None,
     icon=str(project_root / "assets" / "app_icon.ico"),
 )
-
 coll = COLLECT(
     exe,
     a.binaries,
@@ -62,5 +59,5 @@ coll = COLLECT(
     strip=False,
     upx=False,
     upx_exclude=[],
-    name="Novalist",
+    name="DeepSonder-PySide6",
 )

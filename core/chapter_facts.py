@@ -175,7 +175,7 @@ def build_chunk_facts_prompt(
 ) -> PromptBundle:
     """Build one source-only extraction prompt with no existing story memory."""
     system_prompt = """
-你是 Novalist 的章节事实提取器。只提取给定正文中能够定位的事实，不续写、不补全、
+你是 DeepSonder 的章节事实提取器。只提取给定正文中能够定位的事实，不续写、不补全、
 不依据常识推测。只输出合法 JSON，不输出 Markdown 代码围栏或额外解释。
 """.strip()
     user_prompt = f"""

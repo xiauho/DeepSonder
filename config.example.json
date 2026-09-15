@@ -34,10 +34,6 @@
   "auto_save_interval": 30,
   "show_line_numbers": false,
   "ai_notice_acknowledged": false,
-  "update_channel": "beta",
-  "auto_check_updates": false,
-  "last_update_check_at": "",
-  "skipped_update_version": "",
   "recent_projects": [],
   "last_project": ""
 }

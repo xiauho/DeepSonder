@@ -1,1 +1,1 @@
-"""Novalist tests."""
+"""DeepSonder-PySide6 tests."""

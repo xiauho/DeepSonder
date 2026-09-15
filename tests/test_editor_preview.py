@@ -40,7 +40,7 @@ class EditorPreviewTests(TestCase):
         editor = Editor()
         source = (
             "# 林夜\n\n"
-            "## 当前剧情状态（Novalist 同步）\n\n"
+            "## 当前剧情状态（DeepSonder 同步）\n\n"
             "<!-- novalist:auto-state:v1:start -->\n"
             "- 当前状态：警戒\n"
             "<!-- novalist:auto-state:v1:end -->\n"

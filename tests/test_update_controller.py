@@ -123,13 +123,13 @@ class UpdateControllerTests(TestCase):
             self.assertFalse(controller.check_automatically())
         check.assert_not_called()
 
-    def test_skipped_version_is_hidden_only_for_automatic_checks(self) -> None:
+    def test_retired_skipped_version_is_ignored(self) -> None:
         controller = UpdateController(
             {"skipped_update_version": "v2.0.6-beta"},
             task_factory=FakeTask,
         )
         result = available_result()
-        self.assertFalse(controller.should_present(result, manual=False))
+        self.assertTrue(controller.should_present(result, manual=False))
         self.assertTrue(controller.should_present(result, manual=True))
 
     def test_skip_version_is_persisted_and_emitted(self) -> None:

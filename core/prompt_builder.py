@@ -33,7 +33,7 @@ from .text_metrics import count_content_chars
 from .token_budget import DEFAULT_TOKEN_SAFETY_FACTOR
 
 COMMON_RULES = """
-你是 Novalist 的小说创作 AI。
+你是 DeepSonder 的小说创作 AI。
 
 当前只执行指定的任务类型，不要执行其他任务。
 

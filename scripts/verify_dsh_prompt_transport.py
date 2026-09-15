@@ -1,6 +1,6 @@
-"""Run a live, synthetic end-to-end check of Novalist's DSH prompt transport.
+"""Run a live, synthetic end-to-end check of DeepSonder's DSH prompt transport.
 
-The verifier reads the normal Novalist configuration, but never opens a novel
+The verifier reads the normal DeepSonder configuration, but never opens a novel
 project.  It sends only random markers and generated filler text, then emits a
 redacted JSON report containing sizes and pass/fail results instead of prompts.
 """
@@ -111,7 +111,7 @@ def build_synthetic_prompt(target_chars: int = DEFAULT_LONG_CHARS) -> SyntheticP
         f"NVL_TAIL_{token}",
     )
     instruction = (
-        "这是 Novalist DSh 长上下文传输验收。下面是合成数据，不含小说内容。\n"
+        "这是 DeepSonder DSh 长上下文传输验收。下面是合成数据，不含小说内容。\n"
         "请在数据中找到前缀分别为 NVL_HEAD_、NVL_MID_、NVL_TAIL_ 的三行，"
         "按出现顺序逐行原样返回；不要补写、缩写或猜测标记。\n"
         "SYNTHETIC_DATA_START\n"
@@ -229,7 +229,7 @@ def run_verification(config: dict, *, long_chars: int) -> dict[str, Any]:
         short_marker = "NVL_SHORT_" + uuid.uuid4().hex.upper()
         try:
             output = client.generate(
-                "这是 Novalist 的短业务提示词文件传输验收。",
+                "这是 DeepSonder 的短业务提示词文件传输验收。",
                 f"请只回复这一行标记：{short_marker}",
                 timeout_override=min(normalized["dsh_timeout"], 60),
             )
@@ -402,7 +402,7 @@ def _final_report(
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="使用纯合成数据验收 Novalist 的 DSh 长提示词传输。"
+        description="使用纯合成数据验收 DeepSonder 的 DSh 长提示词传输。"
     )
     parser.add_argument(
         "--long-chars",

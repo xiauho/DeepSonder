@@ -55,7 +55,7 @@ CANON_ENTRY_TYPES = {
             "- 克制关系：\n\n"
             "## 关键关系\n\n"
             "## 秘密与人物弧线\n\n"
-            "## 当前剧情状态（Novalist 同步）\n\n"
+            "## 当前剧情状态（DeepSonder 同步）\n\n"
             "<!-- novalist:auto-state:v1:start -->\n"
             "- 本次同步截止章节：未记录\n"
             "- 当前状态：未记录\n"

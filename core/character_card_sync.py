@@ -16,7 +16,7 @@ from .project import NovelProject
 from .storage import atomic_write_text
 
 
-MANAGED_STATE_HEADING = "## 当前剧情状态（Novalist 同步）"
+MANAGED_STATE_HEADING = "## 当前剧情状态（DeepSonder 同步）"
 MANAGED_STATE_START = "<!-- novalist:auto-state:v1:start -->"
 MANAGED_STATE_END = "<!-- novalist:auto-state:v1:end -->"
 
@@ -264,13 +264,13 @@ def _render_managed_block(state: dict[str, Any]) -> str:
 
 def _managed_bounds(card_text: str) -> tuple[int, int] | None:
     if card_text.count(MANAGED_STATE_START) > 1 or card_text.count(MANAGED_STATE_END) > 1:
-        raise CharacterCardSyncError("角色卡中存在重复的 Novalist 同步标记，请修复后重试。")
+        raise CharacterCardSyncError("角色卡中存在重复的 DeepSonder 同步标记，请修复后重试。")
     start = card_text.find(MANAGED_STATE_START)
     end = card_text.find(MANAGED_STATE_END)
     if start < 0 and end < 0:
         return None
     if start < 0 or end < start:
-        raise CharacterCardSyncError("角色卡中的 Novalist 同步标记不完整，请修复后重试。")
+        raise CharacterCardSyncError("角色卡中的 DeepSonder 同步标记不完整，请修复后重试。")
     return start, end + len(MANAGED_STATE_END)
 
 

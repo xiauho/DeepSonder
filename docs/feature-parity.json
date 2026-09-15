@@ -27,9 +27,9 @@
     {
       "id": "legacy_project.import",
       "requirement": "required",
-      "pyside6": "pending",
-      "electron": "pending",
-      "note": "Phase 1 freezes the fixture and import boundary; implementation follows after repository separation."
+      "pyside6": "supported",
+      "electron": "supported",
+      "note": "Both series use a read-only scanner and create a new project from legacy name, author, and ordered chapter Markdown only. Derived data is rebuilt after explicit user action."
     },
     {
       "id": "chapter.edit",

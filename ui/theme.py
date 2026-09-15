@@ -1,4 +1,4 @@
-"""Shared design tokens and the single Qt stylesheet used by Novalist."""
+"""Shared design tokens and the single Qt stylesheet used by DeepSonder."""
 
 from __future__ import annotations
 

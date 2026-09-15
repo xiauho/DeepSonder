@@ -5,23 +5,18 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-class ElectronSourceLauncherTests(unittest.TestCase):
-    def test_root_launcher_uses_electron_and_python_sidecar(self) -> None:
+class PySide6SourceLauncherTests(unittest.TestCase):
+    def test_root_launcher_uses_only_pyside6(self) -> None:
         launcher = (PROJECT_ROOT / "run.bat").read_text(encoding="utf-8")
-        self.assertIn("call npm start", launcher)
-        self.assertIn("call npm run self-test", launcher)
-        self.assertIn("NOVALIST_PYTHON", launcher)
-        self.assertIn("node_modules\\.bin\\tsc.cmd", launcher)
-        self.assertIn("Get-Process electron", launcher)
-        self.assertNotIn('"%APP_PYTHON%" main.py', launcher)
+        self.assertIn('"%PYTHON_EXE%" main.py', launcher)
+        self.assertIn("DeepSonder-PySide6", launcher)
+        self.assertNotIn("npm", launcher)
+        self.assertNotIn("electron", launcher.casefold())
+        self.assertNotIn("sidecar", launcher.casefold())
 
-    def test_documented_node_floor_matches_electron_package(self) -> None:
+    def test_launcher_targets_python_312(self) -> None:
         launcher = (PROJECT_ROOT / "run.bat").read_text(encoding="utf-8")
-        package = (PROJECT_ROOT / "electron" / "package.json").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn(">=24.0.0", package)
-        self.assertIn(">= 24", launcher)
+        self.assertIn("py -3.12 -m venv", launcher)
 
 
 if __name__ == "__main__":

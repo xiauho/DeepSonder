@@ -35,7 +35,7 @@ class PrimaryNavigation(QWidget):
 
         brand_text = QVBoxLayout()
         brand_text.setSpacing(3)
-        title = QLabel("Novalist")
+        title = QLabel("DeepSonder")
         title.setObjectName("brandTitle")
         subtitle = QLabel("本地小说创作平台")
         subtitle.setObjectName("brandSubtitle")

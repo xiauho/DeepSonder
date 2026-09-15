@@ -1,4 +1,4 @@
-"""Derive safe Novalist prompt limits from a declared model context window."""
+"""Derive safe DeepSonder prompt limits from a declared model context window."""
 
 from __future__ import annotations
 

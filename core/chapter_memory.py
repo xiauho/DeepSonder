@@ -612,7 +612,7 @@ def build_memory_proposal_prompt(
         context_hash,
     )
     system_prompt = (
-        "你是 Novalist 的章节记忆归并器。只能依据给定事实生成摘要、状态 Patch 和冲突候选。"
+        "你是 DeepSonder 的章节记忆归并器。只能依据给定事实生成摘要、状态 Patch 和冲突候选。"
         "不得补写剧情，不得返回完整故事状态。只输出合法 JSON。"
     )
     model_source = {
@@ -737,7 +737,7 @@ def build_digest_shard_prompt(
 ) -> tuple[PromptBundle, frozenset[str]]:
     allowed_ids = frozenset(_collect_fact_ids(items))
     system_prompt = (
-        "你是 Novalist 的事实归并器。只压缩输入事实，不增加新事实。只输出合法 JSON。"
+        "你是 DeepSonder 的事实归并器。只压缩输入事实，不增加新事实。只输出合法 JSON。"
     )
     payload = json.dumps(items, ensure_ascii=False, separators=(",", ":"))
     user_prompt = f"""

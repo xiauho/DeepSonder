@@ -1,4 +1,4 @@
-# Contributing to Novalist
+# Contributing to DeepSonder-PySide6
 
 Contributions are welcome through issues and pull requests.
 

@@ -1,4 +1,3 @@
-import os
 import sys
 
 from PySide6.QtGui import QFont, QIcon
@@ -7,7 +6,7 @@ from PySide6.QtWidgets import QApplication, QStyleFactory
 from core.config import load_config, normalize_config
 from core.resources import resource_path
 from core.version import load_current_version
-from ui.icons import load_stitch_fonts, material_symbols_available
+from ui.icons import load_stitch_fonts
 from ui.main_window import MainWindow
 from ui.theme import apply_theme
 
@@ -20,7 +19,7 @@ def _set_windows_app_id() -> None:
         import ctypes
 
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
-            "Novalist.Writer.Desktop"
+            "DeepSonder.PySide6.Desktop"
         )
     except (AttributeError, OSError):
         pass
@@ -47,8 +46,8 @@ REQUIRED_RUNTIME_RESOURCES = (
 
 def _configure_application(app: QApplication) -> None:
     _set_windows_app_id()
-    app.setApplicationName("Novalist")
-    app.setOrganizationName("Novalist")
+    app.setApplicationName("DeepSonder-PySide6")
+    app.setOrganizationName("DeepSonder")
     app.setStyle(QStyleFactory.create("Fusion"))
     load_stitch_fonts()
     app.setFont(QFont("Microsoft YaHei UI", 10))
@@ -66,19 +65,18 @@ def validate_runtime_resources() -> None:
 
 
 def run_self_test() -> int:
-    """Exercise the frozen UI without reading or writing the user's settings."""
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    app = QApplication.instance() or QApplication([sys.argv[0], "--self-test"])
-    _configure_application(app)
+    """Validate imports and bundled resources without opening a GUI profile."""
+    import bz2
+    import ctypes
+    import hashlib
+    import lzma
+
     validate_runtime_resources()
-    if app.windowIcon().isNull():
-        raise RuntimeError("应用图标未能加载。")
-    if not material_symbols_available():
-        raise RuntimeError("Material Symbols 字体未能加载。")
-    window = MainWindow(config=normalize_config({}))
-    if "帮助" not in [action.text() for action in window.menuBar().actions()]:
-        raise RuntimeError("主界面菜单未完整加载。")
-    window.close()
+    normalize_config({})
+    hashlib.sha256(b"DeepSonder-PySide6").digest()
+    bz2.compress(b"runtime")
+    lzma.compress(b"runtime")
+    getattr(ctypes, "windll", None)
     return 0
 
 

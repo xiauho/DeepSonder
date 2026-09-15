@@ -37,6 +37,8 @@ class ManuscriptImportServiceTests(unittest.TestCase):
             plan = ManuscriptImportService().scan(copied)
 
             self.assertEqual(plan.source_kind, "novalist_v1_manuscript")
+            self.assertEqual(plan.suggested_name, "迁移基线：雾港来信")
+            self.assertEqual(plan.suggested_author, "Novalist 测试")
             self.assertEqual(len(plan.chapters), 2)
             self.assertEqual(plan.chapters[0].chapter_id, "chapter_0001")
             self.assertEqual(plan.chapters[0].title, "第一章 雾中的信")

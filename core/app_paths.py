@@ -1,4 +1,4 @@
-"""Platform-appropriate locations for Novalist application data."""
+"""Platform-appropriate locations for DeepSonder-PySide6 application data."""
 
 from __future__ import annotations
 
@@ -7,7 +7,11 @@ import sys
 from pathlib import Path
 
 
-APP_DIRECTORY_NAME = "Novalist"
+APP_DIRECTORY_PARTS = ("DeepSonder", "PySide6")
+
+
+def _under(base: Path) -> Path:
+    return base.joinpath(*APP_DIRECTORY_PARTS)
 
 
 def app_config_dir() -> Path:
@@ -15,17 +19,17 @@ def app_config_dir() -> Path:
     if sys.platform == "win32":
         base = os.environ.get("APPDATA")
         return (
-            Path(base) / APP_DIRECTORY_NAME
+            _under(Path(base))
             if base
-            else _home() / "AppData" / "Roaming" / APP_DIRECTORY_NAME
+            else _under(_home() / "AppData" / "Roaming")
         )
     if sys.platform == "darwin":
-        return _home() / "Library" / "Application Support" / APP_DIRECTORY_NAME
+        return _under(_home() / "Library" / "Application Support")
     base = os.environ.get("XDG_CONFIG_HOME")
     return (
-        Path(base) / APP_DIRECTORY_NAME
+        _under(Path(base))
         if base
-        else _home() / ".config" / APP_DIRECTORY_NAME
+        else _under(_home() / ".config")
     )
 
 
@@ -34,30 +38,23 @@ def app_cache_dir() -> Path:
     if sys.platform == "win32":
         base = os.environ.get("LOCALAPPDATA")
         return (
-            Path(base) / APP_DIRECTORY_NAME
+            _under(Path(base))
             if base
-            else _home() / "AppData" / "Local" / APP_DIRECTORY_NAME
+            else _under(_home() / "AppData" / "Local")
         )
     if sys.platform == "darwin":
-        return _home() / "Library" / "Caches" / APP_DIRECTORY_NAME
+        return _under(_home() / "Library" / "Caches")
     base = os.environ.get("XDG_CACHE_HOME")
     return (
-        Path(base) / APP_DIRECTORY_NAME
+        _under(Path(base))
         if base
-        else _home() / ".cache" / APP_DIRECTORY_NAME
+        else _under(_home() / ".cache")
     )
 
 
 def update_cache_dir() -> Path:
-    """Return the directory reserved for downloaded update artifacts."""
-    return app_cache_dir() / "updates"
-
-
-def legacy_application_root() -> Path:
-    """Return the old writable application root used before per-user storage."""
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
-    return Path(__file__).resolve().parent.parent
+    """Return the isolated legacy-helper cache; the current UI never auto-updates."""
+    return app_cache_dir() / "retired-updater"
 
 
 def _home() -> Path:

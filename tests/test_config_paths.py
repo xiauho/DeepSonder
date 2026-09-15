@@ -5,10 +5,9 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import patch
 
-from core.app_paths import app_cache_dir, app_config_dir, update_cache_dir
+from core.app_paths import app_cache_dir, app_config_dir
 from core.config import (
     get_chapter_target_chars,
-    get_update_cache_path,
     load_config,
     normalize_config,
     save_config,
@@ -27,14 +26,12 @@ class ApplicationPathTests(TestCase):
         ):
             self.assertEqual(
                 app_config_dir(),
-                Path(r"C:\Users\writer\AppData\Roaming") / "Novalist",
+                Path(r"C:\Users\writer\AppData\Roaming") / "DeepSonder" / "PySide6",
             )
             self.assertEqual(
                 app_cache_dir(),
-                Path(r"C:\Users\writer\AppData\Local") / "Novalist",
+                Path(r"C:\Users\writer\AppData\Local") / "DeepSonder" / "PySide6",
             )
-            self.assertEqual(update_cache_dir(), app_cache_dir() / "updates")
-            self.assertEqual(get_update_cache_path(), update_cache_dir())
 
     def test_linux_honors_xdg_directories(self) -> None:
         with patch("core.app_paths.sys.platform", "linux"), patch.dict(
@@ -45,8 +42,8 @@ class ApplicationPathTests(TestCase):
             },
             clear=True,
         ):
-            self.assertEqual(app_config_dir(), Path("/tmp/novalist-config/Novalist"))
-            self.assertEqual(app_cache_dir(), Path("/tmp/novalist-cache/Novalist"))
+            self.assertEqual(app_config_dir(), Path("/tmp/novalist-config/DeepSonder/PySide6"))
+            self.assertEqual(app_cache_dir(), Path("/tmp/novalist-cache/DeepSonder/PySide6"))
 
 
 class ConfigMigrationTests(TestCase):
@@ -78,7 +75,7 @@ class ConfigMigrationTests(TestCase):
             self.assertNotIn("expand_target_chars", loaded)
             self.assertEqual(loaded["config_schema_version"], 6)
 
-    def test_legacy_config_is_copied_normalized_and_retained(self) -> None:
+    def test_legacy_install_config_is_not_consumed(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             legacy = root / "install" / "config.json"
@@ -95,70 +92,13 @@ class ConfigMigrationTests(TestCase):
                 encoding="utf-8",
             )
 
-            with patch("core.config.get_config_path", return_value=target), patch(
-                "core.config.get_legacy_config_path", return_value=legacy
-            ):
+            with patch("core.config.get_config_path", return_value=target):
                 loaded = load_config()
 
-            self.assertEqual(loaded["theme"], "dark")
-            self.assertEqual(loaded["chapter_target_chars"], 2600)
-            self.assertEqual(loaded["auto_save_interval"], 600)
+            self.assertEqual(loaded["theme"], "light")
+            self.assertEqual(loaded["chapter_target_chars"], 3000)
             self.assertTrue(legacy.is_file())
-            persisted = json.loads(target.read_text(encoding="utf-8"))
-            self.assertEqual(persisted, loaded)
-            self.assertNotIn("continue_target_chars", persisted)
-
-    def test_new_config_takes_precedence_over_legacy_config(self) -> None:
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            legacy = root / "install" / "config.json"
-            target = root / "profile" / "config.json"
-            legacy.parent.mkdir()
-            target.parent.mkdir()
-            legacy.write_text('{"theme":"dark"}', encoding="utf-8")
-            target.write_text('{"theme":"light"}', encoding="utf-8")
-
-            with patch("core.config.get_config_path", return_value=target), patch(
-                "core.config.get_legacy_config_path", return_value=legacy
-            ):
-                loaded = load_config()
-
-            self.assertEqual(loaded["theme"], "light")
-            persisted = json.loads(target.read_text(encoding="utf-8"))
-            self.assertEqual(persisted["config_schema_version"], 6)
-
-    def test_invalid_legacy_config_is_not_migrated(self) -> None:
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            legacy = root / "install" / "config.json"
-            target = root / "profile" / "config.json"
-            legacy.parent.mkdir()
-            legacy.write_text("{invalid", encoding="utf-8")
-
-            with patch("core.config.get_config_path", return_value=target), patch(
-                "core.config.get_legacy_config_path", return_value=legacy
-            ):
-                loaded = load_config()
-
-            self.assertEqual(loaded["theme"], "light")
             self.assertFalse(target.exists())
-
-    def test_migration_write_failure_does_not_discard_loaded_settings(self) -> None:
-        with TemporaryDirectory() as tmp:
-            legacy = Path(tmp) / "config.json"
-            legacy.write_text('{"theme":"dark"}', encoding="utf-8")
-
-            with patch(
-                "core.config.get_config_path",
-                return_value=Path(tmp) / "profile" / "config.json",
-            ), patch(
-                "core.config.get_legacy_config_path", return_value=legacy
-            ), patch(
-                "core.config._write_config", side_effect=OSError("read only")
-            ):
-                loaded = load_config()
-
-            self.assertEqual(loaded["theme"], "dark")
 
     def test_save_config_creates_the_user_directory(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -170,7 +110,7 @@ class ConfigMigrationTests(TestCase):
             self.assertEqual(saved["theme"], "dark")
             self.assertEqual(saved["config_schema_version"], 6)
 
-    def test_update_preferences_are_normalized(self) -> None:
+    def test_retired_update_preferences_are_removed(self) -> None:
         config = normalize_config(
             {
                 "update_channel": "unsupported",
@@ -179,10 +119,10 @@ class ConfigMigrationTests(TestCase):
                 "skipped_update_version": None,
             }
         )
-        self.assertEqual(config["update_channel"], "beta")
-        self.assertTrue(config["auto_check_updates"])
-        self.assertEqual(config["last_update_check_at"], "")
-        self.assertEqual(config["skipped_update_version"], "")
+        self.assertNotIn("update_channel", config)
+        self.assertNotIn("auto_check_updates", config)
+        self.assertNotIn("last_update_check_at", config)
+        self.assertNotIn("skipped_update_version", config)
 
     def test_future_config_schema_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "高于当前程序支持"):

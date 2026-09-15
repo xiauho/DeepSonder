@@ -537,7 +537,7 @@ class DSHClientTests(TestCase):
         client = DSHClient("dsh")
         client._file_transport_supported = True
         with patch("core.dsh_client.subprocess.run", return_value=completed):
-            with self.assertRaisesRegex(RuntimeError, "没有收到 Novalist"):
+            with self.assertRaisesRegex(RuntimeError, "没有收到 DeepSonder"):
                 client.generate("system", "user")
 
     def test_connection_check_runs_a_real_probe(self) -> None:
@@ -620,7 +620,7 @@ class DSHClientTests(TestCase):
         client._file_transport_supported = True
         with patch("core.dsh_client.shutil.which", return_value="dsh.exe"):
             with patch("core.dsh_client.subprocess.run", side_effect=[version, onboarding]):
-                with self.assertRaisesRegex(RuntimeError, "没有收到 Novalist"):
+                with self.assertRaisesRegex(RuntimeError, "没有收到 DeepSonder"):
                     client.check_connection()
 
     def test_isolated_workspace_is_empty_reused_and_cleaned(self) -> None:

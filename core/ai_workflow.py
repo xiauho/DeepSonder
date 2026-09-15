@@ -1,4 +1,4 @@
-"""UI-independent orchestration for Novalist AI tasks."""
+"""UI-independent orchestration for DeepSonder AI tasks."""
 
 from __future__ import annotations
 

@@ -86,7 +86,7 @@ def inspect_project_schema(root: Path) -> int:
     if version > PROJECT_SCHEMA_VERSION:
         raise ProjectMigrationError(
             f"项目格式版本 {version} 高于当前程序支持的 {PROJECT_SCHEMA_VERSION}，"
-            "请使用更新版本的 Novalist 打开。"
+            "请使用更新版本的 DeepSonder-PySide6 打开。"
         )
     return version
 

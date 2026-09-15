@@ -163,7 +163,7 @@ class CharacterCardSyncPreviewDialog(QDialog):
         layout.addWidget(scroll, 1)
 
         warning = QLabel(
-            "确认后仅更新角色卡中的“Novalist 同步”标记区；其他作者内容保持不变。"
+            "确认后仅更新角色卡中的“DeepSonder 同步”标记区；其他作者内容保持不变。"
             "写入前会再次检查角色卡版本，并在项目备份目录保存原文。"
         )
         warning.setWordWrap(True)

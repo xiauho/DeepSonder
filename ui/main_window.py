@@ -3,11 +3,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer, QUrl
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import (
     QAction,
     QCloseEvent,
-    QDesktopServices,
     QKeySequence,
     QShortcut,
 )
@@ -24,13 +23,17 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QProgressBar,
-    QProgressDialog,
     QPushButton,
     QSplitter,
     QStackedWidget,
     QToolButton,
     QVBoxLayout,
     QWidget,
+)
+
+from application.legacy_project_import_service import (
+    LegacyProjectImportError,
+    LegacyProjectImportService,
 )
 
 from core.chapter_sections import chapter_body_text
@@ -42,16 +45,9 @@ from core.character_card_sync import (
 from core.config import get_chapter_target_chars, load_config
 from core.continuation import MIN_CONTINUATION_CHARS
 from core.project import NovelProject
-from core.project_data import ChapterIdConflictError, ProjectDataStore
+from core.project_data import ChapterIdConflictError, ProjectDataStore, sanitize_filename
 from core.text_metrics import count_content_chars
-from core.update_download_service import VerifiedUpdate
-from core.update_install_service import (
-    UpdateInstallLaunchError,
-    automatic_install_unavailable_reason,
-    launch_verified_update_install,
-)
-from core.update_service import UpdateCheckResult, UpdateInfo
-from core.version import AppVersion, load_current_version
+from core.version import load_current_version
 from ui.ai_controller import AIController
 from ui.ai_engine_controller import AIEngineController
 from ui.ai_task_view_controller import AITaskViewController
@@ -76,9 +72,6 @@ from ui.project_setup_dialog import ProjectSetupDialog
 from ui.settings_controller import SettingsController
 from ui.story_navigation_controller import StoryNavigationController
 from ui.trash_dialog import TrashDialog
-from ui.update_controller import UpdateController
-from ui.update_download_controller import UpdateDownloadController
-from ui.update_dialog import UpdateDialog, no_update_notice
 from ui.view_refresh_controller import ViewRefreshController
 from ui.window_state_controller import WindowStateController
 
@@ -127,16 +120,14 @@ class MainWindow(QMainWindow):
         self.config = dict(config) if config is not None else load_config()
         self._action_icon_buttons: dict[str, IconTextButton] = {}
         self.project_setup_dialog: ProjectSetupDialog | None = None
-        self.update_dialog: UpdateDialog | None = None
-        self.update_download_progress: QProgressDialog | None = None
-        self._pending_update_install: VerifiedUpdate | None = None
+        self.legacy_import_service = LegacyProjectImportService()
         self.ai_engine_controller = AIEngineController(
             self.config,
             self.ai_controller.is_running,
             self,
         )
 
-        self.setWindowTitle("Novalist")
+        self.setWindowTitle("DeepSonder-PySide6")
         self.setMinimumSize(1100, 720)
         self._build_actions()
         self._build_ui()
@@ -158,8 +149,6 @@ class MainWindow(QMainWindow):
             self.ai_engine_controller,
             self,
         )
-        self.update_controller = UpdateController(self.config, self)
-        self.update_download_controller = UpdateDownloadController(self)
         self.export_controller = ExportController(self.project_session, self)
         self.export_page.set_export_controller(self.export_controller)
         self.view_refresh_controller = ViewRefreshController(
@@ -268,7 +257,6 @@ class MainWindow(QMainWindow):
 
         self._refresh_auto_save_timer()
         QTimer.singleShot(80, self._restore_last_project)
-        QTimer.singleShot(1500, self.update_controller.check_automatically)
 
     @property
     def project(self) -> NovelProject | None:
@@ -290,6 +278,7 @@ class MainWindow(QMainWindow):
 
         action("new_project", "新建项目…", self.new_project, "Ctrl+Shift+N")
         action("open_project", "打开项目…", self.open_project, "Ctrl+Shift+O")
+        action("import_legacy_project", "导入旧版项目…", self.import_legacy_project)
         action("save", "保存", self.save_current_file, "Ctrl+S")
         action("export", "导出作品", lambda: self._show_route("export"), "Ctrl+Shift+E")
         action("trash", "回收站…", self.open_trash)
@@ -320,8 +309,7 @@ class MainWindow(QMainWindow):
         action("continuation", "AI 续写", self.continue_chapter, "Ctrl+Alt+Enter")
         action("check", "一致性检查", self.check_consistency, "Ctrl+Shift+C")
         action("memory", "更新故事记忆", self.update_memory, "Ctrl+Shift+M")
-        action("check_updates", "检查更新…", self.check_for_updates)
-        action("about", "关于 Novalist", self.show_about)
+        action("about", "关于 DeepSonder", self.show_about)
 
     def _build_ui(self) -> None:
         central = QWidget(self)
@@ -524,6 +512,7 @@ class MainWindow(QMainWindow):
         file_menu = self.menuBar().addMenu("文件")
         file_menu.addAction(self.actions["new_project"])
         file_menu.addAction(self.actions["open_project"])
+        file_menu.addAction(self.actions["import_legacy_project"])
         self.recent_menu = QMenu("最近项目", self)
         file_menu.addMenu(self.recent_menu)
         self._refresh_recent_menu()
@@ -562,8 +551,6 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.actions["output"])
 
         help_menu = self.menuBar().addMenu("帮助")
-        help_menu.addAction(self.actions["check_updates"])
-        help_menu.addSeparator()
         help_menu.addAction(self.actions["about"])
 
     def _build_statusbar(self) -> None:
@@ -626,25 +613,6 @@ class MainWindow(QMainWindow):
         self.settings_controller.connection_succeeded.connect(self._on_dsh_test_succeeded)
         self.settings_controller.connection_failed.connect(self._on_dsh_test_failed)
         self.settings_controller.connection_finished.connect(self._on_dsh_test_finished)
-        self.update_controller.started.connect(self._on_update_check_started)
-        self.update_controller.result_ready.connect(self._on_update_check_result)
-        self.update_controller.failed.connect(self._on_update_check_failed)
-        self.update_controller.finished.connect(self._on_update_check_finished)
-        self.update_controller.config_changed.connect(self._on_update_config_changed)
-        self.update_download_controller.started.connect(self._on_update_download_started)
-        self.update_download_controller.progress_changed.connect(
-            self._on_update_download_progress
-        )
-        self.update_download_controller.succeeded.connect(
-            self._on_update_download_succeeded
-        )
-        self.update_download_controller.failed.connect(self._on_update_download_failed)
-        self.update_download_controller.cancelled.connect(
-            self._on_update_download_cancelled
-        )
-        self.update_download_controller.finished.connect(
-            self._on_update_download_finished
-        )
         self.editor.dirty_changed.connect(self._on_dirty_changed)
         self.editor.stats_changed.connect(lambda _text: self._refresh_ai_actions())
         self.ai_controller.started.connect(self._on_ai_started)
@@ -713,6 +681,107 @@ class MainWindow(QMainWindow):
         path = QFileDialog.getExistingDirectory(self, "选择小说项目目录", str(start))
         if path:
             self._load_project(Path(path))
+
+    def import_legacy_project(self) -> None:
+        """Create a new project without modifying or trusting derived legacy data."""
+        if self.ai_controller.is_running():
+            QMessageBox.information(
+                self,
+                "AI 任务仍在进行",
+                "请等待当前 AI 任务完成后再导入旧版项目。",
+            )
+            return
+        source = QFileDialog.getExistingDirectory(
+            self,
+            "选择旧版 Novalist 项目文件夹",
+            str(Path.cwd()),
+        )
+        if not source:
+            return
+        try:
+            preview = self.legacy_import_service.preview(Path(source))
+        except (FileNotFoundError, LegacyProjectImportError, OSError, ValueError) as exc:
+            QMessageBox.critical(self, "无法读取旧项目", str(exc))
+            return
+
+        parent = QFileDialog.getExistingDirectory(
+            self,
+            "选择 DeepSonder-PySide6 新项目存放目录",
+            str(Path(source).parent),
+        )
+        if not parent:
+            return
+        name, accepted = QInputDialog.getText(
+            self,
+            "确认新项目名称",
+            "作品名称：",
+            text=preview.suggested_name,
+        )
+        if not accepted or not name.strip():
+            return
+        author, accepted = QInputDialog.getText(
+            self,
+            "确认作者",
+            "作者（可留空）：",
+            text=preview.suggested_author,
+        )
+        if not accepted:
+            return
+
+        target = Path(parent) / sanitize_filename(name.strip())
+        confirmation = QMessageBox(self)
+        confirmation.setIcon(QMessageBox.Icon.Question)
+        confirmation.setWindowTitle("确认导入旧版项目")
+        confirmation.setText(
+            f"将创建新项目“{name.strip()}”，导入 {len(preview.plan.chapters)} 个章节。"
+        )
+        confirmation.setInformativeText(
+            "仅复制项目名称、作者和按顺序排列的章节正文 Markdown。\n"
+            "不会导入旧记忆、人物识别、设定、关系图、AI 结果、缓存、更新状态或回收站；"
+            "旧项目不会被修改。"
+        )
+        confirmation.setDetailedText(
+            f"旧项目：{preview.plan.source_root}\n新项目：{target}"
+        )
+        continue_button = confirmation.addButton(
+            "创建新项目",
+            QMessageBox.ButtonRole.AcceptRole,
+        )
+        cancel_button = confirmation.addButton(QMessageBox.StandardButton.Cancel)
+        confirmation.setDefaultButton(cancel_button)
+        confirmation.exec()
+        if confirmation.clickedButton() is not continue_button:
+            return
+        if not self._save_if_dirty():
+            return
+
+        try:
+            project = self.legacy_import_service.create_project(
+                Path(parent),
+                preview,
+                name=name.strip(),
+                author=author.strip(),
+            )
+            self.project_session.set_project(project)
+            self.project_lifecycle_controller.remember_project(project.root)
+        except FileExistsError as exc:
+            QMessageBox.warning(self, "项目已存在", f"目标目录已经存在：\n{exc}")
+            return
+        except (LegacyProjectImportError, OSError, RuntimeError, ValueError) as exc:
+            QMessageBox.critical(self, "导入失败", str(exc))
+            return
+
+        self._show_route("dashboard")
+        chapters = project.list_chapters()
+        if chapters:
+            self.left_panel.select_path(chapters[0])
+        self.status_message.setText(f"已导入 {len(chapters)} 章 · 旧项目保持不变")
+        QMessageBox.information(
+            self,
+            "导入完成",
+            "已创建新的 DeepSonder-PySide6 项目。\n"
+            "故事记忆和人物识别数据为空，可在需要时从正文重新提取。",
+        )
 
     def _load_project(self, path: Path, quiet: bool = False) -> bool:
         try:
@@ -1493,7 +1562,6 @@ class MainWindow(QMainWindow):
 
     def _on_settings_changed(self, config: dict, message: str) -> None:
         self.config = dict(config)
-        self.update_controller.set_config(self.config)
         self.project_lifecycle_controller.set_config(self.config)
         self.ai_workflow_controller.set_config(self.config)
         self.appearance_controller.apply(self.config)
@@ -1518,13 +1586,6 @@ class MainWindow(QMainWindow):
     def _on_dsh_test_finished(self) -> None:
         self.settings_page.test_button.setEnabled(True)
 
-    def check_for_updates(self) -> None:
-        if (
-            not self.update_controller.check(manual=True)
-            and self.update_controller.is_running()
-        ):
-            self.status_message.setText("更新检查已在进行中")
-
     def show_about(self) -> None:
         try:
             version = load_current_version()
@@ -1533,10 +1594,10 @@ class MainWindow(QMainWindow):
             version_text = "版本未知"
         QMessageBox.information(
             self,
-            "关于 Novalist",
-            f"Novalist {version_text}\n\n"
+            "关于 DeepSonder",
+            f"DeepSonder-PySide6 {version_text}\n\n"
             "本地优先的长篇小说创作工具。\n"
-            "项目主页：https://github.com/xiauho/novalist",
+            "当前为独立测试系列，不自动安装旧版更新包。",
         )
 
     def _on_update_check_started(self, manual: bool) -> None:
@@ -1870,7 +1931,8 @@ class MainWindow(QMainWindow):
             self._load_project(last, quiet=True)
 
     def _update_window_title(self) -> None:
-        self.setWindowTitle("Novalist")
+        suffix = f" — {self.project.name}" if self.project else ""
+        self.setWindowTitle(f"DeepSonder-PySide6{suffix}")
 
     @staticmethod
     def _safe_name(value: str) -> str:
@@ -1878,7 +1940,7 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _safe_project_path(value: object) -> Path | None:
-        """Return a readable Novalist project path without leaking OS errors."""
+        """Return a readable DeepSonder project path without leaking OS errors."""
         return ProjectLifecycleController.safe_project_path(value)
 
     def closeEvent(self, event: QCloseEvent) -> None:
@@ -1895,14 +1957,6 @@ class MainWindow(QMainWindow):
                 return
         if self.ai_controller.is_running():
             QMessageBox.information(self, "AI 任务仍在进行", "请等待当前 AI 任务完成后再退出，以免丢失生成结果。")
-            event.ignore()
-            return
-        if self.update_controller.is_running():
-            self.status_message.setText("更新检查仍在进行，请稍候再退出")
-            event.ignore()
-            return
-        if self.update_download_controller.is_running():
-            self.status_message.setText("更新下载仍在进行，请先取消或等待完成")
             event.ignore()
             return
         self.ai_engine_controller.cleanup()

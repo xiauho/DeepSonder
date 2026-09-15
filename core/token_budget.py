@@ -1,7 +1,7 @@
 """Conservative token estimates for bounded AI task construction.
 
 DeepSeek Harness owns the selected model and does not currently expose that
-model's tokenizer through the headless contract.  Novalist therefore uses a
+model's tokenizer through the headless contract.  DeepSonder therefore uses a
 deliberately conservative, deterministic estimator.  It is an admission and
 diagnostic aid, not a claim about provider billing tokens.
 """
@@ -26,7 +26,7 @@ _ASCII_WORD = re.compile(r"[A-Za-z0-9_]+")
 
 @dataclass(frozen=True)
 class TokenBudget:
-    """One explicit Novalist-side input ceiling and reserved model capacity."""
+    """One explicit DeepSonder-side input ceiling and reserved model capacity."""
 
     input_limit: int = DEFAULT_INPUT_TOKEN_BUDGET
     runtime_reserve: int = DEFAULT_RUNTIME_RESERVE_TOKENS

@@ -62,7 +62,7 @@ class ProjectService:
         except (OSError, RuntimeError) as exc:
             raise ValueError(f"项目路径无效：{candidate}") from exc
         if not self.is_project_path(resolved):
-            raise ValueError(f"该目录不是有效的 Novalist 创作项目：\n{resolved}")
+            raise ValueError(f"该目录不是有效的 DeepSonder-PySide6 创作项目：\n{resolved}")
         return resolved
 
     def safe_project_path(self, value: object) -> Path | None:
