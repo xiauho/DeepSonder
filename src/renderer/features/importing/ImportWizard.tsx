@@ -34,7 +34,10 @@ export function ImportWizard(props: ImportWizardProps) {
     if (!result.ok) { onError(result.error); return; }
     if (result.value === null) return;
     setPlan(result.value);
-    if (!name) setName(result.value.sourceLabel.replace(/\.(md|markdown|txt)$/i, ""));
+    if (!name) setName(result.value.suggestedName);
+    if (!author && result.value.sourceKind === "novalist_v1_manuscript") {
+      setAuthor(result.value.suggestedAuthor);
+    }
   };
 
   const commit = async (event: FormEvent) => {

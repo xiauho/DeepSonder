@@ -1439,6 +1439,8 @@ def manuscript_import_plan_dto(plan: ManuscriptImportPlan) -> dict[str, Any]:
     return {
         "sourceLabel": Path(plan.source_path).name,
         "sourceKind": plan.source_kind,
+        "suggestedName": plan.suggested_name,
+        "suggestedAuthor": plan.suggested_author,
         "digest": plan.digest,
         "totalSourceBytes": plan.total_source_bytes,
         "chapters": [

@@ -1454,6 +1454,8 @@ function isOpenedProjectV2(value: unknown): value is OpenedProjectV2 {
 function isManuscriptImportPlan(value: unknown): value is ManuscriptImportPlan {
   return isRecord(value) && isNonBlankString(value.sourceLabel) &&
     (value.sourceKind === "novalist_v1_manuscript" || value.sourceKind === "external_manuscript") &&
+    isNonBlankString(value.suggestedName) && value.suggestedName.length <= 200 &&
+    typeof value.suggestedAuthor === "string" && value.suggestedAuthor.length <= 500 &&
     isNonBlankString(value.digest) && typeof value.totalSourceBytes === "number" &&
     Array.isArray(value.chapters) && value.chapters.length > 0 && value.chapters.length <= 2_000 &&
     value.chapters.every((item) => isRecord(item) && isNonBlankString(item.chapterId) &&

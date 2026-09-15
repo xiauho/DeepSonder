@@ -72,6 +72,8 @@ export interface ImportWarning {
 export interface ManuscriptImportPlan {
   sourceLabel: string;
   sourceKind: "novalist_v1_manuscript" | "external_manuscript";
+  suggestedName: string;
+  suggestedAuthor: string;
   digest: string;
   totalSourceBytes: number;
   chapters: ImportChapterPreview[];
