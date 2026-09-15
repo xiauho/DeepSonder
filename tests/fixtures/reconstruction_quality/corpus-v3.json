@@ -1,0 +1,113 @@
+{
+  "schema_version": 3,
+  "corpus_id": "novalist-synthetic-reconstruction-v3",
+  "privacy": {"synthetic": true, "contains_personal_data": false},
+  "quality_gates": {
+    "local": {
+      "entities": {"precision": 0.95, "recall": 0.75, "f1": 0.85},
+      "relations": {"precision": 0.95, "recall": 0.7, "f1": 0.8},
+      "worlds": {"precision": 0.95, "recall": 0.45, "f1": 0.6},
+      "character_fields": {"precision": 0.95, "recall": 0.45, "f1": 0.6},
+      "events": {"precision": 0.95, "recall": 0.45, "f1": 0.6}
+    },
+    "combined": {
+      "entities": {"precision": 0.95, "recall": 0.95, "f1": 0.95},
+      "relations": {"precision": 0.75, "recall": 0.95, "f1": 0.85},
+      "worlds": {"precision": 0.95, "recall": 0.95, "f1": 0.95},
+      "character_fields": {"precision": 0.95, "recall": 0.95, "f1": 0.95},
+      "events": {"precision": 0.95, "recall": 0.95, "f1": 0.95}
+    }
+  },
+  "cases": [
+    {
+      "case_id": "explicit-markers",
+      "chapters": [{"chapter_id": "chapter_0001", "content": "# 信使\n\n[[人物:林砚]] [[人物:苏乔]] [[关系:林砚|调查搭档|苏乔]]\n"}],
+      "expected": {"entities": ["林砚", "苏乔"], "relations": [{"source": "林砚", "target": "苏乔", "label": "调查搭档"}], "worlds": [], "character_fields": [], "events": []},
+      "recorded_enhanced": {"entities": [], "relations": [], "worlds": [], "character_fields": [], "events": []}
+    },
+    {
+      "case_id": "action-speakers",
+      "chapters": [{"chapter_id": "chapter_0001", "content": "# 门廊\n\n林舟拆开信封。苏棠低声说：先别开门。\n"}],
+      "expected": {"entities": ["林舟", "苏棠"], "relations": [], "worlds": [], "character_fields": [], "events": []},
+      "recorded_enhanced": {"entities": [], "relations": [], "worlds": [], "character_fields": [], "events": []}
+    },
+    {
+      "case_id": "natural-relation",
+      "chapters": [{"chapter_id": "chapter_0001", "content": "# 旧友\n\n周宁是许澄的朋友。\n"}],
+      "expected": {"entities": ["周宁", "许澄"], "relations": [{"source": "周宁", "target": "许澄", "label": "朋友"}], "worlds": [], "character_fields": [], "events": []},
+      "recorded_enhanced": {"entities": [], "relations": [], "worlds": [], "character_fields": [], "events": []}
+    },
+    {
+      "case_id": "semantic-enhancement",
+      "chapters": [{"chapter_id": "chapter_0001", "content": "# 对峙\n\n闻溪凝视着白榆，白榆悄悄按住刀柄。\n"}],
+      "expected": {"entities": ["闻溪", "白榆"], "relations": [{"source": "白榆", "target": "闻溪", "label": "警惕"}], "worlds": [], "character_fields": [], "events": []},
+      "recorded_enhanced": {"entities": [{"name": "闻溪", "confidence": 0.76}, {"name": "白榆", "confidence": 0.76}], "relations": [{"source": "白榆", "target": "闻溪", "label": "警惕", "confidence": 0.72}], "worlds": [], "character_fields": [], "events": []}
+    },
+    {
+      "case_id": "negative-weather",
+      "chapters": [{"chapter_id": "chapter_0001", "content": "# 雨夜\n\n雨落在屋檐上，空巷里只有风声。\n"}],
+      "expected": {"entities": [], "relations": [], "worlds": [], "character_fields": [], "events": []},
+      "recorded_enhanced": {"entities": [], "relations": [], "worlds": [], "character_fields": [], "events": []}
+    },
+    {
+      "case_id": "duplicate-and-conflict",
+      "chapters": [{"chapter_id": "chapter_0001", "content": "# 同盟\n\n[[人物:季川]] [[人物:秦澜]] [[关系:季川|盟友|秦澜]]\n"}],
+      "expected": {"entities": ["季川", "秦澜"], "relations": [{"source": "季川", "target": "秦澜", "label": "盟友"}], "worlds": [], "character_fields": [], "events": []},
+      "recorded_enhanced": {"entities": [{"name": "季川", "confidence": 0.76}, {"name": "秦澜", "confidence": 0.76}], "relations": [{"source": "季川", "target": "秦澜", "label": "盟友", "confidence": 0.76}, {"source": "秦澜", "target": "季川", "label": "敌对", "confidence": 0.62}], "worlds": [], "character_fields": [], "events": []}
+    },
+    {
+      "case_id": "explicit-structured-knowledge",
+      "chapters": [{"chapter_id": "chapter_0001", "content": "# 雾港\n\n[[人物:顾遥]] [[角色字段:顾遥|身份|巡灯员]] [[世界:雾港|地点|终年被浓雾笼罩的港城]] [[事件:第一夜|点亮灯塔|顾遥在雾港点亮灯塔|顾遥|雾港]]\n"}],
+      "expected": {"entities": ["顾遥"], "relations": [], "worlds": [{"name": "雾港", "category": "地点", "description": "终年被浓雾笼罩的港城"}], "character_fields": [{"character": "顾遥", "field": "身份", "value": "巡灯员"}], "events": [{"time_label": "第一夜", "title": "点亮灯塔", "description": "顾遥在雾港点亮灯塔", "characters": ["顾遥"], "worlds": ["雾港"]}]},
+      "recorded_enhanced": {"entities": [], "relations": [], "worlds": [], "character_fields": [], "events": []}
+    },
+    {
+      "case_id": "enhanced-structured-knowledge",
+      "chapters": [{"chapter_id": "chapter_0001", "content": "# 地下城\n\n顾遥身为守门人，驻守在由黑曜石建成的沉星城。\n"}],
+      "expected": {"entities": ["顾遥"], "relations": [], "worlds": [{"name": "沉星城", "category": "地点", "description": "由黑曜石建成的地下城"}], "character_fields": [{"character": "顾遥", "field": "身份", "value": "守门人"}], "events": [{"time_label": "抵达当日", "title": "驻守沉星城", "description": "顾遥开始驻守沉星城", "characters": ["顾遥"], "worlds": ["沉星城"]}]},
+      "recorded_enhanced": {"entities": [{"name": "顾遥", "confidence": 0.76}], "relations": [], "worlds": [{"name": "沉星城", "category": "地点", "description": "由黑曜石建成的地下城", "confidence": 0.74}], "character_fields": [{"character": "顾遥", "field": "身份", "value": "守门人", "confidence": 0.74}], "events": [{"time_label": "抵达当日", "title": "驻守沉星城", "description": "顾遥开始驻守沉星城", "characters": ["顾遥"], "worlds": ["沉星城"], "confidence": 0.74}]}
+    },
+    {
+      "case_id": "historical-courtesy-name",
+      "chapters": [{"chapter_id": "chapter_0001", "content": "# 朝会\n\n萧景，字子衡，在丹墀前与慕容雪结为政治盟友。\n"}],
+      "local_expected": {"entities": [], "relations": [], "worlds": [], "character_fields": [], "events": []},
+      "expected": {"entities": ["萧景", "慕容雪"], "relations": [{"source": "萧景", "target": "慕容雪", "label": "政治盟友"}], "worlds": [], "character_fields": [{"character": "萧景", "field": "身份", "value": "朝臣"}], "events": [{"time_label": "朝会", "title": "结盟", "description": "萧景与慕容雪在朝会上结盟", "characters": ["萧景", "慕容雪"], "worlds": []}]},
+      "recorded_enhanced": {"entities": [{"name": "萧景", "confidence": 0.82}, {"name": "慕容雪", "confidence": 0.82}], "relations": [{"source": "萧景", "target": "慕容雪", "label": "政治盟友", "confidence": 0.79}], "worlds": [], "character_fields": [{"character": "萧景", "field": "身份", "value": "朝臣", "confidence": 0.73}], "events": [{"time_label": "朝会", "title": "结盟", "description": "萧景与慕容雪在朝会上结盟", "characters": ["萧景", "慕容雪"], "worlds": [], "confidence": 0.78}]}
+    },
+    {
+      "case_id": "science-fiction-station",
+      "chapters": [{"chapter_id": "chapter_0001", "content": "# 近星点\n\n导航员叶穹抵达环日站，发现这座空间站依靠三组聚变环维持轨道。\n"}],
+      "local_expected": {"entities": [], "relations": [], "worlds": [], "character_fields": [], "events": []},
+      "expected": {"entities": ["叶穹"], "relations": [], "worlds": [{"name": "环日站", "category": "空间站", "description": "依靠三组聚变环维持轨道"}], "character_fields": [{"character": "叶穹", "field": "身份", "value": "导航员"}], "events": [{"time_label": "抵达日", "title": "抵达环日站", "description": "叶穹抵达环日站", "characters": ["叶穹"], "worlds": ["环日站"]}]},
+      "recorded_enhanced": {"entities": [{"name": "叶穹", "confidence": 0.84}], "relations": [], "worlds": [{"name": "环日站", "category": "空间站", "description": "依靠三组聚变环维持轨道", "confidence": 0.8}], "character_fields": [{"character": "叶穹", "field": "身份", "value": "导航员", "confidence": 0.82}], "events": [{"time_label": "抵达日", "title": "抵达环日站", "description": "叶穹抵达环日站", "characters": ["叶穹"], "worlds": ["环日站"], "confidence": 0.8}]}
+    },
+    {
+      "case_id": "multi-chapter-state-change",
+      "chapters": [{"chapter_id": "chapter_0001", "content": "# 失踪\n\n程墨与谢遥一同进入北塔。\n"}, {"chapter_id": "chapter_0002", "content": "# 归来\n\n三日后，程墨独自归来，谢遥仍然失踪。\n"}],
+      "local_expected": {"entities": ["程墨", "谢遥"], "relations": [], "worlds": [], "character_fields": [], "events": []},
+      "expected": {"entities": ["程墨", "谢遥"], "relations": [{"source": "程墨", "target": "谢遥", "label": "同行者"}], "worlds": [{"name": "北塔", "category": "地点", "description": "程墨与谢遥进入的高塔"}], "character_fields": [{"character": "谢遥", "field": "状态", "value": "失踪"}], "events": [{"time_label": "第一日", "title": "进入北塔", "description": "程墨与谢遥进入北塔", "characters": ["程墨", "谢遥"], "worlds": ["北塔"]}, {"time_label": "三日后", "title": "程墨归来", "description": "程墨独自归来而谢遥仍然失踪", "characters": ["程墨", "谢遥"], "worlds": []}]},
+      "recorded_enhanced": {"entities": [{"name": "程墨", "confidence": 0.81}, {"name": "谢遥", "confidence": 0.81}], "relations": [{"source": "程墨", "target": "谢遥", "label": "同行者", "confidence": 0.72}], "worlds": [{"name": "北塔", "category": "地点", "description": "程墨与谢遥进入的高塔", "confidence": 0.75}], "character_fields": [{"character": "谢遥", "field": "状态", "value": "失踪", "confidence": 0.86}], "events": [{"time_label": "第一日", "title": "进入北塔", "description": "程墨与谢遥进入北塔", "characters": ["程墨", "谢遥"], "worlds": ["北塔"], "confidence": 0.78}, {"time_label": "三日后", "title": "程墨归来", "description": "程墨独自归来而谢遥仍然失踪", "characters": ["程墨", "谢遥"], "worlds": [], "confidence": 0.83}]}
+    },
+    {
+      "case_id": "ensemble-directed-relations",
+      "chapters": [{"chapter_id": "chapter_0001", "content": "# 远征队\n\n队长韩青信任医师宁晚，宁晚则负责保护少年洛川。\n"}],
+      "local_expected": {"entities": [], "relations": [], "worlds": [], "character_fields": [], "events": []},
+      "expected": {"entities": ["韩青", "宁晚", "洛川"], "relations": [{"source": "韩青", "target": "宁晚", "label": "信任"}, {"source": "宁晚", "target": "洛川", "label": "保护"}], "worlds": [], "character_fields": [{"character": "韩青", "field": "身份", "value": "队长"}, {"character": "宁晚", "field": "身份", "value": "医师"}], "events": []},
+      "recorded_enhanced": {"entities": [{"name": "韩青", "confidence": 0.8}, {"name": "宁晚", "confidence": 0.8}, {"name": "洛川", "confidence": 0.78}], "relations": [{"source": "韩青", "target": "宁晚", "label": "信任", "confidence": 0.78}, {"source": "宁晚", "target": "洛川", "label": "保护", "confidence": 0.78}], "worlds": [], "character_fields": [{"character": "韩青", "field": "身份", "value": "队长", "confidence": 0.8}, {"character": "宁晚", "field": "身份", "value": "医师", "confidence": 0.8}], "events": []}
+    },
+    {
+      "case_id": "pronoun-continuity",
+      "chapters": [{"chapter_id": "chapter_0001", "content": "# 借伞\n\n许棠把伞递给江屿。他接过伞，却没有向她道谢。\n"}],
+      "local_expected": {"entities": [], "relations": [], "worlds": [], "character_fields": [], "events": []},
+      "expected": {"entities": ["许棠", "江屿"], "relations": [{"source": "许棠", "target": "江屿", "label": "帮助"}], "worlds": [], "character_fields": [], "events": []},
+      "recorded_enhanced": {"entities": [{"name": "许棠", "confidence": 0.79}, {"name": "江屿", "confidence": 0.79}], "relations": [{"source": "许棠", "target": "江屿", "label": "帮助", "confidence": 0.7}], "worlds": [], "character_fields": [], "events": []}
+    },
+    {
+      "case_id": "negative-place-and-organization",
+      "chapters": [{"chapter_id": "chapter_0001", "content": "# 公告\n\n北境王国发布了新的航路条例，远洋协会将在冬季关闭旧码头。\n"}],
+      "local_expected": {"entities": [], "relations": [], "worlds": [], "character_fields": [], "events": []},
+      "expected": {"entities": [], "relations": [], "worlds": [], "character_fields": [], "events": []},
+      "recorded_enhanced": {"entities": [], "relations": [], "worlds": [], "character_fields": [], "events": []}
+    }
+  ]
+}

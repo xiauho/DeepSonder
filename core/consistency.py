@@ -1,0 +1,72 @@
+"""Consistency check orchestration."""
+
+from __future__ import annotations
+
+import threading
+from dataclasses import replace
+
+from .context_budget import build_ai_context
+from .context_profiles import CONSISTENCY_CONTEXT_PROFILE, REPAIR_CONTEXT_PROFILE
+from .dsh_client import DSHClient
+from .project import NovelProject
+from .prompt_builder import build_check_prompt, build_consistency_repair_prompt
+
+
+def run_consistency_check(
+    project: NovelProject,
+    chapter_id: str,
+    dsh: DSHClient,
+    cancel_event: threading.Event | None = None,
+    *,
+    history_remote_enabled: bool = True,
+) -> str:
+    prompt_budget = dsh.prompt_build_budget()
+    context = build_ai_context(
+        project,
+        chapter_id,
+        profile=CONSISTENCY_CONTEXT_PROFILE,
+    )
+    context = replace(context, history_remote_enabled=history_remote_enabled)
+    prompt = build_check_prompt(
+        project,
+        chapter_id,
+        context=context,
+        prompt_budget=prompt_budget,
+    )
+    generate_options = {"cancel_event": cancel_event} if cancel_event is not None else {}
+    return dsh.generate(
+        prompt.system_prompt,
+        prompt.user_prompt,
+        context_report=prompt.report,
+        **generate_options,
+    )
+
+
+def run_consistency_repair(
+    project: NovelProject,
+    chapter_id: str,
+    issue: dict,
+    dsh: DSHClient,
+    cancel_event: threading.Event | None = None,
+):
+    prompt_budget = dsh.prompt_build_budget()
+    context = build_ai_context(
+        project,
+        chapter_id,
+        profile=REPAIR_CONTEXT_PROFILE,
+        relevance_query=str(issue),
+    )
+    prompt = build_consistency_repair_prompt(
+        project,
+        chapter_id,
+        issue,
+        context=context,
+        prompt_budget=prompt_budget,
+    )
+    generate_options = {"cancel_event": cancel_event} if cancel_event is not None else {}
+    return dsh.generate_json(
+        prompt.system_prompt,
+        prompt.user_prompt,
+        context_report=prompt.report,
+        **generate_options,
+    )

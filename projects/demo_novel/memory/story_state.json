@@ -1,0 +1,29 @@
+{
+  "current_chapter": 1,
+  "current_location": "青云宗后山",
+  "characters": {
+    "林夜": {
+      "location": "青云宗后山",
+      "state": "刚醒来，轻微头痛",
+      "power_level": "炼气三层",
+      "items": [
+        "残缺古剑"
+      ],
+      "relations": {
+        "苏婉": "初识"
+      }
+    },
+    "苏婉": {
+      "location": "青云宗后山",
+      "state": "正常",
+      "power_level": "筑基初期",
+      "items": [],
+      "relations": {
+        "林夜": "初识"
+      }
+    }
+  },
+  "foreshadowing": [
+    "残缺古剑的来历"
+  ]
+}

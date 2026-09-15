@@ -1,0 +1,104 @@
+{
+  "name": "deepsonder-electron",
+  "version": "0.1.0-beta",
+  "private": true,
+  "description": "DeepSonder Electron desktop shell",
+  "author": "DeepSonder contributors",
+  "type": "module",
+  "main": "dist/electron/main/index.js",
+  "scripts": {
+    "clean": "node scripts/clean.mjs",
+    "typecheck": "tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
+    "build": "npm run clean && npm run typecheck && tsc -p tsconfig.electron.json && vite build && npm run check:bundles",
+    "check:bundles": "node scripts/check-renderer-bundles.mjs",
+    "start": "npm run build && electron .",
+    "self-test": "npm run build && electron . --self-test",
+    "capture": "npm run build && electron . --self-test --capture-preview",
+    "test": "npm run build && node --test electron-tests/*.test.mjs",
+    "benchmark:workspace": "npm run build && node scripts/benchmark-large-workspace.mjs",
+    "benchmark:renderer": "npm run build && electron . --self-test --performance-report=build/renderer-performance.json",
+    "package:dir": "npm run build && electron-builder --dir --win --x64 --publish never",
+    "package:win": "npm run build && electron-builder --win nsis zip --x64 --publish never"
+  },
+  "dependencies": {
+    "@codemirror/commands": "6.11.0",
+    "@codemirror/lang-markdown": "6.5.2",
+    "@codemirror/language": "6.12.4",
+    "@codemirror/search": "6.7.2",
+    "@codemirror/view": "6.43.11",
+    "cytoscape": "3.34.3",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.4",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "electron": "44.3.0",
+    "electron-builder": "26.15.3",
+    "typescript": "7.0.2",
+    "vite": "8.2.2"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "build": {
+    "appId": "io.github.xiauho.deepsonder.electron",
+    "productName": "DeepSonder-Electron",
+    "asar": true,
+    "directories": {
+      "output": "release",
+      "buildResources": "assets"
+    },
+    "files": [
+      "dist/**/*",
+      "generated/release-trust.json",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "dist/electron-sidecar/DeepSonderElectronSidecar.exe",
+        "to": "sidecar/DeepSonderElectronSidecar.exe"
+      },
+      {
+        "from": "assets/app_icon.ico",
+        "to": "assets/app_icon.ico"
+      },
+      {
+        "from": "LICENSE",
+        "to": "legal/LICENSE"
+      },
+      {
+        "from": "PRIVACY.md",
+        "to": "legal/PRIVACY.md"
+      },
+      {
+        "from": "THIRD_PARTY_NOTICES.md",
+        "to": "legal/THIRD_PARTY_NOTICES.md"
+      },
+      {
+        "from": "licenses",
+        "to": "legal/licenses"
+      }
+    ],
+    "artifactName": "DeepSonder-Electron-v${version}-windows-${arch}.${ext}",
+    "win": {
+      "icon": "assets/app_icon.ico",
+      "target": [
+        "nsis",
+        "zip"
+      ]
+    },
+    "nsis": {
+      "artifactName": "DeepSonder-Electron-v${version}-windows-${arch}-setup.${ext}",
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "deleteAppDataOnUninstall": false
+    }
+  }
+}

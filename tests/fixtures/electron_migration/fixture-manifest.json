@@ -1,0 +1,65 @@
+{
+  "fixture_schema_version": 1,
+  "fixture_version": 1,
+  "project_directory": "golden_project",
+  "legacy_import_contract": {
+    "source_format": "novalist-project-v1",
+    "import_project_fields": [
+      "name",
+      "author"
+    ],
+    "chapter_sources": [
+      "outline/chapters/chapter_01.md",
+      "outline/chapters/chapter_02.md"
+    ],
+    "excluded_prefixes": [
+      ".novalist/",
+      "canon/",
+      "memory/",
+      "writing/"
+    ],
+    "excluded_files": [
+      "outline/main_arc.md",
+      "outline/future_plan.md"
+    ]
+  },
+  "locked_files_sha256": {
+    ".novalist/project.json": "e066c3ba4d746ff34b1eede23a4d2d6959fadcb61a40f0c39ddd1129e327ea13",
+    "canon/characters/林砚.md": "1a3ccf25d8db588e9f0f5352a57201535017a5aa2d7cfcad5d945b43c5696422",
+    "canon/characters/苏乔.md": "928221685af06bca0a2b312b31547a926b07e11ed91cb6853773fde82652ed79",
+    "canon/power/_核心规则.md": "1976af74b86dd23e9717a99a02550cf693590d34e70ba46fa1fccd3940c4f43c",
+    "canon/power/回声现象.md": "6f0f1e9408a34b984bcf7583d06c55c7acdf7b940b4bd8d0703c84bbcf558314",
+    "canon/system_registry.json": "9d115e23ce8028a08f08214d5f86d8ec346979352325b2975b9dc9a427960a90",
+    "canon/timeline.md": "77a5725cd9a18b708ef11d85a5b329eaa7eb66017d0e37b82414108386d53e89",
+    "canon/world/雾港.md": "87f16c525cb7628faf1c9774b6df9c144f4ef00f24f195552387e232888e8ea1",
+    "memory/chapter_summaries.json": "30c1ac5341eaf528d9d566d10c3b5d022c69849d6052e8633c0bc0aadf51ae4d",
+    "memory/foreshadowing.json": "8100284bbcebc5e695d33cf585dbad18fd3c2a0219d7cacecb3b3ee96ed91e7b",
+    "memory/story_state.json": "5468270e14b599aa1e0476ce73701628333e950d2f4feb89f7c62b40efbe2d2e",
+    "outline/chapters/chapter_01.md": "6ed0b2b93062a10830ce03862f8661bb3db91a9f489779678fa5788e151f90ea",
+    "outline/chapters/chapter_02.md": "21c2aa13cfdfabdd8181f55983d1be6fabe56e2bcd6903f8ec5783680911208d",
+    "outline/future_plan.md": "92209a91b4cc43c686c71c74f19c44799c7300c1154a0a5dabfc3512530d3975",
+    "outline/main_arc.md": "24d1d277cdd43103ef143cc1e47668d6d5ffd8a2c304fd8b4e5a3880843e15c2",
+    "project.json": "7c51231a7428612b711662d3f3c9d705a3f6781b09b6076cd9187867487ff7e6",
+    "writing/style_guide.md": "7183f9a4fc636b6132857826c88ac3d19c449f1775a2bcb98102c8d7f2b243d2"
+  },
+  "expected": {
+    "project_schema_version": 1,
+    "project_name": "迁移基线：雾港来信",
+    "chapter_ids": [
+      "chapter_01",
+      "chapter_02"
+    ],
+    "character_names": [
+      "林砚",
+      "苏乔"
+    ],
+    "current_chapter": 2,
+    "open_foreshadowing": 1,
+    "resolved_foreshadowing": 1,
+    "directed_relationships": [
+      ["林砚", "苏乔", "互相信任的调查搭档"],
+      ["林砚", "白鸥", "身份不明的线人"],
+      ["苏乔", "林砚", "需要保护但可以托付后背的同伴"]
+    ]
+  }
+}
