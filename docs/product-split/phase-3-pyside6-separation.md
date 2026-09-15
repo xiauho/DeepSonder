@@ -29,4 +29,4 @@ PySide6 tags use the `pyside6-v<version>` namespace and produce `DeepSonder-PySi
 - Python tests and packaged executable self-test pass;
 - both `docs/feature-parity.json` files report the import capability consistently.
 
-Repository-history cleanup of duplicated Electron and legacy updater source is intentionally tracked separately from release contents. It does not enter the PySide6 package and should only be removed after an explicit, reviewed deletion approval.
+The duplicated Electron renderer and its migration documentation were removed after explicit approval; their authoritative copies remain in `D:\GitHub-store\DeepSonder`. A small set of historical schema-v2/Sidecar and updater backend files remains for test-history safety after deletion review rejected that wider batch. Those files have no PySide6 entry, CI release job or package dependency and should be removed only in a separately reviewed cleanup.
