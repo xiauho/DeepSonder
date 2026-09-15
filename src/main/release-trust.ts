@@ -50,7 +50,8 @@ export function parseReleaseTrustPolicy(value: unknown): ReleaseTrustPolicy {
 export function loadReleaseTrustPolicy(applicationRoot: string): ReleaseTrustPolicy {
   const policyPath = path.join(applicationRoot, "generated", "release-trust.json");
   try {
-    return parseReleaseTrustPolicy(JSON.parse(readFileSync(policyPath, "utf8")));
+    const encoded = readFileSync(policyPath, "utf8").replace(/^\uFEFF/u, "");
+    return parseReleaseTrustPolicy(JSON.parse(encoded));
   } catch (error) {
     throw new Error(
       `无法加载内嵌发布信任策略：${error instanceof Error ? error.message : String(error)}`,

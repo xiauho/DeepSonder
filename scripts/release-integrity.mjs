@@ -19,7 +19,7 @@ export function publicKeyFingerprint(publicKeyPem) {
 
 export async function validateReleaseManifest(releaseDirectory, manifestPath) {
   const bytes = await readFile(manifestPath);
-  const value = JSON.parse(bytes.toString("utf8"));
+  const value = JSON.parse(bytes.toString("utf8").replace(/^\uFEFF/u, ""));
   if (value?.schema_version !== 4 || value.package_kind !== "electron-only") {
     throw new Error("发布清单不是 Electron-only schema 4。 ");
   }
@@ -77,7 +77,7 @@ export async function signReleaseManifest(manifestPath, privateKeyPath, publicKe
   const privateKey = createPrivateKey(await readFile(privateKeyPath));
   const publicKeyPem = await readFile(publicKeyPath);
   const publicKey = createPublicKey(publicKeyPem);
-  const manifest = JSON.parse(bytes.toString("utf8"));
+  const manifest = JSON.parse(bytes.toString("utf8").replace(/^\uFEFF/u, ""));
   const fingerprint = publicKeyFingerprint(publicKeyPem);
   if (manifest?.signature?.algorithm !== "ed25519" || manifest.signature.key_id !== fingerprint) {
     throw new Error("发布清单中的签名密钥指纹与受信公钥不一致。");
@@ -92,7 +92,7 @@ export async function signReleaseManifest(manifestPath, privateKeyPath, publicKe
 export async function verifyReleaseSignature(manifestPath, publicKeyPath, signaturePath) {
   const bytes = await readFile(manifestPath);
   const publicKeyPem = await readFile(publicKeyPath);
-  const manifest = JSON.parse(bytes.toString("utf8"));
+  const manifest = JSON.parse(bytes.toString("utf8").replace(/^\uFEFF/u, ""));
   if (manifest?.signature?.algorithm !== "ed25519" ||
       manifest.signature.key_id !== publicKeyFingerprint(publicKeyPem)) {
     throw new Error("发布清单不信任所提供的公钥。");

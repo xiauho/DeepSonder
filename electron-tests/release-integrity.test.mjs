@@ -29,7 +29,7 @@ async function fixture(signature) {
     sha256: await sha256File(path.join(directory, name)),
   })));
   const manifestPath = path.join(directory, "release-manifest.json");
-  await writeFile(manifestPath, JSON.stringify({
+  await writeFile(manifestPath, "\uFEFF" + JSON.stringify({
     schema_version: 4,
     package_kind: "electron-only",
     release_tier: "prerelease",
@@ -95,7 +95,7 @@ test("signed metadata rejects a missing source commit", async () => {
     file: "release-manifest.sig",
   });
   try {
-    const manifest = JSON.parse(await readFile(sample.manifestPath, "utf8"));
+    const manifest = JSON.parse((await readFile(sample.manifestPath, "utf8")).replace(/^\uFEFF/u, ""));
     delete manifest.source_commit;
     await writeFile(sample.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
     await assert.rejects(
@@ -110,7 +110,7 @@ test("signed metadata rejects a missing source commit", async () => {
 test("release tier must match the semantic version", async () => {
   const sample = await fixture({ algorithm: "none", reason: "local-rehearsal" });
   try {
-    const manifest = JSON.parse(await readFile(sample.manifestPath, "utf8"));
+    const manifest = JSON.parse((await readFile(sample.manifestPath, "utf8")).replace(/^\uFEFF/u, ""));
     manifest.release_tier = "stable";
     await writeFile(sample.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
     await assert.rejects(

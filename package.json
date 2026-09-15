@@ -58,7 +58,7 @@
     ],
     "extraResources": [
       {
-        "from": "dist/electron-sidecar/DeepSonderElectronSidecar.exe",
+        "from": "generated/sidecar/DeepSonderElectronSidecar.exe",
         "to": "sidecar/DeepSonderElectronSidecar.exe"
       },
       {
