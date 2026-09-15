@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-09-15",
+  "series": {
+    "pyside6": {
+      "product": "DeepSonder-PySide6",
+      "workspace": "D:\\GitHub-store\\novalist"
+    },
+    "electron": {
+      "product": "DeepSonder-Electron",
+      "workspace": "D:\\GitHub-store\\DeepSonder"
+    }
+  },
+  "compatibility_policy": {
+    "legacy_in_place_upgrade": false,
+    "legacy_protocol_compatibility": false,
+    "legacy_project_import": "manuscript_only",
+    "legacy_source_must_remain_unchanged": true
+  },
+  "features": [
+    {
+      "id": "project.create",
+      "requirement": "required",
+      "pyside6": "supported",
+      "electron": "supported"
+    },
+    {
+      "id": "legacy_project.import",
+      "requirement": "required",
+      "pyside6": "pending",
+      "electron": "pending",
+      "note": "Phase 1 freezes the fixture and import boundary; implementation follows after repository separation."
+    },
+    {
+      "id": "chapter.edit",
+      "requirement": "required",
+      "pyside6": "supported",
+      "electron": "supported"
+    },
+    {
+      "id": "memory.extract",
+      "requirement": "required",
+      "pyside6": "supported",
+      "electron": "supported"
+    },
+    {
+      "id": "character.recognize",
+      "requirement": "required",
+      "pyside6": "supported",
+      "electron": "supported"
+    },
+    {
+      "id": "relationship.reconstruct",
+      "requirement": "required",
+      "pyside6": "supported",
+      "electron": "supported"
+    },
+    {
+      "id": "consistency.check",
+      "requirement": "required",
+      "pyside6": "supported",
+      "electron": "supported"
+    },
+    {
+      "id": "ai.expand",
+      "requirement": "required",
+      "pyside6": "supported",
+      "electron": "supported"
+    },
+    {
+      "id": "ai.continue",
+      "requirement": "required",
+      "pyside6": "supported",
+      "electron": "supported"
+    },
+    {
+      "id": "graph.visualization",
+      "requirement": "platform_specific",
+      "pyside6": "basic",
+      "electron": "enhanced"
+    }
+  ]
+}
