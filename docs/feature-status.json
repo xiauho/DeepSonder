@@ -22,7 +22,8 @@
     {
       "id": "memory.extract",
       "requirement": "required",
-      "status": "supported"
+      "status": "supported",
+      "notes": "角色地点支持明确移动表达、地点量词规范化及附近地点指代（需人工确认）；保留前后内外等方位区别；否定、命令、计划和无角色到达依据继续阻断；阻断输出目标、新值与事实锚点。"
     },
     {
       "id": "character.recognize",

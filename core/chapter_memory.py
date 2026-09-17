@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import re
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,7 +27,7 @@ from .token_budget import (
 
 
 MEMORY_SUGGESTION_SCHEMA_VERSION = 2
-MEMORY_PROPOSAL_PROMPT_VERSION = 4
+MEMORY_PROPOSAL_PROMPT_VERSION = 5
 MEMORY_CACHE_SCHEMA_VERSION = 1
 DIGEST_SHARD_SCHEMA_VERSION = 1
 DEFAULT_REDUCE_BATCH_TOKENS = 8_000
@@ -252,7 +253,7 @@ class ChapterMemoryProposal:
             lines.append("\n冲突与警告：")
             for conflict in self.conflicts:
                 lines.append(
-                    f"- [{conflict.severity}] {conflict.description}"
+                    f"- [{conflict.severity}] {conflict.target}：{conflict.description}"
                 )
         return "\n".join(lines)
 
@@ -650,6 +651,8 @@ change 参数约束：
   两类依据可以是不同 fact。不能只凭“一行人”“众人”等匿名群体事实批量复制个人位置。
 - value 只写引用事实能够直接支持的简洁地点名，不得加入未被事实支持的“背风”、
   “歇息”等修饰或动作。
+- “冲到、跑到、赶到、走到、奔至、退到”也属于移动；命令、计划、否定或其他角色到达不能作为本人到达。
+- “那片空地”等指代须同时引用附近描述该地点的事实，优先保留“山门前空地”等精确名称。
 旧状态中以“…”结尾的值是截断展示，不要据此生成覆盖 Patch。
 
 【章节事实或归并片段】
@@ -998,7 +1001,13 @@ def apply_memory_patches(
                     "unsupported_patch",
                     "blocker",
                     target,
-                    "记忆 Patch 引用的事实与目标角色或字段类别不匹配。",
+                    (
+                        f"{patch.subject}的位置更新未通过地点证据校验（拟写入：{patch.value}）。"
+                        "缺少该角色已到达/身处目标地点的依据，或地点指代无法关联。"
+                        "请检查引用事实中的角色、否定/命令表达和地点锚点。"
+                        if patch.kind == "set_character_field" and patch.field == "location"
+                        else "记忆 Patch 引用的事实与目标角色或字段类别不匹配。"
+                    ),
                     patch.evidence_fact_ids,
                     (patch.op_id,),
                 )
@@ -1010,7 +1019,11 @@ def apply_memory_patches(
                     "evidence_value_mismatch",
                     "warning",
                     target,
-                    "Patch 的新值没有直接出现在引用事实中，需要人工确认。",
+                    (
+                        "地点使用了规范化表述或附近事实的指代关联，需要人工确认是否为同一地点。"
+                        if patch.kind == "set_character_field" and patch.field == "location"
+                        else "Patch 的新值没有直接出现在引用事实中，需要人工确认。"
+                    ),
                     patch.evidence_fact_ids,
                     (patch.op_id,),
                 )
@@ -1084,21 +1097,7 @@ def _evidence_supports_patch(
     if patch.kind == "set_current_location":
         candidates = category_candidates
     elif patch.kind == "set_character_field" and patch.field == "location":
-        # A destination can be expressed as a group location while a second
-        # fact proves that the named character is part of that scene. Requiring
-        # both properties on one fact rejected legitimate group movements.
-        subject_candidates = [
-            fact for fact in category_candidates if _fact_mentions_subject(fact, subject)
-        ]
-        location_candidates = [
-            fact
-            for fact in category_candidates
-            if fact.category == "location"
-            or _fact_mentions_location_change(fact)
-        ]
-        if not subject_candidates or not location_candidates:
-            return False, False
-        candidates = category_candidates
+        return _character_location_support(patch, category_candidates)
     else:
         candidates = [
             fact
@@ -1130,26 +1129,107 @@ def _fact_mentions_subject(fact: FactRecord, subject: str) -> bool:
     )
 
 
-def _fact_mentions_location_change(fact: FactRecord) -> bool:
-    text = f"{fact.predicate} {fact.value}".casefold()
-    return any(
-        marker in text
-        for marker in (
-            "抵达",
-            "到达",
-            "来到",
-            "进入",
-            "深入",
-            "撤至",
-            "退至",
-            "迁往",
-            "移至",
-            "停下",
-            "扎营",
-            "驻扎",
-            "休整",
-        )
+_LOCATION_VERBS = r"抵达|到达|来到|进入|深入|撤至|退至|移至|冲到|跑到|赶到|走到|奔至|退到|停下|扎营|驻扎|休整|身处|位于"
+_UNREALIZED_LOCATION = re.compile(
+    r"没有|并未|尚未|未曾|未能|没能|不能|无法|不曾|不要|不得|尚待|不在|不是|"
+    r"(?:未|没)(?:抵达|到达|来到|进入|冲到|跑到|赶到|走到|奔至|退到)|"
+    r"下令|命令|要求|打算|计划|准备|将要|即将|试图|如果|假如|是否|能否|梦见|想象|回忆|曾经|昨日|昨夜"
+)
+
+
+def _normalize_location_phrase(text: str) -> str:
+    """Drop only demonstrative/count classifiers immediately before place nouns.
+
+    Keep directions, names, modifiers, punctuation and clause boundaries intact.
+    This is not fuzzy matching: 山门前那片空地 matches 山门前空地, not 山门后空地.
+    """
+    return re.sub(
+        r"(?:那|这|一)(?:片|块|处|座|个)(?=空地|广场|石阶|山门|营地|码头|大厅|院落|洞口)",
+        "",
+        text.casefold(),
     )
+
+
+def _nearby_location_facts(left: FactRecord, right: FactRecord) -> bool:
+    """Resolve backward local references, never chapter-wide coincidence."""
+    a = re.fullmatch(r"(.+):p(\d+)", left.anchor)
+    b = re.fullmatch(r"(.+):p(\d+)", right.anchor)
+    return bool(a and b and a[1] == b[1] and 0 <= int(a[2]) - int(b[2]) <= 8)
+
+
+def _character_location_support(
+    patch: MemoryPatch, evidence: list[FactRecord]
+) -> tuple[bool, bool]:
+    subject = patch.subject.casefold()
+    destination = str(patch.value).casefold()
+    normalized_destination = _normalize_location_phrase(destination)
+    for fact in evidence:
+        if not _fact_mentions_subject(fact, subject):
+            continue
+        clauses = re.split(r"[，,。；;！!？?\n]", f"{fact.predicate}，{fact.value}")
+        for clause in clauses:
+            if _UNREALIZED_LOCATION.search(clause):
+                continue
+            movement = re.search(_LOCATION_VERBS, clause)
+            if movement:
+                actor = clause[:movement.start()].strip()
+                if re.search(r"看见|看着|目睹|听说|听见|让|命|要求|希望|等待", actor):
+                    continue
+                named_actor = subject in actor
+                implicit_actor = not actor or actor in {"已", "已经", "终于", "随队", "共同"}
+                if not named_actor and not (implicit_actor and fact.subject.casefold() == subject):
+                    continue
+            elif not (fact.category == "location" and fact.subject.casefold() == subject
+                      and clause == fact.value and not _UNREALIZED_LOCATION.search(fact.predicate)
+                      and not re.search(_LOCATION_VERBS, fact.predicate)):
+                continue
+            # Bare values must not bypass a negated or merely planned predicate.
+            if clause == fact.value and _UNREALIZED_LOCATION.search(fact.predicate):
+                continue
+            if destination in clause:
+                return True, True
+            if normalized_destination in _normalize_location_phrase(clause):
+                return True, False
+            # Some extractors put the destination in value, with only a verb
+            # in predicate (e.g. "抵达" / "北港").
+            if clause == fact.predicate and movement and destination == fact.value.casefold():
+                return True, True
+            if (clause == fact.predicate and movement
+                    and normalized_destination == _normalize_location_phrase(fact.value)):
+                return True, False
+            for place in evidence:
+                place_text = f"{place.subject} {place.predicate} {place.value}".casefold()
+                qualified_destination = any(
+                    destination.endswith(noun) and len(destination) > len(noun)
+                    and destination[:-len(noun)] in place.subject
+                    and noun in f"{place.predicate} {place.value}"
+                    for noun in ("山门", "广场", "码头", "营地", "大厅", "洞口")
+                )
+                if (place is fact or not (
+                        normalized_destination in _normalize_location_phrase(place_text)
+                        or qualified_destination)
+                        or not _nearby_location_facts(fact, place)
+                        or _UNREALIZED_LOCATION.search(place_text)):
+                    continue
+                shared_place = any(noun in clause and noun in place_text for noun in (
+                    "空地", "广场", "石阶", "山门", "营地", "码头", "大厅", "院落", "洞口",
+                ))
+                # Require a deictic/bare destination, not two explicitly
+                # distinct places such as 东面空地 and 西面空地.
+                if movement:
+                    destination_phrase = clause[movement.end():].strip()
+                    shared_place = shared_place and any(
+                        destination_phrase == prefix + noun
+                        or destination_phrase.startswith("时" + prefix + noun)
+                        or destination_phrase.startswith("后" + prefix + noun)
+                        for prefix in ("", "那片", "这片", "那处", "这处", "那座", "这座")
+                        for noun in ("空地", "广场", "石阶", "山门", "营地", "码头", "大厅", "院落", "洞口")
+                    )
+                shared_group = "随队" in clause and place.subject in {"一行人", "众人", "队伍"}
+                if shared_place or shared_group:
+                    # The association still needs human review.
+                    return True, False
+    return False, False
 
 
 def _try_build_memory_prompt(

@@ -1277,7 +1277,7 @@ class AIWorkflowController(QObject):
             box = QMessageBox(self.parent)
             box.setIcon(QMessageBox.Icon.Warning)
             box.setWindowTitle("记忆提案存在阻断冲突")
-            box.setText("为避免覆盖不一致状态，本次未写入。")
+            box.setText("以下更新未通过证据校验，本次未写入。")
             box.setInformativeText(details)
             box.setDetailedText(proposal.conflict_evidence_text())
             retry_button = box.addButton(
@@ -1287,7 +1287,10 @@ class AIWorkflowController(QObject):
             box.addButton("关闭", QMessageBox.ButtonRole.RejectRole)
             box.setDefaultButton(retry_button)
             box.exec()
-            self._emit_output("记忆提案存在阻断冲突，故事状态未写入。")
+            self._emit_output(
+                "记忆提案存在阻断冲突，故事状态未写入。\n"
+                + details + "\n\n引用事实与正文锚点：\n" + proposal.conflict_evidence_text()
+            )
             self._emit_status("记忆更新被冲突检测阻止")
             if box.clickedButton() is retry_button:
                 self._emit_output("正在跳过旧提案缓存并重新生成记忆提案。")

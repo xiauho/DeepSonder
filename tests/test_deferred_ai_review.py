@@ -61,6 +61,22 @@ class DeferredAIReviewTests(TestCase):
         self.ai.release_result.assert_called_once_with(self.token)
         self.assertFalse(self.workflow.has_pending_result)
 
+    def test_blocked_memory_outputs_actionable_evidence_without_committing(self):
+        from test_memory_location_evidence import LocationEvidenceTests
+        proposal = LocationEvidenceTests().proposal("未到达山门")
+        self.session._project = Mock()
+        self.workflow._emit_output = Mock()
+        self.workflow.ai_result_service.commit_memory_proposal = Mock()
+        with patch('ui.ai_workflow_controller.QMessageBox') as dialog:
+            dialog.return_value.clickedButton.return_value = None
+            self.workflow._on_memory_done(AITaskToken('memory', 'chapter_01'), proposal)
+            dialog.return_value.setDetailedText.assert_called_once_with(proposal.conflict_evidence_text())
+        output = self.workflow._emit_output.call_args.args[0]
+        self.assertIn("拟写入：山门", output)
+        self.assertIn("未到达山门", output)
+        self.assertIn("chapter_01:p0032", output)
+        self.workflow.ai_result_service.commit_memory_proposal.assert_not_called()
+
     def test_project_reset_releases_pending_snapshot(self):
         self.ai.succeeded.emit(self.token, object())
         self.session.project_changed.emit(None)
