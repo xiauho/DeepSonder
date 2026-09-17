@@ -9,7 +9,7 @@ from typing import Any
 from copy import deepcopy
 
 from .app_paths import app_config_dir
-from .theme_tokens import DARK_COLORS, LIGHT_COLORS
+from .theme_tokens import DARK_COLORS, LIGHT_COLORS, PREVIOUS_DARK_COLORS, PREVIOUS_LIGHT_COLORS
 from .storage import atomic_write_text
 from .token_budget import (
     DEFAULT_CHUNK_OVERLAP_TOKENS,
@@ -137,6 +137,11 @@ def _merge_config(config: dict, path: Path) -> bool:
         data = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(data, dict):
             config.update(data)
+            # New theme tokens must inherit the saved theme, not light defaults.
+            palette = DARK_COLORS if data.get("theme") == "dark" else LIGHT_COLORS
+            for key, value in palette.items():
+                if key not in data:
+                    config[key] = value
             if "ai_history_mode" not in data:
                 config["ai_history_mode"] = (
                     "custom" if "ai_context_history_chapters" in data else "auto"
@@ -190,6 +195,9 @@ def _normalize_config(config: dict[str, Any]) -> None:
         config.update(LIGHT_COLORS)
 
     palette = LIGHT_COLORS if config["theme"] == "light" else DARK_COLORS
+    previous = PREVIOUS_LIGHT_COLORS if config["theme"] == "light" else PREVIOUS_DARK_COLORS
+    if all(str(config.get(key, "")).upper() == value for key, value in previous.items()):
+        config.update({key: palette[key] for key in previous})
     for key, value in palette.items():
         candidate = config.get(key)
         if not isinstance(candidate, str) or not _is_hex_color(candidate):

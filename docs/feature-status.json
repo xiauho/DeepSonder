@@ -118,6 +118,18 @@
       "requirement": "required",
       "status": "supported",
       "notes": "Session-local draft retention across routes and theme changes; explicit save/discard, staged defaults, save failure feedback and exit guard; apply only edited values to current configuration."
+    },
+    {
+      "id": "appearance.semantic_light_dark_themes",
+      "requirement": "required",
+      "status": "supported",
+      "notes": "Brand-free navigation rail; stronger light interaction blue; neutral layered dark surfaces; separate primary button/text colors and visible focus states. Previous stock palettes update while custom palettes are preserved."
+    },
+    {
+      "id": "appearance.windows_native_caption_theme",
+      "requirement": "required",
+      "status": "supported",
+      "notes": "Application-wide native caption theme for main windows and Qt dialogs; live switching, handle recreation and activation updates; high-contrast system-colour fallback. Windows 10 uses supported native dark framing; exact caption/text/border colours depend on Windows 11 DWM support."
     }
   ]
 }

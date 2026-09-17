@@ -27,16 +27,12 @@ class PrimaryNavigation(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("primarySidebar")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setFixedWidth(76)
         self.buttons: dict[str, QPushButton] = {}
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 10, 6, 10)
+        layout.setContentsMargins(6, 14, 6, 10)
         layout.setSpacing(4)
-        brand = QLabel("DS")
-        brand.setObjectName("brandTitle")
-        brand.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        brand.setToolTip("DeepSonder")
-        layout.addWidget(brand)
         self.quick_open_button = self._rail_button("search", "查找", "快速打开章节与资料（Ctrl+P）")
         self.quick_open_button.clicked.connect(self.quick_open_requested)
         layout.addWidget(self.quick_open_button)

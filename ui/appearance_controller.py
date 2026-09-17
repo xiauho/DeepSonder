@@ -53,9 +53,9 @@ class AppearanceController(QObject):
         muted = palette["muted_text_color"]
         refresh_button_icons(self.root, muted)
         for button in self.action_icon_buttons.values():
-            color = "#FFFFFF" if button.objectName() == "accentButton" else muted
+            color = palette["primary_text_color"] if button.objectName() == "accentButton" else muted
             button.set_icon_color(color)
         theme_icon = "dark_mode" if self.config.get("theme") == "light" else "light_mode"
         set_button_icon(self.theme_button, theme_icon, muted, 17)
         if self.ai_creation_button is not None:
-            set_button_icon(self.ai_creation_button, "auto_awesome", "#FFFFFF", 17)
+            set_button_icon(self.ai_creation_button, "auto_awesome", palette["primary_text_color"], 17)

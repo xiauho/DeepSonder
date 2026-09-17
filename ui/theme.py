@@ -21,7 +21,7 @@ QDialog { background: __BG__; }
 QDialog#trashDialog { background: __BG__; color: __TEXT__; }
 
 QWidget#primarySidebar {
-    background: __PANEL__;
+    background: __SIDEBAR__;
     border-right: 1px solid __BORDER__;
 }
 QLabel#brandTitle, QLabel#eyebrow {
@@ -328,7 +328,7 @@ QPlainTextEdit#writingEditor, QTextBrowser#markdownPreview {
     border: 1px solid __BORDER__;
     border-radius: 8px;
     padding: 24px 32px;
-    selection-background-color: __ACCENT__;
+    selection-background-color: __PRIMARY__;
     selection-color: __ACCENT_TEXT__;
     font-family: "Microsoft YaHei UI", "Source Serif 4", "霞鹜文楷", "LXGW WenKai", sans-serif;
     font-size: __EDITOR_FONT_SIZE__px;
@@ -356,7 +356,8 @@ QPlainTextEdit#outputPanel, QTextBrowser#inspectorBrowser, QTextBrowser#pageBrow
     border: 1px solid __BORDER__;
     border-radius: 7px;
     padding: 10px;
-    selection-background-color: __ACCENT__;
+    selection-background-color: __PRIMARY__;
+    selection-color: __ACCENT_TEXT__;
 }
 QPlainTextEdit#outputPanel { font-family: "JetBrains Mono", "Cascadia Mono", "Microsoft YaHei UI"; font-size: __SMALL_FONT_SIZE__px; }
 
@@ -376,7 +377,8 @@ QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
     border-radius: 7px;
     padding: 7px 9px;
     padding-right: 34px;
-    selection-background-color: __ACCENT__;
+    selection-background-color: __PRIMARY__;
+    selection-color: __ACCENT_TEXT__;
 }
 QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus { border-color: __ACCENT__; }
 QSpinBox, QDoubleSpinBox { padding-right: 30px; }
@@ -423,7 +425,7 @@ QComboBox::down-arrow {
     height: 18px;
 }
 QComboBox QAbstractItemView {
-    background: __PANEL__;
+    background: __POPOVER__;
     color: __TEXT__;
     border: 1px solid __BORDER__;
     outline: none;
@@ -460,7 +462,7 @@ QListWidget#foreshadowingSelectionList::indicator:checked,
 QListWidget#powerSelectionList::indicator:checked,
 QListWidget#coreSystemSelectionList::indicator:checked {
     border-color: __ACCENT__;
-    background: __ACCENT__;
+    background: __PRIMARY__;
     image: url("__CHECKMARK__");
 }
 QCheckBox::indicator:disabled,
@@ -482,9 +484,9 @@ QPushButton:hover, QToolButton:hover { background: __HOVER__; border-color: __AC
 QPushButton:pressed, QToolButton:pressed { background: __SELECTION__; }
 QPushButton:disabled, QToolButton:disabled { color: __MUTED__; border-color: __BORDER__; }
 QToolButton#accentButton, QPushButton#accentButton {
-    background: __ACCENT__;
+    background: __PRIMARY__;
     color: __ACCENT_TEXT__;
-    border-color: __ACCENT__;
+    border-color: __PRIMARY__;
     font-weight: 700;
     padding-left: 17px; padding-right: 17px;
 }
@@ -506,7 +508,7 @@ QPushButton#focusExitButton {
     border-radius: 9px;
     padding: 7px 13px;
 }
-QPushButton#focusExitButton:hover { background: __ACCENT__; color: __ACCENT_TEXT__; }
+QPushButton#focusExitButton:hover { background: __PRIMARY__; color: __ACCENT_TEXT__; }
 QPushButton#dangerButton { color: __DANGER__; }
 QPushButton#linkButton { background: transparent; border: none; color: __ACCENT__; text-align: left; }
 
@@ -551,10 +553,18 @@ QMessageBox QPushButton:hover {
     border-color: __ACCENT__;
 }
 QMessageBox QPushButton:default {
-    background: __ACCENT__;
+    background: __PRIMARY__;
     color: __ACCENT_TEXT__;
-    border-color: __ACCENT__;
+    border-color: __PRIMARY__;
 }
+
+/* Control boundaries and state feedback stay separate from subtle dividers. */
+QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox { border-color: __CONTROL_BORDER__; }
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus { border-color: __ACCENT__; }
+QToolButton#accentButton:pressed, QPushButton#accentButton:pressed { background: __ACCENT_HOVER__; border-color: __ACCENT__; }
+QPushButton QLabel#buttonIcon:disabled, QPushButton QLabel#buttonText:disabled { color: __MUTED__; }
+QPushButton#accentButton QLabel#buttonIcon:disabled, QPushButton#accentButton QLabel#buttonText:disabled { color: __MUTED__; }
+QPlainTextEdit#writingEditor, QTextBrowser#markdownPreview { background: __PANEL__; }
 
 QPushButton#quickAccessMode { color: __MUTED__; background: transparent; border: 1px solid __BORDER__; }
 QPushButton#quickAccessMode:checked { color: __ACCENT__; background: __SELECTION__; border: 1px solid __ACCENT__; }
@@ -569,20 +579,20 @@ QPushButton:focus, QToolButton:focus { border: 1px solid __ACCENT__; }
 QMenuBar { background: __PANEL__; border-bottom: 1px solid __BORDER__; padding: 2px 8px; }
 QMenuBar::item { padding: 5px 9px; border-radius: 5px; }
 QMenuBar::item:selected { background: __HOVER__; }
-QMenu { background: __PANEL__; border: 1px solid __BORDER__; border-radius: 6px; padding: 6px; }
+QMenu { background: __POPOVER__; border: 1px solid __BORDER__; border-radius: 6px; padding: 6px; }
 QMenu::item { padding: 7px 28px 7px 12px; border-radius: 5px; }
 QMenu::item:selected { background: __SELECTION__; }
 QMenu::item:disabled { color: __MUTED__; }
 QStatusBar { background: __PANEL__; border-top: 1px solid __BORDER__; padding: 3px 10px; }
 QStatusBar::item { border: none; }
 QProgressBar { background: __FIELD__; border: none; border-radius: 4px; }
-QProgressBar::chunk { background: __ACCENT__; border-radius: 4px; }
+QProgressBar::chunk { background: __PRIMARY__; border-radius: 4px; }
 QSplitter::handle { background: __BORDER__; width: 1px; height: 1px; }
-QSplitter::handle:hover { background: __ACCENT__; }
+QSplitter::handle:hover { background: __PRIMARY__; }
 QSplitter#mainSplitter::handle { background: __BORDER__; width: 5px; }
-QSplitter#mainSplitter::handle:hover { background: __ACCENT__; }
+QSplitter#mainSplitter::handle:hover { background: __PRIMARY__; }
 QSplitter#outerSplitter::handle { background: __BORDER__; height: 5px; }
-QSplitter#outerSplitter::handle:hover { background: __ACCENT__; }
+QSplitter#outerSplitter::handle:hover { background: __PRIMARY__; }
 QScrollBar:vertical { background: transparent; width: 10px; margin: 2px; }
 QScrollBar::handle:vertical { background: __BORDER__; border-radius: 4px; min-height: 30px; }
 QScrollBar::handle:vertical:hover { background: __MUTED__; }
@@ -629,7 +639,7 @@ def build_qss(config: dict | None = None) -> str:
         editor_size = max(12, min(36, int(config.get("editor_font_size", 16) or 16)))
     except (TypeError, ValueError):
         editor_size = 16
-    accent_text = "#FFFFFF" if light else "#08111E"
+    accent_text = colors["primary_text_color"]
     asset_root = resource_path("assets")
     replacements = {
         "__FONT_SIZE__": str(font_size),
@@ -646,7 +656,11 @@ def build_qss(config: dict | None = None) -> str:
         "__SELECTION__": colors["selection_color"],
         "__HOVER__": colors["hover_color"],
         "__ACCENT_TEXT__": accent_text,
-        "__ACCENT_HOVER__": _mix(colors["accent_color"], "#FFFFFF" if light else "#000000", 0.12),
+        "__ACCENT_HOVER__": colors["primary_hover_color"],
+        "__PRIMARY__": colors["primary_color"],
+        "__SIDEBAR__": colors["sidebar_color"],
+        "__POPOVER__": colors["popover_color"],
+        "__CONTROL_BORDER__": colors["control_border_color"],
         "__GOOD__": "#278457" if light else "#7BD39B",
         "__GOOD_BG__": _mix(colors["panel_color"], "#278457", 0.13),
         "__DANGER__": "#C13D49" if light else "#FF8D98",
@@ -699,7 +713,6 @@ def document_css(config: dict | None = None) -> str:
 
 def apply_theme(app, config: dict | None = None) -> None:
     colors = colors_for(config)
-    light = (config or {}).get("theme", "light") == "light"
     palette = app.palette()
     palette.setColor(QPalette.ColorRole.Window, QColor(colors["background_color"]))
     palette.setColor(QPalette.ColorRole.WindowText, QColor(colors["text_color"]))
@@ -708,12 +721,14 @@ def apply_theme(app, config: dict | None = None) -> None:
     palette.setColor(QPalette.ColorRole.Text, QColor(colors["text_color"]))
     palette.setColor(QPalette.ColorRole.Button, QColor(colors["field_color"]))
     palette.setColor(QPalette.ColorRole.ButtonText, QColor(colors["text_color"]))
-    palette.setColor(QPalette.ColorRole.Highlight, QColor(colors["accent_color"]))
+    palette.setColor(QPalette.ColorRole.Highlight, QColor(colors["primary_color"]))
     palette.setColor(
         QPalette.ColorRole.HighlightedText,
-        QColor("#FFFFFF" if light else "#08111E"),
+        QColor(colors["primary_text_color"]),
     )
     palette.setColor(QPalette.ColorRole.ToolTipBase, QColor(colors["panel_color"]))
     palette.setColor(QPalette.ColorRole.ToolTipText, QColor(colors["text_color"]))
     app.setPalette(palette)
     app.setStyleSheet(build_qss(config))
+    from ui.native_caption import sync_native_captions
+    sync_native_captions(app, config or {}, colors)
