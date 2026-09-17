@@ -11,7 +11,8 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 MAX_OUTPUT_ENTRY_CHARS = 24_000
 MAX_OUTPUT_BLOCKS = 1_200
 TASK_LABELS = {
-    "expand": "扩写",
+    "selection_expand": "选区扩写", "style_polish": "选区文风润色", "style_review": "文风审校",
+    "expand": "按章纲生成正文",
     "continuation": "续写",
     "check": "设定检查",
     "memory": "记忆更新",

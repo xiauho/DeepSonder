@@ -55,7 +55,8 @@ SECTION_LABELS = {
 }
 
 TASK_LABELS = {
-    "expand": "章节扩写",
+    "selection_expand": "选区扩写", "style_polish": "选区文风润色", "style_review": "文风审校",
+    "expand": "按章纲生成正文",
     "continuation": "章节续写",
     "check": "一致性检查",
     "repair": "一致性修复",
@@ -257,6 +258,11 @@ def render_context_reports(reports: list[PromptContextReport]) -> str:
             if selection_rows:
                 blocks.append("<h3>相关资料筛选</h3><ul>" + "".join(selection_rows) + "</ul>")
         rows = []
+        if report.style_samples:
+            labels = {"included": "已纳入", "disabled": "已停用", "scene_mismatch": "场景不匹配", "budget_omitted": "预算或数量限制省略"}
+            blocks.append("<h3>表达样文（不作为事实）</h3><ul>" + "".join(
+                "<li>" + html.escape(str(row["id"])) + " · v" + str(int(row["version"])) + " · " + labels.get(row["status"], "未纳入") + "</li>"
+                for row in report.style_samples) + "</ul>")
         for item in report.sections:
             label = SECTION_LABELS.get(item.key, item.key)
             status = STATUS_LABELS.get(item.status, item.status)

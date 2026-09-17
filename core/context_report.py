@@ -50,6 +50,7 @@ class PromptContextReport:
     history_unverified: int = 0
     history_provenance_error: bool = False
     history_sources: tuple[dict, ...] = ()
+    style_samples: tuple[dict, ...] = ()
     state_scope: str = ""
     transport: str = "pending"
     submitted_prompt_chars: int = 0

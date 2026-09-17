@@ -55,6 +55,10 @@ def context_paths(
         paths.extend(project.list_characters())
         paths.extend(project.list_world())
         paths.extend(project.list_power())
+    from .style_library import LIBRARY_PATH
+    from .writing_style import WRITING_KINDS, STYLE_PATH, EXCEPTIONS_PATH
+    if task_kind in WRITING_KINDS:
+        paths.extend((project.root / STYLE_PATH, project.root / EXCEPTIONS_PATH, project.root / LIBRARY_PATH))
     unique: dict[str, Path] = {}
     for path in paths:
         resolved = str(Path(path).resolve())

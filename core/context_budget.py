@@ -238,7 +238,7 @@ def build_task_context(
         chapter_summaries=summaries,
         main_arc=store.load_main_arc() if profile.include_main_arc else "",
         future_plan=store.load_future_plan() if profile.include_future_plan else "",
-        style_guide=store.load_style_guide() if profile.include_style else "",
+        style_guide=store.load_style_guide(chapter_id) if profile.include_style else "",
         history_view=history_view,
         history_query=relevance_query,
         state_scope=state_scope,

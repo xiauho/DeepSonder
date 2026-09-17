@@ -190,6 +190,96 @@ class AIWorkflowController(QObject):
             },
         )
 
+    def prose_task(self, kind: str) -> None:
+        from core.prose_review import prose_bounds, validate_scope, TASK_LABELS
+        from ui.prose_review_dialog import ProseRequestDialog
+        request = self._prepare_request()
+        if request is None:
+            return
+        project, chapter_id, workflow = request
+        source = self.editor.text_edit.toPlainText()
+        cursor = self.editor.text_edit.textCursor()
+        encoded = source.encode("utf-16-le")
+        start = len(encoded[:cursor.selectionStart() * 2].decode("utf-16-le"))
+        end = len(encoded[:cursor.selectionEnd() * 2].decode("utf-16-le"))
+        if start == end and kind == "style_review":
+            start, end = prose_bounds(source)
+        try:
+            selected = validate_scope(source, start, end)
+        except ValueError as exc:
+            QMessageBox.information(self.parent, "请选择正文", str(exc))
+            return
+        dialog = ProseRequestDialog(kind, len(selected), self.parent)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        if (project is not self.project_session.project or chapter_id != self.editor.current_chapter_id()
+                or source != self.editor.text_edit.toPlainText()):
+            self._emit_status("原文已经变化，请重新选择正文。")
+            return
+        requirements = dialog.requirements.toPlainText().strip()
+        self._start(kind, chapter_id, f"正在{TASK_LABELS[kind]} · {len(selected)} 字",
+            lambda cancel_event: workflow.review_prose(project, chapter_id, source=source,
+                start=start, end=end, kind=kind, request=requirements, cancel_event=cancel_event),
+            task_context={"start": start, "end": end, "request": requirements})
+
+    def manage_style_library(self) -> None:
+        from core.style_library import load_library, save_library, revision
+        from ui.style_library_dialog import StyleLibraryDialog
+        project = self.project_session.project
+        if project is None or self.has_pending_result or self.ai_controller.is_running():
+            return
+        try:
+            expected = revision(project.root)
+            dialog = StyleLibraryDialog(load_library(project.root), self.editor.current_chapter_id() or "", self.parent)
+            if dialog.exec() == QDialog.DialogCode.Accepted and project is self.project_session.project:
+                save_library(project.root, dialog.value, expected_revision=expected)
+                self._emit_status("本书文风与样文已确认保存；下次生成时生效")
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self.parent, "文风资料未保存", str(exc))
+
+    def manage_style_exceptions(self) -> None:
+        from core.writing_style import load_exceptions, save_exceptions
+        from ui.prose_review_dialog import StyleExceptionsDialog
+        project = self.project_session.project
+        if project is None or self.has_pending_result or self.ai_controller.is_running():
+            return
+        try:
+            dialog = StyleExceptionsDialog(load_exceptions(project.root), self.parent)
+            if dialog.exec() == QDialog.DialogCode.Accepted and project is self.project_session.project:
+                save_exceptions(project.root, dialog.quotes())
+                self._emit_status("本书文风例外已保存")
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self.parent, "文风例外未保存", str(exc))
+
+    def _on_prose_done(self, token, result) -> None:
+        from core.prose_review import apply_patches
+        from core.writing_style import load_exceptions, save_exceptions
+        from ui.prose_review_dialog import ProseReviewDialog
+        if not self._task_context_matches(token):
+            self._emit_status("正文或资料已变化，文风建议未写入。")
+            return
+        dialog = ProseReviewDialog(result, self.parent)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            self._emit_status("已保留原文，未保存文风例外。")
+            return
+        if not self._task_context_matches(token) or self.editor.text_edit.toPlainText() != result.source:
+            self._emit_status("正文或资料已变化，修改未写入。")
+            QMessageBox.warning(self.parent, "结果已过期", "请重新生成建议，正文和文风例外均未修改。")
+            return
+        try:
+            patches = dialog.selected_patches()
+            updated = apply_patches(result.source, patches)
+            project = self.project_session.project
+            if dialog.exceptions:
+                quotes = list(load_exceptions(project.root))
+                quotes.extend(result.patches[i].expected_original for i in sorted(dialog.exceptions))
+                save_exceptions(project.root, quotes)
+            if patches and not self.editor.replace_range_if_matches(0, len(result.source), result.source, updated):
+                raise ValueError("原文已变化，未应用正文修改。")
+            self._emit_status(f"已采用 {len(patches)} 处修改、保存 {len(dialog.exceptions)} 条例外；正文可撤销，尚未自动保存。")
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self.parent, "无法应用建议", str(exc))
+
     def check(self) -> None:
         request = self._prepare_request()
         if request is None:
@@ -592,6 +682,8 @@ class AIWorkflowController(QObject):
                 self._on_check_done(token, result)
             elif token.kind == "repair":
                 self._on_repair_done(token, result)
+            elif token.kind in {"selection_expand", "style_polish", "style_review"}:
+                self._on_prose_done(token, result)
             elif token.kind == "memory":
                 self._on_memory_done(token, result)
         finally:
@@ -860,8 +952,10 @@ class AIWorkflowController(QObject):
                 return
             workflow = self._workflow(dsh)
             chapter = project.load_chapter(chapter_id)
+            from core.writing_style import load_style, render_style
             story_constraints = "\n".join(
                 (
+                    render_style(load_style(project.root, chapter_id)[:2500]),
                     f"章节：{chapter.title}",
                     "本章大纲：" + (chapter.outline or "（暂无）"),
                     "剧情简写：" + (chapter.plot_brief or "（暂无）"),

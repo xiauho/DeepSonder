@@ -51,6 +51,30 @@ class AIV2TaskTests(unittest.TestCase):
             reconstruction_service=reconstruction,
         ), documents, reconstruction
 
+    def test_v2_style_is_shared_but_never_injected_into_fact_tasks(self):
+        from application.ai_v2_context import AIV2ContextSnapshot
+        with tempfile.TemporaryDirectory() as tmp:
+            project = self._project(Path(tmp))
+            documents = DocumentV2Service()
+            reconstruction = ReconstructionService()
+            folder = project.root / "writing"
+            folder.mkdir(exist_ok=True)
+            style = folder / "style_guide.md"
+            style.write_text("# 本书风格\n冷峻克制，保留对白节奏。", encoding="utf-8")
+            context = prepare_v2_context(project, "chapter_0001", documents=documents, reconstruction=reconstruction)
+            snapshot = AIV2ContextSnapshot.capture(project, "chapter_0001", documents=documents, reconstruction=reconstruction)
+            for kind in ("expand", "continuation", "check", "memory"):
+                _system, user, report = build_v2_prompt(context, kind, target_chars=1000, prompt_budget=9000)
+                self.assertEqual("冷峻克制" in user, kind in {"expand", "continuation"})
+                self.assertLessEqual(report.total_prompt_chars, 9000)
+            from dataclasses import replace
+            long_context = replace(context, style_guide="表达要求" * 3000, current_content="正文" * 10000)
+            _system, _user, report = build_v2_prompt(long_context, "expand", target_chars=1000, prompt_budget=4000)
+            self.assertLessEqual(report.total_prompt_chars, 4000)
+            self.assertTrue(any(item.key == "style" and item.status == "trimmed" for item in report.sections))
+            style.write_text("新的表达要求", encoding="utf-8")
+            self.assertFalse(snapshot.matches(project, "chapter_0001", documents=documents, reconstruction=reconstruction))
+
     def test_v2_writing_result_is_review_first_and_preserves_heading(self) -> None:
         def execute(kind, project, chapter_id, options, cancel_event, report):
             self.assertEqual(kind, "expand")

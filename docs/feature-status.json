@@ -130,6 +130,45 @@
       "requirement": "required",
       "status": "supported",
       "notes": "Application-wide native caption theme for main windows and Qt dialogs; live switching, handle recreation and activation updates; high-contrast system-colour fallback. Windows 10 uses supported native dark framing; exact caption/text/border colours depend on Windows 11 DWM support."
+    },
+    {
+      "id": "ai.outline_generation_and_selection_expansion",
+      "requirement": "required",
+      "status": "supported",
+      "note": "Explicit outline-to-chapter action and scoped selection expansion; original AI expansion command remains searchable."
+    },
+    {
+      "id": "ai.shared_writing_style",
+      "requirement": "required",
+      "status": "supported",
+      "note": "Project writing/style_guide.md shared by desktop prose generation, retries, supplements, scoped tasks and schema-v2 generation. Fact/check prompts omit style. Style participates in stale-result checks."
+    },
+    {
+      "id": "ai.prose_style_review",
+      "requirement": "required",
+      "status": "supported",
+      "note": "One bounded model call produces exact-source non-overlapping proposals; deterministic advisory checks, explicit per-proposal adoption, undo, deferred review, cancellation and stale-context protection."
+    },
+    {
+      "id": "ai.style_exceptions",
+      "requirement": "required",
+      "status": "supported",
+      "note": "Explicit author-confirmed per-book exact-quote exceptions for style review/polish, with removal management; never derived into story memory."
+    },
+    {
+      "id": "ai.book_style_profile",
+      "requirement": "optional",
+      "status": "supported"
+    },
+    {
+      "id": "ai.scene_style_samples",
+      "requirement": "optional",
+      "status": "supported"
+    },
+    {
+      "id": "ai.prose_evaluation_runner",
+      "requirement": "optional",
+      "status": "supported"
     }
   ]
 }

@@ -571,8 +571,8 @@ class Editor(QWidget):
         if current[start:end] != str(expected):
             return False
         cursor = self.text_edit.textCursor()
-        cursor.setPosition(start)
-        cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+        cursor.setPosition(len(current[:start].encode("utf-16-le")) // 2)
+        cursor.setPosition(len(current[:end].encode("utf-16-le")) // 2, QTextCursor.MoveMode.KeepAnchor)
         cursor.insertText(str(replacement))
         self.text_edit.setTextCursor(cursor)
         self.text_edit.ensureCursorVisible()

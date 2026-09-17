@@ -360,8 +360,13 @@ class MainWindow(QMainWindow):
         action("navigation", "显示/隐藏资料面板", self.toggle_navigation_panel, "Ctrl+Shift+L")
         action("inspector", "显示/隐藏写作助手", self.toggle_inspector, "Ctrl+Shift+I")
         action("output", "显示/隐藏 AI 任务", self.toggle_output, "Ctrl+J")
-        action("expand", "AI 扩写", self.expand_chapter, "Ctrl+Enter")
+        action("expand", "按章纲生成正文", self.expand_chapter, "Ctrl+Enter")
         action("continuation", "AI 续写", self.continue_chapter, "Ctrl+Alt+Enter")
+        action("selection_expand", "选区扩写…", lambda: self.ai_workflow_controller.prose_task("selection_expand"))
+        action("style_polish", "选区文风润色…", lambda: self.ai_workflow_controller.prose_task("style_polish"))
+        action("style_review", "文风审校（去 AI 味）…", lambda: self.ai_workflow_controller.prose_task("style_review"))
+        action("style_library", "本书文风与样文…", lambda: self.ai_workflow_controller.manage_style_library())
+        action("style_exceptions", "管理本书文风例外…", lambda: self.ai_workflow_controller.manage_style_exceptions())
         action("check", "一致性检查", self.check_consistency, "Ctrl+Shift+C")
         action("memory", "更新故事记忆", self.update_memory, "Ctrl+Shift+M")
         action("about", "关于 DeepSonder", self.show_about)
@@ -446,7 +451,7 @@ class MainWindow(QMainWindow):
         self.ai_availability_action = self.ai_creation_menu.addAction("打开项目…")
         self.ai_availability_action.triggered.connect(self._resolve_ai_availability)
         self.ai_creation_menu.addSeparator()
-        for key in ("expand", "continuation", "check", "memory"):
+        for key in ("expand", "continuation", "selection_expand", "style_polish", "style_review", "style_library", "style_exceptions", "check", "memory"):
             self.ai_creation_menu.addAction(self.actions[key])
             self.actions[key].changed.connect(self._sync_ai_creation_button)
         self.ai_creation_menu.addSeparator()
@@ -586,6 +591,8 @@ class MainWindow(QMainWindow):
         create_menu.addSeparator()
         create_menu.addAction(self.actions["expand"])
         create_menu.addAction(self.actions["continuation"])
+        for key in ("selection_expand", "style_polish", "style_review", "style_library", "style_exceptions"):
+            create_menu.addAction(self.actions[key])
         create_menu.addAction(self.actions["check"])
         create_menu.addAction(self.actions["memory"])
 
@@ -671,6 +678,7 @@ class MainWindow(QMainWindow):
         self.settings_controller.connection_failed.connect(self._on_dsh_test_failed)
         self.settings_controller.connection_finished.connect(self._on_dsh_test_finished)
         self.editor.dirty_changed.connect(self._on_dirty_changed)
+        self.editor.text_edit.selectionChanged.connect(self._refresh_ai_actions)
         self.editor.stats_changed.connect(lambda _text: self._refresh_ai_actions())
         self.ai_controller.started.connect(self._on_ai_started)
         self.ai_controller.finished.connect(self._on_ai_finished)
@@ -1995,7 +2003,7 @@ class MainWindow(QMainWindow):
             remaining = target - current
             continuation_enabled = current > 0 and remaining >= MIN_CONTINUATION_CHARS
             if current <= 0:
-                continuation_tip = "当前正文为空，请先使用 AI 扩写或手动写下开头。"
+                continuation_tip = "当前正文为空，请先按章纲生成正文或手动写下开头。"
             elif remaining <= 0:
                 continuation_tip = f"当前正文约 {current} 字，已达到目标章节字数 {target} 字。"
             elif remaining < MIN_CONTINUATION_CHARS:
@@ -2015,6 +2023,26 @@ class MainWindow(QMainWindow):
                   "请先打开一个小说项目。" if self.project is None else
                   "请先在写作目录中选择一个章节。" if not chapter_open else
                   "AI 引擎尚未就绪，请检查设置。" if self.ai_engine_controller.client is None else "")
+        from core.prose_review import validate_scope
+        selected_ok = False
+        if chapter_open:
+            source = self.editor.text_edit.toPlainText()
+            cursor = self.editor.text_edit.textCursor()
+            encoded = source.encode("utf-16-le")
+            start = len(encoded[:cursor.selectionStart()*2].decode("utf-16-le"))
+            end = len(encoded[:cursor.selectionEnd()*2].decode("utf-16-le"))
+            try:
+                validate_scope(source, start, end)
+                selected_ok = True
+            except ValueError:
+                pass
+        for key in ("selection_expand", "style_polish", "style_review"):
+            enabled = not reason and (selected_ok or (key == "style_review" and bool(chapter_body_text(self.editor.text_edit.toPlainText()).strip())))
+            self.actions[key].setEnabled(enabled)
+            self.actions[key].setToolTip(reason or ("先选择正文片段（不含大纲和备注）。" if not enabled else "仅生成修改建议；确认后写入，可撤销。"))
+            self.actions[key].setStatusTip(self.actions[key].toolTip())
+        self.actions["style_library"].setEnabled(self.project is not None and not running)
+        self.actions["style_exceptions"].setEnabled(self.project is not None and not running)
         self._ai_unavailable_reason = reason
         for key in ("expand", "check", "memory"):
             action = self.actions[key]
@@ -2029,7 +2057,7 @@ class MainWindow(QMainWindow):
         self.ai_availability_hint.setText(reason or (continuation_tip if not continuation_enabled else "选择创作操作；生成结果需审阅后写入。"))
         self.ai_availability_action.setVisible(bool(reason) or (chapter_open and not continuation_enabled))
         self._ai_help_expand = bool(not reason and chapter_open and not chapter_body_text(self.editor.text_edit.toPlainText()).strip())
-        self.ai_availability_action.setText("查看 AI 任务" if running else "打开项目…" if self.project is None else "选择章节" if not chapter_open else "使用 AI 扩写…" if self._ai_help_expand else "打开创作设置…")
+        self.ai_availability_action.setText("查看 AI 任务" if running else "打开项目…" if self.project is None else "选择章节" if not chapter_open else "按章纲生成正文…" if self._ai_help_expand else "打开创作设置…")
         self._sync_ai_creation_button()
 
     def _resolve_ai_availability(self) -> None:

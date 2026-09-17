@@ -442,20 +442,14 @@ class ProjectDataStore:
         item = entries.get(legacy_key)
         return item if isinstance(item, dict) else {}
 
-    def load_style_guide(self) -> str:
+    def load_style_guide(self, chapter_id: str = "") -> str:
         """Return author-written style rules without template-only comments.
 
         A newly seeded guide contains headings and HTML comments that help the
         author fill it in. Those hints must not become accidental AI rules.
         """
-        raw = self.read_text(self.style_guide_path)
-        cleaned = re.sub(r"<!--.*?-->", "", raw, flags=re.DOTALL).strip()
-        substantive = [
-            line.strip()
-            for line in cleaned.splitlines()
-            if line.strip() and not line.lstrip().startswith("#")
-        ]
-        return cleaned if substantive else ""
+        from .writing_style import load_style
+        return load_style(self.project.root, chapter_id)
 
     def load_chapter(self, chapter_id: str):
         return self.project.load_chapter(chapter_id)

@@ -318,4 +318,6 @@ def _supplement_story_constraints(context) -> str:
         "剧情简写：" + (chapter.plot_brief or "（暂无）"),
         "当前正文结尾：" + (chapter.content[-500:] if chapter.content else "（暂无）"),
     ]
+    from .writing_style import render_style
+    parts.insert(0, render_style(context.style_guide[:2500]))
     return "\n".join(parts)[:6500]

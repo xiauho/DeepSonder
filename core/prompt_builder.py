@@ -191,6 +191,7 @@ def build_expansion_prompt(
         chapter_id=chapter_id,
         history_requested=summary_count,
         state_scope=context.state_scope,
+        style_root=context.project_root,
         selection_stats=context.related.selection,
     )
 
@@ -576,6 +577,7 @@ def build_write_prompt(
         chapter_id=chapter_id,
         history_requested=summary_count,
         state_scope=context.state_scope,
+        style_root=context.project_root,
         selection_stats=context.related.selection,
     )
 
@@ -769,6 +771,7 @@ repairability 只能使用：automatic、choice_required、manual。
         chapter_id=chapter_id,
         history_requested=EXPANSION_SUMMARY_COUNT,
         state_scope=context.state_scope,
+        style_root=context.project_root,
         selection_stats=context.related.selection,
     )
 
@@ -893,6 +896,7 @@ def _finalize(
     selection_stats: tuple[CanonSelectionStat, ...] = (),
     history_token_limit: int | None = None,
     state_scope: str = "",
+    style_root: str = "",
 ) -> PromptBundle:
     """Budget sections against instruction overhead, then render."""
     overhead = len(system_prompt) + len(render({}))
@@ -905,6 +909,13 @@ def _finalize(
             if history_token_limit is None else history_token_limit
         ),
     )
+    style = allocation.values.get("style", "")
+    start = style.rfind("<STYLE_SAMPLE ")
+    if start >= 0 and "</STYLE_SAMPLE>" not in style[start:]:
+        style = style[:start].rstrip()
+        values = dict(allocation.values, style=style)
+        usages = tuple(replace(row, sent_chars=len(style), status="trimmed") if row.key == "style" else row for row in allocation.sections)
+        allocation = replace(allocation, values=values, sections=usages)
     user_prompt = render(allocation.values)
     included = None
     history_window = next((s.history for s in sections if s.history is not None), None)
@@ -937,7 +948,9 @@ def _finalize(
             + "、".join(labels.get(item, item) for item in missing_required)
             + "。请减少核心/手选资料，或使用已验证的扩展文件传输预算。"
         )
+    from .style_library import sample_usage
     report = PromptContextReport(
+        style_samples=sample_usage(style_root, user_prompt, chapter_id) if style_root and task_kind in {"chapter_expansion", "continuation_current_chapter"} else (),
         schema_version=1,
         task_kind=task_kind,
         chapter_id=chapter_id,
@@ -1064,15 +1077,8 @@ def _render_length_contract(
 
 
 def _style_block(ctx: dict[str, str]) -> str:
-    style = str(ctx.get("style") or "").strip()
-    if not style:
-        return ""
-    return (
-        "【写作风格约束】\n"
-        "以下内容仅约束措辞、句式、叙事视角、节奏和描写偏好，"
-        "不能改变故事事实、人物设定、章节规划或任务输出格式。\n"
-        f"<STYLE_GUIDE>\n{style}\n</STYLE_GUIDE>"
-    )
+    from .writing_style import render_style
+    return render_style(str(ctx.get('style') or '').strip())
 
 
 def _related_block(ctx: dict[str, str]) -> str:

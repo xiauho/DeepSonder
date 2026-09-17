@@ -43,7 +43,7 @@ class QuickAccessController:
             if key in {"quick_open", "commands"}:
                 continue
             shortcut = action.shortcut().toString()
-            if key in {"expand", "continuation", "check", "memory", "character_sync"}:
+            if key in {"expand", "continuation", "check", "memory", "character_sync", "selection_expand", "style_polish", "style_review", "style_exceptions", "style_library"}:
                 group = "AI 创作"
             elif key in {"save", "undo", "redo", "find"}:
                 group = "文档编辑"
@@ -53,6 +53,8 @@ class QuickAccessController:
                 group = "项目与应用"
             tip = action.toolTip()
             detail = group + (" · " + tip if tip and tip != action.text() else "")
+            if key == "expand":
+                detail += " · 原 AI 扩写"
             entries.append(QuickEntry(key, action.text().replace("&", ""), detail,
                                       mode="commands", shortcut=shortcut))
         return entries

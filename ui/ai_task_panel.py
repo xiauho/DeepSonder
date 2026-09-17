@@ -8,7 +8,8 @@ from PySide6.QtWidgets import (
 )
 
 TASK_LABELS = {
-    "expand": "章节扩写", "continuation": "章节续写", "check": "一致性检查",
+    "selection_expand": "选区扩写", "style_polish": "选区文风润色", "style_review": "文风审校",
+    "expand": "按章纲生成正文", "continuation": "章节续写", "check": "一致性检查",
     "memory": "故事记忆", "repair": "一致性修复", "writing_supplement": "差额补写",
 }
 

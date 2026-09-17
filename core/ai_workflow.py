@@ -108,6 +108,10 @@ class AIWorkflowService:
             cancel_event=cancel_event,
         )
 
+    def review_prose(self, project, chapter_id, **options):
+        from .prose_review import run_prose_task
+        return run_prose_task(project, chapter_id, self.dsh, **options)
+
     def supplement_prose(
         self,
         chapter_id: str,
