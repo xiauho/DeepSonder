@@ -2,8 +2,9 @@ import os
 from unittest import TestCase, SkipTest
 from unittest.mock import patch
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
-from PySide6.QtCore import QCoreApplication
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QCoreApplication, Qt
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication, QToolButton
 from core.config import DEFAULT_CONFIG
 from ui.main_window import MainWindow
 
@@ -53,6 +54,40 @@ class CompactWorkspaceTests(TestCase):
         self.assertFalse(w.left_panel.isVisible())
         w.panel_buttons['navigation'].click()
         self.assertTrue(w.left_panel.isVisible())
+
+    def test_inspector_close_button_hides_panel_and_keeps_controls_in_sync(self):
+        w = self.window
+        close_button = w.inspector.findChild(QToolButton, 'panelToggleButton')
+        self.assertIsNotNone(close_button)
+        for theme in ('light', 'dark'):
+            with self.subTest(theme=theme):
+                if w.window_state_controller.inspector_visible:
+                    w.toggle_inspector()
+                w.appearance_controller.apply({**w.config, 'theme': theme})
+                w.panel_buttons['inspector'].click()
+                self.app.processEvents()
+                self.assertTrue(w.inspector.isVisible())
+                editor_width = w.editor.width()
+                QTest.mouseClick(close_button, Qt.MouseButton.LeftButton)
+                self.app.processEvents()
+                self.assertFalse(w.inspector.isVisible())
+                self.assertFalse(w.window_state_controller.inspector_visible)
+                self.assertFalse(w.panel_buttons['inspector'].isChecked())
+                self.assertGreater(w.editor.width(), editor_width)
+
+                w.window_state_controller.activate_route('reports')
+                w.window_state_controller.activate_route('writing')
+                self.app.processEvents()
+                self.assertFalse(w.inspector.isVisible())
+
+                w.actions['inspector'].trigger()
+                self.app.processEvents()
+                self.assertTrue(w.inspector.isVisible())
+                self.assertTrue(w.window_state_controller.inspector_visible)
+                self.assertTrue(w.panel_buttons['inspector'].isChecked())
+                QTest.mouseClick(close_button, Qt.MouseButton.LeftButton)
+                self.app.processEvents()
+                self.assertFalse(w.inspector.isVisible())
 
     def test_task_menu_keeps_records_reachable_when_actions_disabled(self):
         w = self.window

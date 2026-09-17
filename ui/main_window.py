@@ -653,6 +653,7 @@ class MainWindow(QMainWindow):
         self.left_panel.delete_canon_requested.connect(self.delete_canon_by_path)
         self.left_panel.new_timeline_requested.connect(self.new_timeline)
         self.left_panel.toggle_requested.connect(self.toggle_navigation_panel)
+        self.inspector.toggle_requested.connect(self.toggle_inspector)
         self.memory_page.sync_requested.connect(self.update_memory)
         self.memory_page.chapter_requested.connect(self._open_memory_chapter)
         self.memory_page.foreshadowing_changed.connect(self.project_session.notify_data_changed)

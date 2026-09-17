@@ -11,6 +11,10 @@ from PySide6.QtWidgets import QApplication, QWidget
 from shiboken6 import isValid
 
 COLOR_DEFAULT = 0xFFFFFFFF
+# RDW_INVALIDATE | RDW_FRAME | RDW_UPDATENOW | RDW_NOCHILDREN.
+# Repaint the native frame immediately without invalidating child widgets.
+CAPTION_REDRAW_FLAGS = 0x0001 | 0x0400 | 0x0100 | 0x0040
+WM_NCACTIVATE = 0x0086
 
 
 def colorref(value: str) -> int:
@@ -25,6 +29,12 @@ class WindowsCaptionBackend:
         self.set_attribute = self.dwm.DwmSetWindowAttribute
         self.set_attribute.argtypes = [wintypes.HWND, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD]
         self.set_attribute.restype = ctypes.c_long
+        self.send_message = self.user.SendMessageW
+        self.send_message.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+        self.send_message.restype = ctypes.c_ssize_t
+        self.redraw_window = self.user.RedrawWindow
+        self.redraw_window.argtypes = [wintypes.HWND, ctypes.c_void_p, wintypes.HRGN, wintypes.UINT]
+        self.redraw_window.restype = wintypes.BOOL
         self.user.SystemParametersInfoW.argtypes = [wintypes.UINT, wintypes.UINT, ctypes.c_void_p, wintypes.UINT]
         self.user.SystemParametersInfoW.restype = wintypes.BOOL
 
@@ -45,11 +55,21 @@ class WindowsCaptionBackend:
             36: COLOR_DEFAULT if system_colors else colorref(colors['text_color'] if active else colors['muted_text_color']),
             34: COLOR_DEFAULT if system_colors else colorref(colors['border_color']),
         }
+        applied = False
         for attribute, value in values.items():
             payload = wintypes.DWORD(value)
             # Unsupported attributes return a failed HRESULT on older Windows;
             # retain native system rendering rather than changing window flags.
-            self.set_attribute(hwnd, attribute, ctypes.byref(payload), ctypes.sizeof(payload))
+            result = self.set_attribute(hwnd, attribute, ctypes.byref(payload), ctypes.sizeof(payload))
+            applied = result >= 0 or applied
+        if applied:
+            # Windows 10 caches the caption's dark-mode appearance even after
+            # frame recalculation and WM_NCPAINT. Refresh its non-client active
+            # appearance, then restore the real state. WM_NCACTIVATE paints the
+            # caption; it does not activate the window or move keyboard focus.
+            self.send_message(hwnd, WM_NCACTIVATE, int(not active), 0)
+            self.send_message(hwnd, WM_NCACTIVATE, int(active), 0)
+            self.redraw_window(hwnd, None, None, CAPTION_REDRAW_FLAGS)
 
 
 class _SystemThemeEvents(QAbstractNativeEventFilter):
@@ -74,6 +94,7 @@ class NativeCaptionController(QObject):
         self.dark = False
         self.colors = {}
         self.pending = set()
+        self._applying_windows = set()
         self.refresh_timer = QTimer(self)
         self.refresh_timer.setSingleShot(True)
         self.refresh_timer.timeout.connect(self.refresh)
@@ -85,7 +106,10 @@ class NativeCaptionController(QObject):
         self.schedule_refresh()
 
     def schedule_refresh(self):
-        self.refresh_timer.start(0)
+        # Caption painting can synchronously deliver native activation events.
+        # Those are consequences of this refresh, not another theme change.
+        if not self._applying_windows:
+            self.refresh_timer.start(0)
 
     def refresh(self):
         for window in self.app.topLevelWidgets():
@@ -101,14 +125,20 @@ class NativeCaptionController(QObject):
         if window.windowFlags() & Qt.WindowType.FramelessWindowHint:
             return
         hwnd = int(window.effectiveWinId())
-        if hwnd:
-            self.backend.apply(hwnd, self.dark, self.colors, window.isActiveWindow())
+        if hwnd and hwnd not in self._applying_windows:
+            self._applying_windows.add(hwnd)
+            try:
+                self.backend.apply(hwnd, self.dark, self.colors, window.isActiveWindow())
+            finally:
+                self._applying_windows.discard(hwnd)
 
     def eventFilter(self, watched, event):
         if isinstance(watched, QWidget) and watched.isWindow() and event.type() in (
             QEvent.Type.Show, QEvent.Type.WinIdChange,
             QEvent.Type.WindowActivate, QEvent.Type.WindowDeactivate,
         ):
+            if int(watched.effectiveWinId()) in self._applying_windows:
+                return False
             self.apply_window(watched)
             # Qt can finish updating native styles after Show/WinIdChange.
             key = id(watched)
