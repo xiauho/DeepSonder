@@ -42,7 +42,7 @@ foreach ($Target in @($BuildRoot, $DistRoot, $BundleRoot, $ReleaseRoot)) {
 Push-Location $ProjectRoot
 try {
     if (-not $SkipTests) {
-        & $PythonExecutable -m unittest discover -s tests
+        & $PythonExecutable scripts/run_tests.py
         if ($LASTEXITCODE -ne 0) {
             throw "测试未通过，已停止打包。"
         }

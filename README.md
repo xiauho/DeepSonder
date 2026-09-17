@@ -45,7 +45,7 @@ python main.py
 ## 测试与打包
 
 ```powershell
-python -m unittest discover -s tests
+python scripts/run_tests.py
 .\scripts\build_windows.ps1 -PythonExecutable python
 ```
 
