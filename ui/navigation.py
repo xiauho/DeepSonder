@@ -10,6 +10,7 @@ class PrimaryNavigation(QWidget):
     """One persistent primary navigation for every top-level page."""
 
     NAV_ANCHOR_RATIO = 0.10
+    quick_open_requested = Signal()
     route_requested = Signal(str)
     new_project_requested = Signal()
     trash_requested = Signal()
@@ -26,90 +27,50 @@ class PrimaryNavigation(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("primarySidebar")
-        self.setFixedWidth(236)
+        self.setFixedWidth(76)
         self.buttons: dict[str, QPushButton] = {}
-
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 18, 14, 16)
-        layout.setSpacing(7)
-
-        brand_text = QVBoxLayout()
-        brand_text.setSpacing(3)
-        title = QLabel("DeepSonder")
-        title.setObjectName("brandTitle")
-        subtitle = QLabel("本地小说创作平台")
-        subtitle.setObjectName("brandSubtitle")
-        brand_text.addWidget(title)
-        brand_text.addWidget(subtitle)
-        layout.addLayout(brand_text)
-
-        self.project_card = QFrame()
-        self.project_card.setObjectName("projectCard")
-        project_layout = QVBoxLayout(self.project_card)
-        project_layout.setContentsMargins(11, 10, 11, 10)
-        project_layout.setSpacing(3)
-        project_caption = QLabel("当前项目")
-        project_caption.setObjectName("mutedLabel")
-        self.project_name = QLabel("尚未打开项目")
-        self.project_name.setObjectName("projectCardName")
-        self.project_name.setWordWrap(True)
-        project_layout.addWidget(project_caption)
-        project_layout.addWidget(self.project_name)
-        layout.addWidget(self.project_card)
-
-        new_button = IconTextButton("add", "新建项目", centered=True)
-        new_button.setObjectName("accentButton")
-        new_button.clicked.connect(self.new_project_requested)
-        layout.addWidget(new_button)
-        layout.addSpacing(10)
-
-        nav_label = QLabel("工作区")
-        nav_label.setObjectName("mutedLabel")
-        layout.addWidget(nav_label)
-        nav_frame = QFrame()
-        nav_frame.setObjectName("primaryNav")
-        nav_layout = QVBoxLayout(nav_frame)
-        nav_layout.setContentsMargins(0, 0, 0, 0)
-        nav_layout.setSpacing(3)
+        layout.setContentsMargins(6, 10, 6, 10)
+        layout.setSpacing(4)
+        brand = QLabel("DS")
+        brand.setObjectName("brandTitle")
+        brand.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        brand.setToolTip("DeepSonder")
+        layout.addWidget(brand)
+        self.quick_open_button = self._rail_button("search", "查找", "快速打开章节与资料（Ctrl+P）")
+        self.quick_open_button.clicked.connect(self.quick_open_requested)
+        layout.addWidget(self.quick_open_button)
+        # Project identity lives beside the document directory, not in the rail.
+        self.project_name = QLabel(self)
+        self.project_name.hide()
+        short_labels = {"writing": "写作", "canon": "资料", "memory": "记忆", "reports": "报告"}
         for route, icon_name, label in self.ROUTES:
-            button = IconTextButton(icon_name, label)
-            button.set_rail_anchor(self.NAV_ANCHOR_RATIO)
-            button.setObjectName("primaryNavButton")
-            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button = self._rail_button(icon_name, short_labels.get(route, label), label)
             button.clicked.connect(lambda _checked=False, target=route: self.route_requested.emit(target))
-            nav_layout.addWidget(button)
+            layout.addWidget(button)
             self.buttons[route] = button
-        nav_layout.addStretch(1)
-        layout.addWidget(nav_frame, 1)
-
-        divider = QFrame()
-        divider.setFrameShape(QFrame.Shape.HLine)
-        divider.setObjectName("navDivider")
-        layout.addWidget(divider)
-        trash = IconTextButton("delete_sweep", "回收站")
-        trash.set_rail_anchor(self.NAV_ANCHOR_RATIO)
-        trash.setObjectName("primaryNavButton")
-        trash.setCursor(Qt.CursorShape.PointingHandCursor)
-        trash.setToolTip("打开回收站")
+        layout.addStretch(1)
+        trash = self._rail_button("delete_sweep", "回收站", "打开回收站")
         trash.clicked.connect(lambda _checked=False: self.trash_requested.emit())
-        self.buttons["trash"] = trash
-        self.trash_button = trash
+        self.buttons["trash"] = self.trash_button = trash
         layout.addWidget(trash)
-
-        settings = IconTextButton("settings", "设置")
-        settings.set_rail_anchor(self.NAV_ANCHOR_RATIO)
-        settings.setObjectName("primaryNavButton")
-        settings.setCursor(Qt.CursorShape.PointingHandCursor)
+        settings = self._rail_button("settings", "设置", "应用设置")
         settings.clicked.connect(lambda: self.route_requested.emit("settings"))
         self.buttons["settings"] = settings
         layout.addWidget(settings)
-        local = QLabel("本地优先 · dsh headless")
-        local.setObjectName("navHint")
-        local.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(local)
 
         self.set_trash_enabled(False)
         self.set_active("dashboard")
+
+    def _rail_button(self, icon: str, label: str, tooltip: str) -> IconTextButton:
+        button = IconTextButton(icon, label)
+        button.set_vertical()
+        button.setFixedHeight(56)
+        button.setObjectName("primaryNavButton")
+        button.setToolTip(tooltip)
+        button.setAccessibleName(tooltip)
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        return button
 
     def set_project(self, name: str | None) -> None:
         self.project_name.setText(name or "尚未打开项目")

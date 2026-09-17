@@ -292,7 +292,7 @@ class Inspector(QWidget):
         header_layout.setContentsMargins(0, 0, 0, 0)
         title_box = QVBoxLayout()
         title_box.setSpacing(1)
-        title = QLabel("故事雷达")
+        title = QLabel("写作助手")
         title.setObjectName("panelTitle")
         subtitle = QLabel("上下文、记忆与检查结果")
         subtitle.setObjectName("mutedLabel")
@@ -302,7 +302,7 @@ class Inspector(QWidget):
         toggle_btn = QToolButton()
         toggle_btn.setObjectName("panelToggleButton")
         set_button_icon(toggle_btn, "close", size=17)
-        toggle_btn.setToolTip("收起故事雷达（Ctrl+Shift+I 可恢复）")
+        toggle_btn.setToolTip("收起写作助手（Ctrl+Shift+I 可恢复）")
         toggle_btn.clicked.connect(self.toggle_requested)
         header_layout.addWidget(toggle_btn)
         layout.addWidget(header)
@@ -319,9 +319,9 @@ class Inspector(QWidget):
         }
         self._context_reports: list[PromptContextReport] = []
         self.context_browser.anchorClicked.connect(self._on_context_link)
-        self.tabs.addTab(self.context_browser, "上下文")
+        self.tabs.addTab(self.context_browser, "本章资料")
         self.tabs.addTab(self.memory_browser, "记忆")
-        self.tabs.addTab(self.report_browser, "报告")
+        self.tabs.addTab(self.report_browser, "检查结果")
         layout.addWidget(self.tabs, 1)
         self.set_theme({"theme": "light"})
 
@@ -375,6 +375,16 @@ class Inspector(QWidget):
             self.context_browser,
             render_context_reports(self._context_reports),
         )
+        self.tabs.setCurrentWidget(self.context_browser)
+
+    def clear_task_context(self) -> None:
+        self._context_reports = []
+
+    def show_task_context(self) -> None:
+        """Restore the task report even after normal chapter navigation refreshed the tab."""
+        content = (render_context_reports(self._context_reports) if self._context_reports else
+                   "<h2>本次上下文</h2><p>本次任务尚未提供上下文用量报告。</p>")
+        self._set_browser_html(self.context_browser, content)
         self.tabs.setCurrentWidget(self.context_browser)
 
     def context_report_payload(self) -> str:

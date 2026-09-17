@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "backed_up": [
+    "memory/story_state.json"
+  ],
+  "created": [
+    "memory/foreshadowing.json",
+    "canon/system_registry.json",
+    ".novalist/project.json"
+  ]
+}

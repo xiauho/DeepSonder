@@ -4,7 +4,7 @@ import re
 import shlex
 from typing import Any
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSpinBox,
     QTextBrowser,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -863,40 +864,35 @@ class SettingsPage(QWidget):
         super().__init__(parent)
         self.setObjectName("settingsPage")
         self._config = dict(config)
+        self._loading_form = True
+        self._save_error = ""
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(30, 26, 34, 30)
-        root.setSpacing(18)
+        root.setContentsMargins(20, 16, 20, 18)
+        root.setSpacing(10)
         header = QFrame()
         header.setObjectName("pageHeader")
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(0, 0, 0, 0)
         title_box = QVBoxLayout()
         title_box.setSpacing(4)
-        eyebrow = QLabel("SETTINGS / WORKSPACE")
-        eyebrow.setObjectName("eyebrow")
-        title = QLabel("设置")
-        title.setObjectName("pageTitle")
         subtitle = QLabel("只配置 DeepSonder 本身和本机 DeepSeek Harness，不保存任何 API 密钥。")
         subtitle.setObjectName("mutedLabel")
-        title_box.addWidget(eyebrow)
-        title_box.addWidget(title)
+        subtitle.setWordWrap(True)
         title_box.addWidget(subtitle)
         header_layout.addLayout(title_box, 1)
-        save = QPushButton("保存设置")
+        save = self.save_button = QPushButton("保存设置")
         save.setObjectName("accentButton")
         save.clicked.connect(self._emit_save)
         header_layout.addWidget(save, 0, Qt.AlignmentFlag.AlignTop)
         root.addWidget(header)
-
-        scroll = QScrollArea()
-        scroll.setObjectName("pageScroll")
-        scroll.setWidgetResizable(True)
-        content = QWidget()
-        content.setObjectName("pageContent")
-        content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(2, 2, 10, 12)
-        content_layout.setSpacing(14)
+        self.feedback = QLabel("设置已保存")
+        self.feedback.setWordWrap(True)
+        self.feedback.setObjectName("mutedLabel")
+        root.addWidget(self.feedback)
+        self.tabs = QTabWidget()
+        self.tabs.setAccessibleName("设置分类")
+        root.addWidget(self.tabs, 1)
 
         writing = QFrame()
         writing.setObjectName("settingsSection")
@@ -951,7 +947,6 @@ class SettingsPage(QWidget):
         writing_form.addRow("前文参考说明", self.history_preview)
         writing_form.addRow("远期参考（扩写/续写/检查）", self.history_remote)
         writing_layout.addLayout(writing_form)
-        content_layout.addWidget(writing)
 
         ai = QFrame()
         ai.setObjectName("settingsSection")
@@ -969,6 +964,14 @@ class SettingsPage(QWidget):
         ai_layout.addWidget(ai_title)
         ai_layout.addWidget(ai_hint)
         ai_form = QFormLayout()
+        advanced_form = QFormLayout()
+        self.advanced_toggle = QPushButton("高级启动参数")
+        self.advanced_toggle.setCheckable(True)
+        self.advanced_toggle.setObjectName("ghostButton")
+        self.advanced_content = QWidget()
+        self.advanced_content.setLayout(advanced_form)
+        self.advanced_content.hide()
+        self.advanced_toggle.toggled.connect(self.advanced_content.setVisible)
         self.command = QLineEdit()
         self.command.setPlaceholderText("dsh 或可执行文件路径")
         self.launcher_args = QLineEdit()
@@ -1010,16 +1013,28 @@ class SettingsPage(QWidget):
         self.timeout.setRange(30, 1800)
         self.timeout.setSuffix(" 秒")
         ai_form.addRow("命令", self.command)
-        ai_form.addRow("启动参数", self.launcher_args)
-        ai_form.addRow("运行配置", self.profile)
-        ai_form.addRow("提示词传输", self.prompt_transport)
+        advanced_form.addRow("启动参数", self.launcher_args)
+        advanced_form.addRow("运行配置", self.profile)
+        advanced_form.addRow("提示词传输", self.prompt_transport)
         ai_form.addRow("模型上下文窗口", self.model_context_window)
         ai_form.addRow("自定义窗口", self.custom_context_window)
         ai_form.addRow("上下文使用策略", self.context_strategy)
         ai_form.addRow("自动预算", self.context_budget_preview)
-        ai_form.addRow("附加参数", self.extra_args)
+        advanced_form.addRow("附加参数", self.extra_args)
         ai_form.addRow("最长等待", self.timeout)
         ai_layout.addLayout(ai_form)
+        ai_layout.addWidget(self.advanced_toggle)
+        ai_layout.addWidget(self.advanced_content)
+        self.parameter_errors = {}
+        for field in (self.launcher_args, self.extra_args):
+            error = QLabel()
+            error.setObjectName("saveErrorMessage")
+            error.setWordWrap(True)
+            error.hide()
+            row, _role = advanced_form.getWidgetPosition(field)
+            advanced_form.insertRow(row + 1, error)
+            self.parameter_errors[field] = error
+            field.textChanged.connect(lambda _text, target=field: self._clear_parameter_error(target))
         ai_actions = QHBoxLayout()
         self.test_button = QPushButton("测试 dsh")
         self.test_button.setObjectName("secondaryButton")
@@ -1027,10 +1042,10 @@ class SettingsPage(QWidget):
         self.test_status = QLabel("未测试")
         self.test_status.setObjectName("mutedLabel")
         ai_actions.addWidget(self.test_button)
-        ai_actions.addWidget(self.test_status)
+        self.test_status.setWordWrap(True)
+        ai_actions.addWidget(self.test_status, 1)
         ai_actions.addStretch(1)
         ai_layout.addLayout(ai_actions)
-        content_layout.addWidget(ai)
 
         appearance = QFrame()
         appearance.setObjectName("settingsSection")
@@ -1054,7 +1069,6 @@ class SettingsPage(QWidget):
         appearance_form.addRow("主题", self.theme)
         appearance_form.addRow("界面字号", self.ui_font_size)
         appearance_layout.addLayout(appearance_form)
-        content_layout.addWidget(appearance)
 
         privacy = QFrame()
         privacy.setObjectName("settingsSection")
@@ -1071,15 +1085,34 @@ class SettingsPage(QWidget):
         privacy_text.setWordWrap(True)
         privacy_layout.addWidget(privacy_title)
         privacy_layout.addWidget(privacy_text)
-        content_layout.addWidget(privacy)
-        content_layout.addStretch(1)
-        scroll.setWidget(content)
-        root.addWidget(scroll, 1)
+        self.section_scrolls = []
+        for label, section in (("写作", writing), ("AI 与连接", ai), ("外观", appearance), ("数据", privacy)):
+            section_scroll = QScrollArea()
+            section_scroll.setWidgetResizable(True)
+            section_scroll.setWidget(section)
+            self.tabs.addTab(section_scroll, label)
+            self.section_scrolls.append(section_scroll)
+            section.layout().addStretch(1)
+        self.writing_form = writing_form
+        self.ai_form = ai_form
+        for form in (writing_form, ai_form, advanced_form, appearance_form):
+            form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+            for row in range(form.rowCount()):
+                field_item = form.itemAt(row, QFormLayout.ItemRole.FieldRole)
+                label_item = form.itemAt(row, QFormLayout.ItemRole.LabelRole)
+                if field_item and label_item and field_item.widget() and isinstance(label_item.widget(), QLabel):
+                    field_item.widget().setAccessibleName(label_item.widget().text())
 
         reset = QPushButton("恢复默认设置")
         reset.setObjectName("ghostButton")
         reset.clicked.connect(self._restore_defaults)
-        root.addWidget(reset, 0, Qt.AlignmentFlag.AlignLeft)
+        footer = QHBoxLayout()
+        footer.addWidget(reset)
+        footer.addStretch()
+        self.discard_button = QPushButton("放弃修改")
+        self.discard_button.clicked.connect(lambda: self.set_config(self._latest_config))
+        footer.addWidget(self.discard_button)
+        root.addLayout(footer)
         self.auto_save.toggled.connect(self.auto_save_interval.setEnabled)
         self.model_context_window.currentIndexChanged.connect(
             self._update_context_budget_preview
@@ -1093,11 +1126,49 @@ class SettingsPage(QWidget):
         self.ai_history_mode.currentIndexChanged.connect(self._update_context_budget_preview)
         self.ai_context_history_chapters.valueChanged.connect(self._update_context_budget_preview)
         self.history_remote.toggled.connect(self._update_context_budget_preview)
+        self._fields = self.findChildren(QLineEdit) + self.findChildren(QSpinBox) + self.findChildren(QComboBox) + self.findChildren(QCheckBox)
+        # Spin-box line edits are implementation details, not independent fields.
+        self._fields = [field for field in self._fields if not (isinstance(field, QLineEdit) and isinstance(field.parent(), QSpinBox))]
+        for field in self._fields:
+            signal = field.textChanged if isinstance(field, QLineEdit) else field.valueChanged if isinstance(field, QSpinBox) else field.currentIndexChanged if isinstance(field, QComboBox) else field.toggled
+            signal.connect(self._update_draft)
         self.set_config(config)
 
+    def _snapshot(self):
+        return tuple(field.text() if isinstance(field, QLineEdit) else field.value() if isinstance(field, QSpinBox) else field.currentData() if isinstance(field, QComboBox) else field.isChecked() for field in self._fields)
+
+    def has_unsaved_changes(self):
+        return hasattr(self, "_baseline") and self._snapshot() != self._baseline
+
+    def _update_draft(self, *_args):
+        if self._loading_form:
+            return
+        dirty = self.has_unsaved_changes()
+        self.save_button.setEnabled(dirty)
+        self.discard_button.setEnabled(dirty)
+        self.feedback.setObjectName("saveErrorMessage" if self._save_error else "mutedLabel")
+        self.feedback.style().unpolish(self.feedback)
+        self.feedback.style().polish(self.feedback)
+        self.feedback.setText(self._save_error or ("有未保存的修改；切换页面会保留草稿，保存后生效。" if dirty else "设置已保存"))
+
+    def show_save_error(self, message):
+        self._save_error = "设置保存失败：" + str(message)
+        self._update_draft()
+
+    def synchronize_config(self, config):
+        if self.has_unsaved_changes():
+            self._latest_config = normalize_config(config)
+        else:
+            self.set_config(config)
+
+    def edited_values(self, candidate):
+        return {key: value for key, value in candidate.items() if value != self._config.get(key)}
+
     def set_config(self, config: dict) -> None:
+        self._loading_form = True
         config = normalize_config(config)
         self._config = dict(config)
+        self._latest_config = dict(config)
         self.auto_save.setChecked(bool(config.get("auto_save", True)))
         self.auto_save_interval.setValue(int(config.get("auto_save_interval", 30)))
         self.editor_font_size.setValue(int(config.get("editor_font_size", 16)))
@@ -1139,6 +1210,12 @@ class SettingsPage(QWidget):
         self.ui_font_size.setValue(int(config.get("ui_font_size", 14)))
         self.auto_save_interval.setEnabled(self.auto_save.isChecked())
         self._update_context_budget_preview()
+        self._baseline = self._snapshot()
+        self._loading_form = False
+        self._save_error = ""
+        for field in self.parameter_errors:
+            self._clear_parameter_error(field)
+        self._update_draft()
 
     def _selected_model_context_window(self) -> int:
         selected = int(self.model_context_window.currentData() or 0)
@@ -1149,6 +1226,7 @@ class SettingsPage(QWidget):
     def _update_context_budget_preview(self) -> None:
         is_custom = self.model_context_window.currentData() == -1
         self.custom_context_window.setEnabled(is_custom)
+        self.ai_form.setRowVisible(self.custom_context_window, is_custom)
         capacity = derive_context_capacity(
             self._selected_model_context_window(),
             self.context_strategy.currentData(),
@@ -1165,6 +1243,7 @@ class SettingsPage(QWidget):
         )
         mode = self.ai_history_mode.currentData()
         self.ai_context_history_chapters.setEnabled(mode == "custom")
+        self.writing_form.setRowVisible(self.ai_context_history_chapters, mode == "custom")
         count = resolve_history_count(
             mode, self.ai_context_history_chapters.value(), capacity.strategy,
         )
@@ -1180,11 +1259,23 @@ class SettingsPage(QWidget):
         )
 
     def config(self) -> dict:
-        try:
-            launcher_args = shlex.split(self.launcher_args.text())
-            extra_args = shlex.split(self.extra_args.text())
-        except ValueError:
-            raise ValueError("启动参数或附加参数的引号不完整。") from None
+        parsed = []
+        for field, name in ((self.launcher_args, "启动参数"), (self.extra_args, "附加参数")):
+            try:
+                parsed.append(shlex.split(field.text()))
+            except ValueError:
+                message = f"{name}的引号不完整，请补齐成对的引号。"
+                error = self.parameter_errors[field]
+                error.setText(message)
+                field.setAccessibleDescription(message)
+                error.show()
+                self.tabs.setCurrentIndex(1)
+                self.advanced_toggle.setChecked(True)
+                self._invalid_parameter = field
+                QTimer.singleShot(0, self._reveal_invalid_parameter)
+                field.setFocus()
+                raise ValueError(message) from None
+        launcher_args, extra_args = parsed
         result = dict(self._config)
         result.update(
             {
@@ -1210,11 +1301,20 @@ class SettingsPage(QWidget):
         result.update(palette)
         return result
 
+    def _clear_parameter_error(self, field):
+        self.parameter_errors[field].hide()
+        field.setAccessibleDescription("")
+
+    def _reveal_invalid_parameter(self):
+        field = getattr(self, "_invalid_parameter", None)
+        if field is not None and self.tabs.currentIndex() == 1 and self.isVisible():
+            self.section_scrolls[1].ensureWidgetVisible(self.parameter_errors[field], 20, 20)
+
     def _emit_save(self) -> None:
         try:
             config = self.config()
         except ValueError as exc:
-            self.test_status.setText(str(exc))
+            self.feedback.setText(str(exc))
             return
         self.save_requested.emit(config)
 
@@ -1225,9 +1325,19 @@ class SettingsPage(QWidget):
         try:
             config = self.config()
         except ValueError as exc:
-            self.test_status.setText(str(exc))
+            self.feedback.setText(str(exc))
             return
         self.test_requested.emit(config)
 
     def _restore_defaults(self) -> None:
+        saved = dict(self._latest_config)
+        self.set_config(saved)
+        latest = dict(saved)
+        baseline = self._baseline
         self.set_config(DEFAULT_CONFIG)
+        self._config = saved
+        self._latest_config = latest
+        self._baseline = baseline
+        self._update_draft()
+        if self.has_unsaved_changes():
+            self.feedback.setText("默认值已载入草稿；点击保存设置后生效，也可放弃修改。")

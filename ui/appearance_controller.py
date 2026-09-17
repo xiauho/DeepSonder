@@ -45,7 +45,7 @@ class AppearanceController(QObject):
         if editor is not None and hasattr(editor, "set_theme"):
             editor.set_theme(self.config)
         self.left_panel.set_theme(self.config)
-        self.settings_page.set_config(self.config)
+        self.settings_page.synchronize_config(self.config)
         self.refresh_icons()
 
     def refresh_icons(self) -> None:

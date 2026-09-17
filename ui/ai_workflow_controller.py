@@ -57,6 +57,10 @@ class AIWorkflowController(QObject):
 
     output_requested = Signal(str)
     status_requested = Signal(str)
+    review_requested = Signal(object)
+    pending_review_changed = Signal()
+    review_finished = Signal()
+    check_report_ready = Signal()
 
     def __init__(
         self,
@@ -72,6 +76,7 @@ class AIWorkflowController(QObject):
         go_to_writing: Callable[[], bool],
         save_if_dirty: Callable[[], bool] | None = None,
         left_panel=None,
+        defer_result_review: bool = False,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -93,6 +98,9 @@ class AIWorkflowController(QObject):
             str, PendingForeshadowingResolution
         ] = {}
         self._plain_text_fallback_count = 0
+        self.defer_result_review = defer_result_review
+        self._pending_review = None
+        self._reviewing = False
 
         ai_controller.succeeded.connect(self._on_task_succeeded)
         report_signal = getattr(ai_engine_controller, "context_reported", None)
@@ -202,6 +210,9 @@ class AIWorkflowController(QObject):
 
     def check_from_reports(self) -> None:
         """Choose a chapter and run consistency checking without leaving reports."""
+        if self.has_pending_result:
+            self._emit_status("请先在 AI 任务面板审阅或放弃上一份结果")
+            return
         project = self.project_session.project
         if project is None:
             QMessageBox.information(self.parent, "尚未打开项目", "请先打开或新建一个小说项目。")
@@ -321,6 +332,9 @@ class AIWorkflowController(QObject):
         return True
 
     def repair_issue(self, issue: object) -> None:
+        if self.has_pending_result:
+            self._emit_status("请先在 AI 任务面板审阅或放弃上一份结果")
+            return
         if not isinstance(issue, dict):
             return
         if issue.get("recommended_target") != "chapter" or issue.get("repairability") != "automatic":
@@ -376,6 +390,9 @@ class AIWorkflowController(QObject):
         )
 
     def _prepare_request(self):
+        if self.has_pending_result:
+            self._emit_status("请先在 AI 任务面板审阅或放弃上一份结果")
+            return None
         project = self.project_session.project
         if project is None:
             QMessageBox.information(self.parent, "尚未打开项目", "请先打开或新建一个小说项目。")
@@ -500,6 +517,9 @@ class AIWorkflowController(QObject):
         task_context: object | None = None,
         editor_text: str | None = None,
     ) -> bool:
+        if self.has_pending_result:
+            self._emit_status("请先在 AI 任务面板审阅或放弃上一份结果")
+            return False
         project = self.project_session.project
         if project is None:
             return False
@@ -525,7 +545,42 @@ class AIWorkflowController(QObject):
         if callable(show_report):
             show_report(report)
 
+    @property
+    def has_pending_result(self) -> bool:
+        return self._pending_review is not None or self._reviewing
+
     def _on_task_succeeded(self, token, result) -> None:
+        if not self.defer_result_review:
+            self._review_task_result(token, result)
+            return
+        self._pending_review = (token, result)
+        self.review_requested.emit(token)
+        self.pending_review_changed.emit()
+        self._emit_status("AI 结果待审阅，尚未写入")
+
+    def review_pending_result(self) -> None:
+        if self._pending_review is None or self._reviewing:
+            return
+        token, result = self._pending_review
+        self._pending_review = None
+        self._reviewing = True
+        try:
+            self._review_task_result(token, result)
+        finally:
+            self._reviewing = False
+            self.pending_review_changed.emit()
+            self.review_finished.emit()
+
+    def discard_pending_result(self) -> None:
+        if self._pending_review is None:
+            return
+        token, _result = self._pending_review
+        self._pending_review = None
+        self.ai_controller.release_result(token)
+        self._emit_status("AI 结果已放弃，未写入")
+        self.pending_review_changed.emit()
+
+    def _review_task_result(self, token, result) -> None:
         try:
             if token.kind == "expand":
                 self._on_expansion_done(token, result)
@@ -983,6 +1038,7 @@ class AIWorkflowController(QObject):
         self._emit_status(f"章节已保存并更新 {len(updated)} 条伏笔状态")
 
     def _on_project_changed(self, _project) -> None:
+        self.discard_pending_result()
         self._pending_foreshadowing_resolutions.clear()
 
     @staticmethod
@@ -1035,6 +1091,7 @@ class AIWorkflowController(QObject):
             rendered,
             project=self.project_session.project,
         )
+        self.check_report_ready.emit()
 
     def _on_repair_done(self, token, result) -> None:
         task_context_getter = getattr(self.ai_controller, "result_context", None)
@@ -1261,7 +1318,8 @@ class AIWorkflowController(QObject):
         message = str(message or "AI 任务已完成").strip()
         self._emit_output(f"✅ {message}")
         self._emit_status(message)
-        QMessageBox.information(self.parent, "AI 任务完成", message)
+        if not self.defer_result_review:
+            QMessageBox.information(self.parent, "AI 任务完成", message)
 
     def _record_plain_text_fallbacks(self, count: int) -> None:
         count = max(0, int(count))

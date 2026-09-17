@@ -91,13 +91,9 @@ def main() -> int:
     config = load_config()
     apply_theme(app, config)
 
-    window = MainWindow(config=config)
-    screen = app.primaryScreen()
-    if screen is not None:
-        area = screen.availableGeometry()
-        window.resize(int(area.width() * 0.75), int(area.height() * 0.82))
-    else:
-        window.resize(1440, 900)
+    from core.app_paths import app_config_dir
+    window = MainWindow(config=config, ui_state_path=app_config_dir() / "ui-state.json")
+    window.workspace_state.restore_geometry()
     window.show()
 
     return app.exec()

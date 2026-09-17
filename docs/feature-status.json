@@ -1,0 +1,123 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-09-17",
+  "product": "DeepSonder-PySide6",
+  "maintenance_policy": "independent",
+  "features": [
+    {
+      "id": "project.create",
+      "requirement": "required",
+      "status": "supported"
+    },
+    {
+      "id": "legacy_project.import",
+      "requirement": "required",
+      "status": "supported"
+    },
+    {
+      "id": "chapter.edit",
+      "requirement": "required",
+      "status": "supported"
+    },
+    {
+      "id": "memory.extract",
+      "requirement": "required",
+      "status": "supported"
+    },
+    {
+      "id": "character.recognize",
+      "requirement": "required",
+      "status": "supported"
+    },
+    {
+      "id": "relationship.reconstruct",
+      "requirement": "required",
+      "status": "supported"
+    },
+    {
+      "id": "consistency.check",
+      "requirement": "required",
+      "status": "supported"
+    },
+    {
+      "id": "ai.expand",
+      "requirement": "required",
+      "status": "supported"
+    },
+    {
+      "id": "ai.continue",
+      "requirement": "required",
+      "status": "supported"
+    },
+    {
+      "id": "graph.visualization",
+      "requirement": "optional",
+      "status": "basic"
+    },
+    {
+      "id": "workspace.compact_navigation_and_panel_state",
+      "requirement": "required",
+      "status": "supported"
+    },
+    {
+      "id": "workspace.chapter_canon_navigation",
+      "requirement": "required",
+      "status": "supported",
+      "note": "Separate chapter/canon browsing with per-scope search, selection, expansion and scroll state; explicit navigation reveals its target."
+    },
+    {
+      "id": "ai.task_panel_and_deferred_review",
+      "requirement": "required",
+      "status": "supported",
+      "note": "Session-local task summary and logs; explicit review/discard, retained context snapshot, guarded commit, pending-result protection on new tasks/project switches/exit. Existing confirmation dialogs remain authoritative."
+    },
+    {
+      "id": "workspace.persistent_layout_and_reading_position",
+      "requirement": "required",
+      "status": "supported",
+      "notes": "Profile-local window geometry, sidebar preferences and per-project document/cursor/scroll restoration; missing-document fallback."
+    },
+    {
+      "id": "workspace.actionable_ai_availability",
+      "requirement": "required",
+      "status": "supported",
+      "notes": "AI creation menu explains unavailable actions and offers chapter, project, task or settings navigation."
+    },
+    {
+      "id": "workspace.persistent_save_error_feedback",
+      "requirement": "required",
+      "status": "supported",
+      "notes": "Saving feedback and persistent error banner; successful save clears failure; external revision conflicts remain protected."
+    },
+    {
+      "id": "workspace.document_navigation_recovery",
+      "requirement": "required",
+      "status": "supported",
+      "notes": "Elided titles with full tooltips, clear empty-search action and locate-current-document shortcut button."
+    },
+    {
+      "id": "workspace.quick_document_open",
+      "requirement": "required",
+      "status": "supported",
+      "notes": "Ctrl+P searches current project navigation metadata across chapters and canon; recently opened documents first; save checks and project/path revalidation remain authoritative."
+    },
+    {
+      "id": "workspace.command_discovery_and_keyboard_navigation",
+      "requirement": "required",
+      "status": "supported",
+      "notes": "Ctrl+Shift+P searches existing actions with shortcut and unavailable-reason display; live availability checked before execution; F6 returns to editor, Ctrl+Alt+F searches directory, Ctrl+Alt+L locates current document. Focus-mode shortcuts remain available."
+    },
+    {
+      "id": "settings.grouped_forms_and_inline_validation",
+      "requirement": "required",
+      "status": "supported",
+      "notes": "Writing, AI/connection, appearance and data tabs; collapsed advanced launcher options, conditional custom rows, inline argument errors with focus and scroll recovery."
+    },
+    {
+      "id": "settings.drafts_and_save_feedback",
+      "requirement": "required",
+      "status": "supported",
+      "notes": "Session-local draft retention across routes and theme changes; explicit save/discard, staged defaults, save failure feedback and exit guard; apply only edited values to current configuration."
+    }
+  ]
+}

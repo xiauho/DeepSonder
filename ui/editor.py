@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QStackedWidget,
+    QSizePolicy,
     QTextBrowser,
     QTextEdit,
     QToolButton,
@@ -27,6 +28,7 @@ from core.project import NovelProject
 from core.storage import atomic_write_text
 from core.text_metrics import count_content_chars
 from ui.icons import set_button_icon
+from ui.elided_label import ElidedLabel
 from ui.theme import document_css
 
 
@@ -101,6 +103,8 @@ class Editor(QWidget):
     dirty_changed = Signal(bool)
     stats_changed = Signal(str)
     file_saved = Signal(str)
+    document_about_to_change = Signal()
+    document_loaded = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -120,16 +124,21 @@ class Editor(QWidget):
         header = QFrame()
         header.setObjectName("editorHeader")
         header_layout = QHBoxLayout(header)
+        self.header_layout = header_layout
         header_layout.setContentsMargins(2, 0, 2, 0)
 
         title_box = QVBoxLayout()
         title_box.setSpacing(2)
-        self.title_label = QLabel("开始你的故事")
+        self.title_label = ElidedLabel("开始你的故事")
         self.title_label.setObjectName("documentTitle")
+        self.title_label.setMinimumWidth(0)
+        self.title_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.path_label = QLabel("从左侧选择文件，或创建一个新章节")
-        self.path_label.setObjectName("mutedLabel")
+        self.path_label.setObjectName("saveErrorMessage")
+        self.path_label.setWordWrap(True)
+        self.path_label.setMinimumWidth(0)
+        self.path_label.hide()
         title_box.addWidget(self.title_label)
-        title_box.addWidget(self.path_label)
         header_layout.addLayout(title_box, 1)
 
         self.source_button = QToolButton()
@@ -162,6 +171,7 @@ class Editor(QWidget):
         self.dirty_badge.setObjectName("savedBadge")
         header_layout.addWidget(self.dirty_badge, 0, Qt.AlignmentFlag.AlignVCenter)
         layout.addWidget(header)
+        layout.addWidget(self.path_label)
 
         self.find_bar = QFrame()
         self.find_bar.setObjectName("findBar")
@@ -248,6 +258,35 @@ class Editor(QWidget):
         self._find_timer.setSingleShot(True)
         self._find_timer.setInterval(FIND_DEBOUNCE_MS)
         self._find_timer.timeout.connect(self._update_match_count)
+
+    def attach_document_actions(self, actions: QWidget) -> None:
+        self._document_actions = actions
+        self._actions_stacked = None
+        self._layout_document_actions()
+
+    def _layout_document_actions(self) -> None:
+        actions = getattr(self, "_document_actions", None)
+        if actions is None:
+            return
+        # Allow the title and mode controls their own row in a narrow editor.
+        needed = (actions.sizeHint().width() + self.source_button.sizeHint().width()
+                  + self.preview_button.sizeHint().width() + self.dirty_badge.sizeHint().width() + 230)
+        stacked = self.width() < needed
+        if stacked == self._actions_stacked:
+            return
+        self._actions_stacked = stacked
+        was_hidden = actions.isHidden()
+        if stacked:
+            self.header_layout.removeWidget(actions)
+            self.layout().insertWidget(1, actions, 0, Qt.AlignmentFlag.AlignRight)
+        else:
+            self.layout().removeWidget(actions)
+            self.header_layout.addWidget(actions)
+        actions.setVisible(not was_hidden)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._layout_document_actions()
 
     def set_view_mode(self, mode: str) -> None:
         """Switch between editable source and a read-only in-memory preview."""
@@ -338,6 +377,8 @@ class Editor(QWidget):
         revision: str | tuple[int, int, int] | None,
         title: str,
     ) -> None:
+        self.document_about_to_change.emit()
+        self._save_failed = False
         self._loading = True
         self._current_path = str(path)
         self._current_category = str(category)
@@ -347,6 +388,8 @@ class Editor(QWidget):
         self._loading = False
         self._set_dirty(False)
         self.title_label.setText(title)
+        self.title_label.setToolTip(f"{title}\n{category} / {Path(path).name}")
+        self.path_label.hide()
         self.path_label.setText(f"{category}  /  {Path(path).name}")
         if self._view_mode == "preview":
             self._render_preview(reset_scroll=True)
@@ -354,8 +397,11 @@ class Editor(QWidget):
         else:
             self.text_edit.setFocus()
         self._update_stats()
+        self.document_loaded.emit()
 
     def clear_document(self, message: str = "未打开文件") -> None:
+        self.document_about_to_change.emit()
+        self._save_failed = False
         self._loading = True
         self.text_edit.clear()
         self.preview_browser.clear()
@@ -364,6 +410,8 @@ class Editor(QWidget):
         self._current_category = ""
         self._loaded_file_revision = None
         self.title_label.setText(message)
+        self.title_label.setToolTip(message)
+        self.path_label.hide()
         self.path_label.setText("从左侧选择文件，或创建一个新章节")
         self._set_dirty(False)
 
@@ -377,8 +425,7 @@ class Editor(QWidget):
         try:
             atomic_write_text(path, self.text_edit.toPlainText())
         except OSError as exc:
-            self.dirty_badge.setText("保存失败")
-            self.path_label.setText(f"保存失败：{exc}")
+            self.show_save_error(str(exc))
             return False
         self.mark_saved(self._file_revision(path))
         return True
@@ -395,12 +442,20 @@ class Editor(QWidget):
             return
         self.text_edit.document().setModified(False)
         self._loaded_file_revision = revision
+        self._save_failed = False
         self._set_dirty(False)
+        self.path_label.hide()
         self.file_saved.emit(self._current_path)
 
+    def show_saving(self) -> None:
+        self.dirty_badge.setText("正在保存…")
+        self.dirty_badge.repaint()
+
     def show_save_error(self, message: str) -> None:
-        self.dirty_badge.setText("保存失败")
+        self._save_failed = True
+        self._set_dirty(self._dirty)
         self.path_label.setText(f"保存失败：{message}")
+        self.path_label.show()
 
     def has_external_change(self) -> bool:
         """Return whether the loaded file changed outside this editor."""
@@ -612,8 +667,8 @@ class Editor(QWidget):
     def _set_dirty(self, dirty: bool) -> None:
         changed = dirty != self._dirty
         self._dirty = dirty
-        self.dirty_badge.setText("未保存" if dirty else "已保存")
-        self.dirty_badge.setObjectName("dirtyBadge" if dirty else "savedBadge")
+        self.dirty_badge.setText("保存失败" if getattr(self, "_save_failed", False) else "未保存" if dirty else "已保存")
+        self.dirty_badge.setObjectName("saveErrorBadge" if getattr(self, "_save_failed", False) else "dirtyBadge" if dirty else "savedBadge")
         self.dirty_badge.style().unpolish(self.dirty_badge)
         self.dirty_badge.style().polish(self.dirty_badge)
         if changed:

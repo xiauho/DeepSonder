@@ -1,56 +1,30 @@
-# DeepSonder dual-series workspace instructions
+# DeepSonder-PySide6 workspace instructions
 
-This repository is the source workspace for **DeepSonder-PySide6**. Its sibling
-workspace is `D:\GitHub-store\DeepSonder`, which contains
-**DeepSonder-Electron**.
+This repository is the standalone source workspace for **DeepSonder-PySide6**.
+The displayed product brand is **DeepSonder**. PySide6 and Electron are independently maintained series with separate roadmaps and releases.
 
-## Mandatory feature-parity workflow
+## Independent development and delivery
 
-- Treat user-facing capabilities as a two-series product contract. Before
-  changing behavior in either workspace, inspect the corresponding behavior in
-  the sibling workspace.
-- For every feature addition, removal, behavior change, bug fix, project-data
-  change, AI workflow change, or import rule change, update both series in the
-  same task whenever the counterpart applies.
-- Add or update equivalent tests in both workspaces. The UI implementation and
-  interaction design may differ, but observable behavior, safety boundaries,
-  and user-visible capability must remain equivalent.
-- Update `docs/feature-parity.json` in both workspaces. A feature may be marked
-  `platform_specific` only when it depends on PySide6/Electron packaging or
-  operating-system integration and does not change product capability.
-- If the counterpart cannot be completed, record it as `pending` with a reason
-  in both parity files, report the gap to the user, and do not describe the
-  feature as complete across both series.
-- Before a release, require every `required` feature to be `supported` in both
-  workspaces and require each workspace's tests and build checks to pass.
+- Scope implementation, tests, documentation, packaging, and release checks to this repository unless the user explicitly requests work on another series.
+- Do not require an Electron inspection, counterpart change, equivalent test, or synchronized release before completing a PySide6 task.
+- UI, capabilities, AI workflows, project formats, and implementation details may evolve independently. Another series may be used as a design reference when relevant or requested; it is not a compatibility or delivery contract.
+- Build, test, and package from this repository root. Never reach into another workspace at runtime or while packaging.
+- Keep `docs/feature-status.json` synchronized with this series' user-facing capabilities. `docs/feature-parity.json` is a historical archive, not a release gate or a file requiring continued synchronization.
+- Before releasing PySide6, require its own required features to be supported and its own applicable tests and build checks to pass. Another series' status never blocks this release.
+- Add or update meaningful tests for behavior changes, including UI state, navigation, AI review, and data safety. Validate layout changes at narrow desktop widths, light/dark themes, and increased display scaling.
 
 ## Product and compatibility boundaries
 
-- The displayed brand is **DeepSonder**. Use the series names
-  **DeepSonder-PySide6** and **DeepSonder-Electron** for executable names,
-  packages, configuration paths, diagnostics, and release artifacts.
-- The two series have independent versions, installers, configuration,
-  caches, release manifests, and update channels. Never allow one series to
-  install or consume the other series' release package.
-- Do not add in-place upgrade or protocol compatibility for old Novalist test
-  releases. Compatibility is limited to a read-only legacy-project importer
-  that creates a new project from project name, author, and ordered chapter
-  Markdown.
-- Never modify an imported legacy source project. Do not import old memory,
-  recognized characters, canon, relationship graphs, AI results, caches,
-  proposals, update state, or trash. Rebuild derived information from the
-  imported manuscript after explicit user action.
-- Keep generated folders and dependencies out of repository copies and release
-  inputs unless explicitly required: `.venv`, `node_modules`, `build`, `dist`,
-  caches, and local release output.
+- Use **DeepSonder-PySide6** for executable names, packages, configuration paths, diagnostics, and release artifacts.
+- Versions, installers, configuration, caches, release manifests, and update channels are independent. Never install or consume an Electron release package in PySide6.
+- Do not assume cross-series project-format or protocol compatibility. Add any explicit importer/exporter only within the user's requested scope and document its boundaries.
+- Do not add in-place upgrades or protocol compatibility for old Novalist test releases. Legacy compatibility is limited to a read-only importer that creates a new project from project name, author, and ordered chapter Markdown.
+- Never modify an imported legacy source project. Do not import old memory, recognized characters, canon, relationship graphs, AI results, caches, proposals, update state, or trash. Rebuild derived information after explicit user action.
+- Keep AI result review and explicit write confirmation, stale-context checks, cancellation, and user-data protections intact when reorganizing UI.
 
-## Cross-workspace coordination
+## Workspace and artifact hygiene
 
-- The PySide6 workspace remains at `D:\GitHub-store\novalist`; do not rename or
-  relocate this directory.
-- The Electron workspace remains at `D:\GitHub-store\DeepSonder`.
-- Each workspace must build and test from its own root without reaching into the
-  sibling workspace at runtime or during release packaging.
-- Shared test fixtures may be copied between repositories, but releases must be
-  self-contained. Record intentional fixture or behavior divergence in both
-  parity files.
+- Treat the current repository root as authoritative; do not depend on historical absolute workspace paths or relocate repositories without an explicit request.
+- Preserve pre-existing changes and user project data. Use temporary/copied projects for tests and UI previews; never initialize, migrate, or mutate the checked-in demo or personal projects just to capture a screenshot.
+- Keep generated folders and dependencies out of repository copies and release inputs unless explicitly required: `.venv`, `node_modules`, `build`, `dist`, caches, and local release output.
+- Shared reference fixtures may be copied intentionally, but this repository and its releases must remain self-contained.

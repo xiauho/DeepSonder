@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QObject, QTimer
+from PySide6.QtCore import QObject, QTimer, Signal
 
 
 class WindowStateController(QObject):
     """Own page presentation, focus mode, side panels, and output visibility."""
+
+    panels_changed = Signal()
 
     WRITING_ROUTES = frozenset(("writing", "canon"))
 
@@ -53,6 +55,10 @@ class WindowStateController(QObject):
         self._focus_mode = False
         self._left_panel_width = 270
         self._inspector_width = 330
+        self.navigation_visible = True
+        self.inspector_visible = False
+        self._output_visible = False
+        self.inspector.hide()
 
     @property
     def current_route(self) -> str:
@@ -64,18 +70,17 @@ class WindowStateController(QObject):
 
     def activate_route(self, route: str) -> None:
         """Show a route and apply the corresponding shared shell state."""
+        if self._focus_mode:
+            self.exit_focus_mode()
+        self._current_route = route
         if route in self.WRITING_ROUTES:
-            self._focus_mode = False
-            self._set_focus_chrome(True)
             self.left_panel.set_scope("canon" if route == "canon" else "all")
             self.page_stack.setCurrentWidget(self.writing_page)
         else:
             self.page_stack.setCurrentWidget(self.pages[route])
-            self.action_bar.hide()
-
-        self._current_route = route
+        self._set_focus_chrome(True)
         self.primary_nav.set_active(route)
-        self._apply_action_bar_visibility()
+        QTimer.singleShot(0, self._restore_side_panel_sizes)
 
     def toggle_focus_mode(self) -> None:
         self._focus_mode = not self._focus_mode
@@ -97,19 +102,23 @@ class WindowStateController(QObject):
         self._set_focus_chrome(visible)
 
     def toggle_navigation_panel(self) -> None:
-        self._toggle_side_panel(self.left_panel, 0, "_left_panel_width")
+        self.navigation_visible = not self.navigation_visible
+        self._toggle_side_panel(self.left_panel, 0, "_left_panel_width", self.navigation_visible)
 
     def toggle_inspector(self) -> None:
-        self._toggle_side_panel(self.inspector, 2, "_inspector_width")
+        self.inspector_visible = not self.inspector_visible
+        self._toggle_side_panel(self.inspector, 2, "_inspector_width", self.inspector_visible)
 
     def toggle_output(self) -> None:
-        self.output_container.setVisible(not self.output_container.isVisible())
+        self._output_visible = not self._output_visible
+        self.output_container.setVisible(self._output_visible and not self._focus_mode)
         if self.output_container.isVisible():
             self.outer_splitter.setSizes([700, 180])
 
     def show_output(self, sizes: list[int] | tuple[int, int] = (690, 190)) -> None:
         """Show the AI output panel using the requested splitter proportions."""
-        self.output_container.show()
+        self._output_visible = True
+        self.output_container.setVisible(not self._focus_mode)
         self.outer_splitter.setSizes(list(sizes))
 
     def remember_panel_sizes(self, _position: int, _index: int) -> None:
@@ -125,15 +134,16 @@ class WindowStateController(QObject):
         if self._focus_mode:
             visible = False
         self.primary_nav.setVisible(visible)
-        self.app_header.setVisible(visible)
+        self.app_header.setVisible(visible and self._current_route not in self.WRITING_ROUTES)
         self.menu_bar.setVisible(visible)
         self.status_bar.setVisible(visible)
         self._apply_action_bar_visibility(visible)
-        self.left_panel.setVisible(visible)
-        self.inspector.setVisible(visible)
+        self.left_panel.setVisible(visible and self.navigation_visible)
+        self.inspector.setVisible(visible and self.inspector_visible)
         self.exit_focus_button.setVisible(not visible)
-        if not visible:
-            self.output_container.hide()
+        self.output_container.setVisible(visible and self._output_visible)
+        if visible:
+            QTimer.singleShot(0, self._restore_side_panel_sizes)
 
     def _apply_action_bar_visibility(self, shell_visible: bool | None = None) -> None:
         if shell_visible is None:
@@ -142,14 +152,13 @@ class WindowStateController(QObject):
             shell_visible and self._current_route in self.WRITING_ROUTES
         )
 
-    def _toggle_side_panel(self, panel, index: int, width_attribute: str) -> None:
-        if panel.isVisible():
+    def _toggle_side_panel(self, panel, index: int, width_attribute: str, shown: bool) -> None:
+        if not shown and panel.isVisible():
             sizes = self.main_splitter.sizes()
             if len(sizes) > index and sizes[index] > 0:
                 setattr(self, width_attribute, sizes[index])
-            panel.hide()
-            return
-        panel.show()
+        panel.setVisible(shown and not self._focus_mode)
+        self.panels_changed.emit()
         QTimer.singleShot(0, self._restore_side_panel_sizes)
 
     def _restore_side_panel_sizes(self) -> None:
@@ -157,5 +166,9 @@ class WindowStateController(QObject):
             return
         left = self._left_panel_width if self.left_panel.isVisible() else 0
         right = self._inspector_width if self.inspector.isVisible() else 0
+        available = max(0, self.main_splitter.width() - 420)
+        if left + right > available and left + right:
+            scale = available / (left + right)
+            left, right = int(left * scale), int(right * scale)
         center = max(1, self.main_splitter.width() - left - right)
         self.main_splitter.setSizes([left, center, right])

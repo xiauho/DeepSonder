@@ -136,6 +136,48 @@ class WindowStateControllerTests(unittest.TestCase):
         self.assertTrue(views["action_bar"].visible)
         self.assertEqual(views["editor"].layout_state, (18, 14, 18, 12))
 
+    def test_hidden_panels_stay_hidden_across_routes_and_focus(self):
+        controller, views = self._controller()
+        controller.activate_route("writing")
+        self.assertFalse(views["inspector"].visible)
+        controller.toggle_navigation_panel()
+        controller.activate_route("memory")
+        self.assertTrue(views["app_header"].visible)
+        controller.activate_route("writing")
+        self.assertFalse(views["app_header"].visible)
+        self.assertFalse(views["left"].visible)
+        controller.toggle_focus_mode()
+        controller.exit_focus_mode()
+        self.assertFalse(views["left"].visible)
+        self.assertFalse(views["inspector"].visible)
+
+    def test_focus_restores_open_assistant_output_and_widths(self):
+        controller, views = self._controller()
+        controller.activate_route("writing")
+        controller.toggle_inspector()
+        views["main_splitter"]._sizes = [260, 800, 360]
+        controller.remember_panel_sizes(0, 0)
+        controller.show_output()
+        controller.toggle_focus_mode()
+        self.assertFalse(views["output"].visible)
+        controller.exit_focus_mode()
+        controller._restore_side_panel_sizes()
+        self.assertTrue(views["inspector"].visible)
+        self.assertTrue(views["output"].visible)
+        self.assertEqual(views["main_splitter"]._sizes, [260, 800, 360])
+
+    def test_task_output_does_not_interrupt_focus_mode(self):
+        controller, views = self._controller()
+        controller.activate_route("writing")
+        controller.toggle_focus_mode()
+        controller.show_output()
+        self.assertFalse(views["output"].visible)
+        controller.activate_route("memory")
+        self.assertFalse(controller.focus_mode)
+        self.assertTrue(views["nav"].visible)
+        self.assertFalse(views["editor"].exit_focus_button.visible)
+        self.assertEqual(views["editor"].layout_state, (18, 14, 18, 12))
+
 
 if __name__ == "__main__":
     unittest.main()

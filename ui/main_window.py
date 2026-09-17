@@ -51,6 +51,7 @@ from core.version import load_current_version
 from ui.ai_controller import AIController
 from ui.ai_engine_controller import AIEngineController
 from ui.ai_task_view_controller import AITaskViewController
+from ui.ai_task_panel import AITaskPanel
 from ui.ai_workflow_controller import AIWorkflowController
 from ui.appearance_controller import AppearanceController
 from ui.character_card_sync_dialog import (
@@ -58,9 +59,10 @@ from ui.character_card_sync_dialog import (
     CharacterCardSyncSelectionDialog,
 )
 from ui.document_controller import DocumentController
+from ui.quick_access_controller import QuickAccessController
 from ui.export_controller import ExportController
 from ui.editor import Editor
-from ui.icons import IconTextButton
+from ui.icons import IconTextButton, set_button_icon
 from ui.inspector import Inspector
 from ui.left_panel import LeftPanel
 from ui.memory_page import StoryMemoryPage
@@ -113,7 +115,7 @@ class MainWindow(QMainWindow):
         "memory": "更新故事记忆",
     }
 
-    def __init__(self, parent=None, config: dict | None = None):
+    def __init__(self, parent=None, config: dict | None = None, ui_state_path=None):
         super().__init__(parent)
         self.project_session = ProjectSession(self)
         self.ai_controller = AIController(self)
@@ -134,7 +136,7 @@ class MainWindow(QMainWindow):
         self.document_controller = DocumentController(
             self.editor,
             self.project_session,
-            self,
+            parent=self,
         )
         self.project_lifecycle_controller = ProjectLifecycleController(
             project_session=self.project_session,
@@ -204,6 +206,8 @@ class MainWindow(QMainWindow):
             ai_creation_button=self.ai_creation_button,
             parent=self,
         )
+        self.window_state_controller.panels_changed.connect(self._sync_panel_buttons)
+        self._sync_panel_buttons()
         self.main_splitter.splitterMoved.connect(
             self.window_state_controller.remember_panel_sizes
         )
@@ -220,6 +224,7 @@ class MainWindow(QMainWindow):
             status_message=self.status_message,
             memory_page=self.memory_page,
             output_panel=self.output_panel,
+            task_panel=self.task_panel,
             window_state_controller=self.window_state_controller,
             parent=self,
         )
@@ -235,8 +240,22 @@ class MainWindow(QMainWindow):
             go_to_writing=lambda: self._show_route("writing"),
             save_if_dirty=self._save_if_dirty,
             left_panel=self.left_panel,
+            defer_result_review=True,
             parent=self,
         )
+        self.ai_workflow_controller.review_requested.connect(self._ai_result_pending)
+        self.ai_workflow_controller.pending_review_changed.connect(self._refresh_ai_actions)
+        self.ai_workflow_controller.review_finished.connect(self._ai_review_finished)
+        self.ai_workflow_controller.check_report_ready.connect(lambda: setattr(self.task_panel, "report_ready", True))
+        self.task_panel.review_requested.connect(self._review_ai_result)
+        self.task_panel.discard_requested.connect(self._discard_ai_result)
+        self.task_panel.cancel_requested.connect(self.cancel_ai_task)
+        self.task_panel.close_requested.connect(self.toggle_output)
+        self.task_panel.copy_requested.connect(self.ai_task_view_controller.copy_output)
+        self.task_panel.clear_requested.connect(self.ai_task_view_controller.clear_output)
+        self.task_panel.context_requested.connect(self._show_task_context)
+        self.task_panel.report_requested.connect(lambda: self._show_route("reports"))
+        self.task_panel.state_changed.connect(self._sync_task_entry)
         self.ai_workflow_controller.output_requested.connect(
             self.ai_task_view_controller.append_output
         )
@@ -249,12 +268,18 @@ class MainWindow(QMainWindow):
         self._show_route("dashboard")
 
         self.exit_focus_shortcut = QShortcut(QKeySequence("Esc"), self)
-        self.exit_focus_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self.exit_focus_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
         self.exit_focus_shortcut.activated.connect(self._exit_focus_mode)
         self.f11_focus_shortcut = QShortcut(QKeySequence("F11"), self)
-        self.f11_focus_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self.f11_focus_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
         self.f11_focus_shortcut.activated.connect(self.toggle_focus_mode)
 
+        from ui.workspace_state_controller import WorkspaceStateController
+        self.workspace_state = WorkspaceStateController(self, ui_state_path)
+        self.quick_access_controller = QuickAccessController(self)
+        self.left_panel.locate_current_requested.connect(self._locate_current_document)
+        self.editor.document_loaded.connect(lambda: self.left_panel.locate_button.setEnabled(True))
+        self.editor.document_about_to_change.connect(lambda: self.left_panel.locate_button.setEnabled(False))
         self._refresh_auto_save_timer()
         QTimer.singleShot(80, self._restore_last_project)
 
@@ -265,6 +290,30 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # Construction
     # ------------------------------------------------------------------
+    def open_quick_access(self, mode="documents") -> None:
+        self.quick_access_controller.open(mode)
+
+    def focus_editor(self) -> None:
+        if not self.editor.current_path():
+            self.status_message.setText("请先打开章节或资料文档。")
+            return
+        route = self.story_navigation_controller.route_for_category(self.editor.current_category())
+        if self.window_state_controller.current_route != route and not self._show_route(route):
+            return
+        if self.editor.view_mode() == "preview":
+            self.editor.preview_browser.setFocus()
+        else:
+            self.editor.text_edit.setFocus()
+
+    def focus_directory(self) -> None:
+        route = "canon" if self.window_state_controller.current_route == "canon" else "writing"
+        if not self._show_route(route):
+            return
+        if not self.window_state_controller.navigation_visible:
+            self.window_state_controller.toggle_navigation_panel()
+        self.left_panel.search.setFocus()
+        self.left_panel.search.selectAll()
+
     def _build_actions(self) -> None:
         self.actions: dict[str, QAction] = {}
 
@@ -274,6 +323,7 @@ class MainWindow(QMainWindow):
             if shortcut:
                 item.setShortcut(QKeySequence(shortcut))
             self.actions[key] = item
+            self.addAction(item)  # Keep shortcuts reachable when focus mode hides the menu bar.
             return item
 
         action("new_project", "新建项目…", self.new_project, "Ctrl+Shift+N")
@@ -301,10 +351,15 @@ class MainWindow(QMainWindow):
         action("undo", "撤销", lambda: self.editor.undo(), "Ctrl+Z")
         action("redo", "重做", lambda: self.editor.redo(), "Ctrl+Y")
         action("find", "查找与替换", lambda: self.editor.show_find(), "Ctrl+F")
+        action("quick_open", "快速打开章节与资料…", lambda: self.open_quick_access("documents"), "Ctrl+P")
+        action("commands", "查找命令与快捷键…", lambda: self.open_quick_access("commands"), "Ctrl+Shift+P")
+        action("focus_editor", "回到正文编辑", self.focus_editor, "F6")
+        action("focus_directory", "搜索当前目录", self.focus_directory, "Ctrl+Alt+F")
+        action("locate_document", "定位当前文档", self._locate_current_document, "Ctrl+Alt+L")
         action("focus", "专注模式", self.toggle_focus_mode, "Ctrl+K")
         action("navigation", "显示/隐藏资料面板", self.toggle_navigation_panel, "Ctrl+Shift+L")
-        action("inspector", "显示/隐藏故事雷达", self.toggle_inspector, "Ctrl+Shift+I")
-        action("output", "显示/隐藏 AI 记录", self.toggle_output, "Ctrl+J")
+        action("inspector", "显示/隐藏写作助手", self.toggle_inspector, "Ctrl+Shift+I")
+        action("output", "显示/隐藏 AI 任务", self.toggle_output, "Ctrl+J")
         action("expand", "AI 扩写", self.expand_chapter, "Ctrl+Enter")
         action("continuation", "AI 续写", self.continue_chapter, "Ctrl+Alt+Enter")
         action("check", "一致性检查", self.check_consistency, "Ctrl+Shift+C")
@@ -351,52 +406,55 @@ class MainWindow(QMainWindow):
         self.theme_button.setProperty("material_icon_size", 17)
         self.theme_button.clicked.connect(self.toggle_theme)
         header_layout.addWidget(self.theme_button)
-        settings_button = IconTextButton("settings", "设置", centered=True)
-        settings_button.setObjectName("ghostButton")
-        settings_button.setToolTip("打开设置")
-        settings_button.clicked.connect(lambda: self._show_route("settings"))
-        header_layout.addWidget(settings_button)
         content_layout.addWidget(self.app_header)
 
         self.action_bar = QFrame()
-        self.action_bar.setObjectName("actionBar")
+        self.action_bar.setObjectName("documentActions")
         action_layout = QHBoxLayout(self.action_bar)
-        action_layout.setContentsMargins(14, 8, 14, 8)
-        action_layout.setSpacing(7)
-        action_layout.addWidget(self._action_button("new_chapter"))
-        action_layout.addWidget(self._action_button("open_project"))
-        action_layout.addWidget(self._action_button("save"))
-        action_layout.addWidget(self._action_button("export"))
-        action_layout.addStretch(1)
-        focus_button = self._action_button("focus")
-        focus_button.setObjectName("ghostButton")
-        focus_button.style().unpolish(focus_button)
-        focus_button.style().polish(focus_button)
-        action_layout.addWidget(focus_button)
-        check_button = self._action_button("check")
-        check_button.setObjectName("secondaryButton")
-        action_layout.addWidget(check_button)
-        memory_button = self._action_button("memory")
-        memory_button.setObjectName("secondaryButton")
-        action_layout.addWidget(memory_button)
+        action_layout.setContentsMargins(0, 0, 0, 0)
+        action_layout.setSpacing(4)
+        self.panel_buttons = {}
+        for key, icon, label in (
+            ("navigation", "menu_book", "章节与资料（Ctrl+Shift+L）"),
+            ("inspector", "psychology", "写作助手（Ctrl+Shift+I）"),
+            ("focus", "center_focus_strong", "专注模式（Ctrl+K）"),
+            ("save", "save", "保存（Ctrl+S）"),
+        ):
+            button = QToolButton()
+            button.setObjectName("workspaceToggle")
+            button.setToolTip(label)
+            button.setAccessibleName(label)
+            set_button_icon(button, icon)
+            action = self.actions[key]
+            button.setEnabled(action.isEnabled())
+            action.changed.connect(lambda item=action, target=button: target.setEnabled(item.isEnabled()))
+            button.clicked.connect(action.trigger)
+            if key in {"navigation", "inspector"}:
+                button.setCheckable(True)
+                self.panel_buttons[key] = button
+            action_layout.addWidget(button)
         self.ai_creation_button = QToolButton()
         self.ai_creation_button.setObjectName("accentButton")
         self.ai_creation_button.setText("AI 创作")
-        self.ai_creation_button.setAccessibleName("AI 创作")
-        self.ai_creation_button.setToolButtonStyle(
-            Qt.ToolButtonStyle.ToolButtonTextBesideIcon
-        )
+        self.ai_creation_button.setAccessibleName("AI 创作与检查")
+        self.ai_creation_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.ai_creation_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.ai_creation_menu = QMenu(self.ai_creation_button)
-        self.ai_creation_menu.addAction(self.actions["expand"])
-        self.ai_creation_menu.addAction(self.actions["continuation"])
+        self.ai_creation_menu.setToolTipsVisible(True)
+        self.ai_availability_hint = self.ai_creation_menu.addAction("请先打开项目")
+        self.ai_availability_hint.setEnabled(False)
+        self.ai_availability_action = self.ai_creation_menu.addAction("打开项目…")
+        self.ai_availability_action.triggered.connect(self._resolve_ai_availability)
+        self.ai_creation_menu.addSeparator()
+        for key in ("expand", "continuation", "check", "memory"):
+            self.ai_creation_menu.addAction(self.actions[key])
+            self.actions[key].changed.connect(self._sync_ai_creation_button)
+        self.ai_creation_menu.addSeparator()
+        self.ai_creation_menu.addAction(self.actions["output"])
         self.ai_creation_button.setMenu(self.ai_creation_menu)
         self.ai_creation_button.setProperty("material_icon", "auto_awesome")
         self.ai_creation_button.setProperty("material_icon_size", 17)
-        self.actions["expand"].changed.connect(self._sync_ai_creation_button)
-        self.actions["continuation"].changed.connect(self._sync_ai_creation_button)
         action_layout.addWidget(self.ai_creation_button)
-        content_layout.addWidget(self.action_bar)
 
         self.page_stack = QStackedWidget()
         self.page_stack.setObjectName("pageStack")
@@ -433,6 +491,13 @@ class MainWindow(QMainWindow):
         self.main_splitter.setChildrenCollapsible(False)
         self.left_panel = LeftPanel()
         self.editor = Editor()
+        self.editor.attach_document_actions(self.action_bar)
+        self.left_panel.project_menu.addAction(self.actions["new_project"])
+        self.left_panel.project_menu.addAction(self.actions["open_project"])
+        self.left_panel.project_menu.addAction(self.actions["import_legacy_project"])
+        self.left_panel.project_menu.addSeparator()
+        self.left_panel.project_menu.addAction(self.actions["export"])
+        self.left_panel.project_menu.addAction(self.actions["trash"])
         self.inspector = Inspector()
         self.main_splitter.addWidget(self.left_panel)
         self.main_splitter.addWidget(self.editor)
@@ -443,34 +508,9 @@ class MainWindow(QMainWindow):
         self.main_splitter.setSizes([270, 820, 330])
         for index in range(3):
             self.main_splitter.setCollapsible(index, False)
-        self.output_container = QFrame()
-        self.output_container.setObjectName("outputContainer")
-        output_layout = QVBoxLayout(self.output_container)
-        output_layout.setContentsMargins(14, 8, 14, 10)
-        output_layout.setSpacing(6)
-        output_header = QHBoxLayout()
-        output_title = QLabel("AI 工作记录")
-        output_title.setObjectName("panelTitle")
-        copy_button = QPushButton("复制")
-        copy_button.setObjectName("ghostButton")
-        copy_button.clicked.connect(lambda: self.ai_task_view_controller.copy_output())
-        clear_button = QPushButton("清空")
-        clear_button.setObjectName("ghostButton")
-        clear_button.clicked.connect(lambda: self.ai_task_view_controller.clear_output())
-        close_button = QPushButton("收起")
-        close_button.setObjectName("ghostButton")
-        close_button.clicked.connect(self.toggle_output)
-        output_header.addWidget(output_title)
-        output_header.addStretch(1)
-        output_header.addWidget(copy_button)
-        output_header.addWidget(clear_button)
-        output_header.addWidget(close_button)
-        output_layout.addLayout(output_header)
-        self.output_panel = QPlainTextEdit()
-        self.output_panel.setObjectName("outputPanel")
-        self.output_panel.setReadOnly(True)
-        self.output_panel.setPlaceholderText("AI 创作、设定检查和记忆更新的过程会记录在这里。")
-        output_layout.addWidget(self.output_panel, 1)
+        self.task_panel = AITaskPanel()
+        self.output_container = self.task_panel
+        self.output_panel = self.task_panel.output
         self.output_container.hide()
 
         self.outer_splitter.addWidget(self.main_splitter)
@@ -500,13 +540,16 @@ class MainWindow(QMainWindow):
         button.setEnabled(action.isEnabled())
         button.setToolTip(action.text())
 
+    def _sync_panel_buttons(self) -> None:
+        controller = self.window_state_controller
+        for key, shown in (("navigation", controller.navigation_visible), ("inspector", controller.inspector_visible)):
+            self.panel_buttons[key].setChecked(shown)
+
     def _sync_ai_creation_button(self) -> None:
         if not hasattr(self, "ai_creation_button"):
             return
-        self.ai_creation_button.setEnabled(
-            self.actions["expand"].isEnabled()
-            or self.actions["continuation"].isEnabled()
-        )
+        # Individual actions carry their availability; task records stay reachable.
+        self.ai_creation_button.setEnabled(True)
 
     def _build_menus(self) -> None:
         file_menu = self.menuBar().addMenu("文件")
@@ -529,6 +572,8 @@ class MainWindow(QMainWindow):
         edit_menu.addAction(self.actions["redo"])
         edit_menu.addSeparator()
         edit_menu.addAction(self.actions["find"])
+        edit_menu.addAction(self.actions["quick_open"])
+        edit_menu.addAction(self.actions["commands"])
 
         create_menu = self.menuBar().addMenu("创作")
         create_menu.addAction(self.actions["new_chapter"])
@@ -549,8 +594,12 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.actions["navigation"])
         view_menu.addAction(self.actions["inspector"])
         view_menu.addAction(self.actions["output"])
+        view_menu.addSeparator()
+        for key in ("focus_editor", "focus_directory", "locate_document"):
+            view_menu.addAction(self.actions[key])
 
         help_menu = self.menuBar().addMenu("帮助")
+        help_menu.addAction(self.actions["commands"])
         help_menu.addAction(self.actions["about"])
 
     def _build_statusbar(self) -> None:
@@ -571,8 +620,15 @@ class MainWindow(QMainWindow):
         self.statusBar().addPermanentWidget(self.task_progress)
         self.statusBar().addPermanentWidget(self.cancel_task_button)
         self.statusBar().addPermanentWidget(self.auto_save_status)
+        self.statusBar().addPermanentWidget(self.ai_indicator)
+        self.task_entry = QToolButton()
+        self.task_entry.setText("AI 任务")
+        self.task_entry.setAccessibleName("打开 AI 任务面板")
+        self.task_entry.clicked.connect(self.toggle_output)
+        self.statusBar().addPermanentWidget(self.task_entry)
 
     def _connect_signals(self) -> None:
+        self.primary_nav.quick_open_requested.connect(lambda: self.open_quick_access("documents"))
         self.primary_nav.route_requested.connect(self._show_route)
         self.primary_nav.new_project_requested.connect(self.new_project)
         self.primary_nav.trash_requested.connect(self.open_trash)
@@ -649,7 +705,7 @@ class MainWindow(QMainWindow):
         if route != "settings":
             self.view_refresh_controller.refresh_route(route)
         else:
-            self.settings_page.set_config(self.config)
+            self.settings_page.synchronize_config(self.config)
         self.window_state_controller.activate_route(route)
         if route == "canon":
             self.story_navigation_controller.select_default_canon()
@@ -677,6 +733,8 @@ class MainWindow(QMainWindow):
     # Projects and documents
     # ------------------------------------------------------------------
     def open_project(self) -> None:
+        if not self._can_leave_ai_review():
+            return
         start = self.project.root if self.project else Path.cwd() / "projects"
         path = QFileDialog.getExistingDirectory(self, "选择小说项目目录", str(start))
         if path:
@@ -684,6 +742,8 @@ class MainWindow(QMainWindow):
 
     def import_legacy_project(self) -> None:
         """Create a new project without modifying or trusting derived legacy data."""
+        if not self._can_leave_ai_review():
+            return
         if self.ai_controller.is_running():
             QMessageBox.information(
                 self,
@@ -784,6 +844,8 @@ class MainWindow(QMainWindow):
         )
 
     def _load_project(self, path: Path, quiet: bool = False) -> bool:
+        if not self._can_leave_ai_review():
+            return False
         try:
             project = self.project_lifecycle_controller.load(path)
         except ProjectSwitchCancelled:
@@ -794,10 +856,13 @@ class MainWindow(QMainWindow):
             return False
 
         self._show_route("dashboard")
+        restored = self.workspace_state.last_document(project)
         chapters = project.list_chapters()
-        if chapters:
+        if restored is not None:
+            self.left_panel.select_path(restored)
+        elif chapters:
             self.left_panel.select_path(chapters[0])
-            self._show_route("dashboard")
+            self._show_route("writing")
         migration = self.project_session.last_migration_result
         if migration is not None and migration.migrated:
             backup = str(migration.backup_path or "")
@@ -817,6 +882,8 @@ class MainWindow(QMainWindow):
     def _on_project_changed(self, project: NovelProject | None) -> None:
         """Update shell state after the view refresh controller switches projects."""
         self.primary_nav.set_project(project.name if project else None)
+        self.task_panel.reset()
+        self.inspector.clear_task_context()
         if hasattr(self, "ai_task_view_controller"):
             self.ai_task_view_controller.clear_output()
         else:
@@ -848,6 +915,8 @@ class MainWindow(QMainWindow):
         self.actions["trash"].setEnabled(enabled)
 
     def new_project(self) -> None:
+        if not self._can_leave_ai_review():
+            return
         parent_dir = QFileDialog.getExistingDirectory(self, "选择新项目存放目录")
         if not parent_dir:
             return
@@ -1550,7 +1619,44 @@ class MainWindow(QMainWindow):
         self.window_state_controller.toggle_inspector()
 
     def toggle_output(self) -> None:
-        self.window_state_controller.toggle_output()
+        if self.window_state_controller.current_route not in {"writing", "canon"}:
+            if not self._show_route("writing"):
+                return
+            self.window_state_controller.show_output()
+        else:
+            self.window_state_controller.toggle_output()
+
+    def _sync_task_entry(self) -> None:
+        label = {"running": "AI 正在处理", "cancelling": "AI 正在取消", "pending": "AI 结果待审阅", "failed": "AI 任务失败"}.get(self.task_panel.state, "AI 任务")
+        self.task_entry.setText(label)
+        self.task_entry.setAccessibleName(label + "，打开任务面板")
+
+    def _ai_result_pending(self, token) -> None:
+        self.task_panel.pending(token)
+        # Do not reopen a panel the author closed while generating.
+
+    def _review_ai_result(self) -> None:
+        if not self.ai_workflow_controller.has_pending_result:
+            return
+        self.task_panel.set_state("reviewing", "正在审阅结果，确认前不会写入。")
+        try:
+            self.ai_workflow_controller.review_pending_result()
+        except Exception as exc:  # Keep Qt signal callbacks from hiding review failures.
+            self.ai_task_view_controller.append_output(f"结果审阅失败：{exc}")
+            self.task_panel.set_state("failed", "结果审阅失败，请展开工作记录查看原因。")
+
+    def _ai_review_finished(self) -> None:
+        if self.task_panel.task_id is not None:
+            self.task_panel.set_state("reviewed")
+
+    def _discard_ai_result(self) -> None:
+        self.ai_workflow_controller.discard_pending_result()
+        self.task_panel.set_state("discarded", "结果已放弃，未写入正文或故事记忆。")
+
+    def _show_task_context(self) -> None:
+        if not self.window_state_controller.inspector_visible:
+            self.window_state_controller.toggle_inspector()
+        self.inspector.show_task_context()
 
     def toggle_theme(self) -> None:
         self.settings_controller.toggle_theme()
@@ -1558,7 +1664,17 @@ class MainWindow(QMainWindow):
     def _apply_settings(self, config: object, message: str = "设置已保存") -> None:
         if not isinstance(config, dict):
             return
-        self.settings_controller.apply(config, message=message)
+        changes = self.settings_page.edited_values(config)
+        updated = {**self.config, **changes}
+        from core.theme_tokens import DARK_COLORS, LIGHT_COLORS
+        updated.update(DARK_COLORS if updated.get("theme") == "dark" else LIGHT_COLORS)
+        try:
+            applied = self.settings_controller.apply(updated, message=message)
+        except OSError as exc:
+            self.settings_page.show_save_error(str(exc))
+            self.status_message.setText("设置保存失败，修改仍保留在设置页。")
+            return
+        self.settings_page.set_config(applied)
 
     def _on_settings_changed(self, config: dict, message: str) -> None:
         self.config = dict(config)
@@ -1566,6 +1682,7 @@ class MainWindow(QMainWindow):
         self.ai_workflow_controller.set_config(self.config)
         self.appearance_controller.apply(self.config)
         self._update_page_header(self.window_state_controller.current_route)
+        self._refresh_ai_actions()
         self.status_message.setText(message)
 
     def _test_dsh(self, config: object) -> None:
@@ -1854,7 +1971,9 @@ class MainWindow(QMainWindow):
     def _refresh_ai_actions(self) -> None:
         if not hasattr(self, "actions") or not hasattr(self, "editor"):
             return
-        running = self.ai_controller.is_running()
+        workflow = getattr(self, "ai_workflow_controller", None)
+        pending = workflow is not None and workflow.has_pending_result
+        running = self.ai_controller.is_running() or pending
         chapter_open = self.project is not None and self.editor.current_chapter_id() is not None
         if "character_sync" in self.actions:
             self.actions["character_sync"].setEnabled(
@@ -1864,6 +1983,8 @@ class MainWindow(QMainWindow):
                 and bool(self.project.list_chapters())
             )
         self.actions["expand"].setEnabled(chapter_open and not running)
+        self.actions["check"].setEnabled(chapter_open and not running)
+        self.actions["memory"].setEnabled(chapter_open and not running)
         continuation_enabled = False
         continuation_tip = "请先打开一个包含正文的章节。"
         if chapter_open and not running:
@@ -1888,7 +2009,51 @@ class MainWindow(QMainWindow):
         self.actions["continuation"].setEnabled(continuation_enabled)
         self.actions["continuation"].setToolTip(continuation_tip)
         self.actions["continuation"].setStatusTip(continuation_tip)
+        reason = ("请先审阅或放弃上一次 AI 结果。" if pending else
+                  "AI 任务正在进行，请等待完成或取消任务。" if self.ai_controller.is_running() else
+                  "请先打开一个小说项目。" if self.project is None else
+                  "请先在写作目录中选择一个章节。" if not chapter_open else
+                  "AI 引擎尚未就绪，请检查设置。" if self.ai_engine_controller.client is None else "")
+        self._ai_unavailable_reason = reason
+        for key in ("expand", "check", "memory"):
+            action = self.actions[key]
+            if reason:
+                action.setEnabled(False)
+            action.setToolTip(reason or {"expand": "根据章节大纲生成正文，完成后可审阅。", "check": "检查当前章节的一致性。", "memory": "从当前章节提取故事记忆。"}[key])
+            action.setStatusTip(action.toolTip())
+        if reason:
+            self.actions["continuation"].setEnabled(False)
+            self.actions["continuation"].setToolTip(reason)
+            self.actions["continuation"].setStatusTip(reason)
+        self.ai_availability_hint.setText(reason or (continuation_tip if not continuation_enabled else "选择创作操作；生成结果需审阅后写入。"))
+        self.ai_availability_action.setVisible(bool(reason) or (chapter_open and not continuation_enabled))
+        self._ai_help_expand = bool(not reason and chapter_open and not chapter_body_text(self.editor.text_edit.toPlainText()).strip())
+        self.ai_availability_action.setText("查看 AI 任务" if running else "打开项目…" if self.project is None else "选择章节" if not chapter_open else "使用 AI 扩写…" if self._ai_help_expand else "打开创作设置…")
         self._sync_ai_creation_button()
+
+    def _resolve_ai_availability(self) -> None:
+        if self.ai_controller.is_running() or self.ai_workflow_controller.has_pending_result:
+            self.window_state_controller.show_output()
+        elif self.project is None:
+            self.actions["open_project"].trigger()
+        elif not self.editor.current_chapter_id():
+            self._show_route("writing")
+            if not self.window_state_controller.navigation_visible:
+                self.window_state_controller.toggle_navigation_panel()
+            self.left_panel.tree.setFocus()
+        elif getattr(self, "_ai_help_expand", False):
+            self.actions["expand"].trigger()
+        else:
+            self._show_route("settings")
+
+    def _locate_current_document(self) -> None:
+        path = self.editor.current_path()
+        if path:
+            if not self._show_route("writing" if self.editor.current_chapter_id() else "canon"):
+                return
+            if not self.window_state_controller.navigation_visible:
+                self.window_state_controller.toggle_navigation_panel()
+            self.left_panel.reveal_path(Path(path))
 
     def check_consistency(self) -> None:
         self.ai_workflow_controller.check()
@@ -1943,7 +2108,16 @@ class MainWindow(QMainWindow):
         """Return a readable DeepSonder project path without leaking OS errors."""
         return ProjectLifecycleController.safe_project_path(value)
 
+    def _can_leave_ai_review(self) -> bool:
+        if self.ai_workflow_controller.has_pending_result:
+            QMessageBox.information(self, "AI 结果待处理", "请先在 AI 任务面板审阅或放弃结果，再切换项目或退出。")
+            return False
+        return True
+
     def closeEvent(self, event: QCloseEvent) -> None:
+        if not self._can_leave_ai_review():
+            event.ignore()
+            return
         if self.editor.is_dirty() and not self.save_current_file(notify=False):
             answer = QMessageBox.question(
                 self,
@@ -1959,5 +2133,19 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "AI 任务仍在进行", "请等待当前 AI 任务完成后再退出，以免丢失生成结果。")
             event.ignore()
             return
+        if self.settings_page.has_unsaved_changes():
+            answer = QMessageBox.question(self, "设置尚未保存", "设置页仍有未保存的修改。是否保存后退出？",
+                QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel)
+            if answer == QMessageBox.StandardButton.Cancel:
+                event.ignore()
+                return
+            if answer == QMessageBox.StandardButton.Save:
+                self.settings_page._emit_save()
+                if self.settings_page.has_unsaved_changes():
+                    self._show_route("settings")
+                    event.ignore()
+                    return
+        self.workspace_state.flush()
         self.ai_engine_controller.cleanup()
         event.accept()

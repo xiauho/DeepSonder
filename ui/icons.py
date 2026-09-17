@@ -101,6 +101,7 @@ class IconTextButton(QPushButton):
         self.setAccessibleName(text)
         self._centered = centered
         self._rail_anchor_ratio: float | None = None
+        self._vertical = False
         self.setProperty("material_icon", icon_name)
         self.setProperty("material_icon_size", 17)
         # Never expose the ligature name as visible UI text if its font is
@@ -161,12 +162,21 @@ class IconTextButton(QPushButton):
         self.updateGeometry()
         self.sync_geometry()
 
+    def set_vertical(self) -> None:
+        """Show a persistent short label below the navigation icon."""
+        self._vertical = True
+        self._text_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setProperty("railButton", True)
+        self.sync_geometry()
+
     def setText(self, text: str) -> None:  # noqa: N802 - Qt API
         super().setText(text)
         if hasattr(self, "_text_label"):
             self.set_label(text)
 
     def sizeHint(self) -> QSize:  # noqa: N802 - Qt API
+        if self._vertical:
+            return QSize(max(56, self._text_label.sizeHint().width() + 12), 56)
         if not self._centered:
             return super().sizeHint()
         text_width = self._text_label.fontMetrics().horizontalAdvance(self._text_label.text())
@@ -178,6 +188,10 @@ class IconTextButton(QPushButton):
     def sync_geometry(self) -> None:
         """Give the icon and text identical vertical slots after QSS changes."""
         slot_height = max(20, self._text_label.fontMetrics().lineSpacing())
+        if self._vertical:
+            self._icon_label.setGeometry((self.width() - 20) // 2, 5, 20, 20)
+            self._text_label.setGeometry(2, 27, self.width() - 4, slot_height)
+            return
         if self._rail_anchor_ratio is not None:
             text_width = self._text_label.fontMetrics().horizontalAdvance(self._text_label.text())
             icon_x = round(self.width() * self._rail_anchor_ratio)

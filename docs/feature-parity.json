@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-09-15",
+  "updated_at": "2026-09-16",
   "series": {
     "pyside6": {
       "product": "DeepSonder-PySide6",
@@ -78,6 +78,16 @@
       "requirement": "platform_specific",
       "pyside6": "basic",
       "electron": "enhanced"
+    },
+    {
+      "id": "workspace.compact_navigation_and_panel_state",
+      "requirement": "required",
+      "pyside6": "supported",
+      "electron": "pending",
+      "note": "PySide6 implements compact labeled navigation, adaptive document actions, and session-local panel visibility/width restoration across routes and focus mode. Electron reference E:/AgentSpace/deepsonder-electron already has a compact rail and on-demand drawers; equivalent focus/panel-state behavior and tests are not verified in this PySide6-scoped task. The contracted sibling D:/GitHub-store/DeepSonder is unavailable. This is not a cross-series completion claim."
     }
-  ]
+  ],
+  "archived": true,
+  "superseded_by": "feature-status.json",
+  "archive_note": "2026-09-16: series now evolve independently. Historical counterpart statuses are not current obligations or release blockers."
 }

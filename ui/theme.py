@@ -83,6 +83,12 @@ QPushButton#primaryNavActive {
     border-left: 3px solid __ACCENT__;
     padding-left: 9px;
 }
+QPushButton[railButton="true"] { padding: 0px; min-height: 48px; }
+QPushButton[railButton="true"] QLabel#buttonText { font-size: 12px; }
+QPushButton[railButton="true"]:focus { border: 2px solid __ACCENT__; }
+QToolButton#workspaceToggle { min-width: 32px; min-height: 32px; padding: 0px; border-radius: 6px; }
+QToolButton#workspaceToggle:checked { background: __SELECTION__; color: __ACCENT__; }
+QToolButton#workspaceToggle:focus { border: 2px solid __ACCENT__; }
 QLabel#buttonIcon {
     font-family: "Material Symbols Outlined";
     font-size: 17px;
@@ -354,11 +360,13 @@ QPlainTextEdit#outputPanel, QTextBrowser#inspectorBrowser, QTextBrowser#pageBrow
 }
 QPlainTextEdit#outputPanel { font-family: "JetBrains Mono", "Cascadia Mono", "Microsoft YaHei UI"; font-size: __SMALL_FONT_SIZE__px; }
 
-QLabel#savedBadge, QLabel#dirtyBadge {
+QLabel#savedBadge, QLabel#dirtyBadge, QLabel#saveErrorBadge {
     padding: 4px 10px;
     border-radius: 10px;
     font-size: __SMALL_FONT_SIZE__px;
 }
+QLabel#saveErrorBadge { color: __DANGER__; background: __FIELD__; }
+QLabel#saveErrorMessage { color: __DANGER__; padding: 6px 8px; background: __FIELD__; border-left: 3px solid __DANGER__; }
 QLabel#savedBadge { color: __GOOD__; background: __GOOD_BG__; }
 QLabel#dirtyBadge { color: __ACCENT__; background: __SELECTION__; }
 
@@ -481,6 +489,7 @@ QToolButton#accentButton, QPushButton#accentButton {
     padding-left: 17px; padding-right: 17px;
 }
 QToolButton#accentButton:hover, QPushButton#accentButton:hover { background: __ACCENT_HOVER__; }
+QToolButton#accentButton:disabled, QPushButton#accentButton:disabled { background: __BORDER__; color: __MUTED__; border-color: __BORDER__; }
 QToolButton#secondaryButton, QPushButton#secondaryButton { background: __FIELD__; }
 QToolButton#ghostButton, QPushButton#ghostButton { background: transparent; border-color: transparent; }
 QToolButton#ghostButton:hover, QPushButton#ghostButton:hover { background: __SELECTION__; }
@@ -547,12 +556,23 @@ QMessageBox QPushButton:default {
     border-color: __ACCENT__;
 }
 
+QPushButton#quickAccessMode { color: __MUTED__; background: transparent; border: 1px solid __BORDER__; }
+QPushButton#quickAccessMode:checked { color: __ACCENT__; background: __SELECTION__; border: 1px solid __ACCENT__; }
+QListWidget#quickAccessResults {
+    background: __FIELD__; border: 1px solid __BORDER__; border-radius: 8px;
+}
+QListWidget#quickAccessResults::item { padding: 9px 12px; border-radius: 5px; }
+QListWidget#quickAccessResults::item:selected { background: __SELECTION__; color: __TEXT__; }
+QListWidget#quickAccessResults:focus { border-color: __ACCENT__; }
+QLabel#quickAccessDetail { color: __MUTED__; }
+QPushButton:focus, QToolButton:focus { border: 1px solid __ACCENT__; }
 QMenuBar { background: __PANEL__; border-bottom: 1px solid __BORDER__; padding: 2px 8px; }
 QMenuBar::item { padding: 5px 9px; border-radius: 5px; }
 QMenuBar::item:selected { background: __HOVER__; }
 QMenu { background: __PANEL__; border: 1px solid __BORDER__; border-radius: 6px; padding: 6px; }
 QMenu::item { padding: 7px 28px 7px 12px; border-radius: 5px; }
 QMenu::item:selected { background: __SELECTION__; }
+QMenu::item:disabled { color: __MUTED__; }
 QStatusBar { background: __PANEL__; border-top: 1px solid __BORDER__; padding: 3px 10px; }
 QStatusBar::item { border: none; }
 QProgressBar { background: __FIELD__; border: none; border-radius: 4px; }

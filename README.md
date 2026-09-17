@@ -2,7 +2,7 @@
 
 DeepSonder 的 PySide6 桌面系列，面向长篇小说项目的本地写作、故事记忆、人物识别、关系梳理、一致性检查与 AI 辅助创作。
 
-本仓库只以 `main.py` / `DeepSonder-PySide6.exe` 作为用户入口。Electron 系列在独立工作区 `D:\GitHub-store\DeepSonder` 维护，两系列功能契约记录在 `docs/feature-parity.json`。
+本仓库只以 `main.py` / `DeepSonder-PySide6.exe` 作为用户入口。PySide6 与 Electron 分别维护、测试和发布，不要求功能或更新同步。本系列能力状态记录在 `docs/feature-status.json`，原 `docs/feature-parity.json` 仅保留历史记录。
 
 ## 开发运行
 
@@ -18,6 +18,19 @@ DeepSonder 的 PySide6 桌面系列，面向长篇小说项目的本地写作、
 python -m pip install -r requirements.txt
 python main.py
 ```
+
+## 快速导航与键盘操作
+
+左侧“查找”或 `Ctrl+P` 可按标题、文件名和类别打开当前项目的章节与资料，留空优先显示最近访问。`Ctrl+Shift+P` 可搜索已有命令、查看快捷键及不可用原因。搜索框支持方向键选择、Enter 执行、Esc 关闭。
+
+- `F6`：回到当前文档；预览模式保持只读。
+- `Ctrl+Alt+F`：打开并搜索当前目录。
+- `Ctrl+Alt+L`：定位当前文档并清除遮挡它的目录搜索。
+- 专注模式下仍可使用快捷键；关闭快速入口不会退出专注模式。
+
+## 设置修改
+
+设置按写作、AI 与连接、外观、数据分类。修改会暂存为草稿，切换页面不会丢失，点击“保存设置”后生效。“恢复默认设置”同样先载入草稿；“放弃修改”恢复已保存配置。未保存草稿退出时会提示处理。
 
 ## 导入旧版项目
 

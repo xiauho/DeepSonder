@@ -48,6 +48,7 @@ class AITaskViewController(QObject):
         memory_page,
         output_panel,
         window_state_controller,
+        task_panel=None,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -62,6 +63,7 @@ class AITaskViewController(QObject):
         self.output_panel = output_panel
         self.window_state_controller = window_state_controller
         self.parent = parent
+        self.task_panel = task_panel
         self._has_output = bool(output_panel.toPlainText())
         self._task_started_at: float | None = None
         self._task_kind: str | None = None
@@ -106,16 +108,22 @@ class AITaskViewController(QObject):
 
     def set_status(self, message: str) -> None:
         self.status_message.setText(message)
+        if self.task_panel is not None and self.task_panel.state in {"running", "reviewing"}:
+            self.task_panel.detail.setText(message)
 
     def cancel(self) -> bool:
         if not self.ai_controller.cancel():
             return False
         self.cancel_button.setEnabled(False)
+        if self.task_panel is not None:
+            self.task_panel.set_state("cancelling", "已请求取消，正在等待后台安全结束。")
         self.set_status("正在取消 AI 任务…")
         self.append_output("已请求取消当前 AI 任务。")
         return True
 
     def _on_started(self, _token) -> None:
+        if self.task_panel is not None:
+            self.task_panel.start(_token)
         self._task_started_at = time.monotonic()
         self._task_kind = getattr(_token, "kind", None)
         label = TASK_LABELS.get(self._task_kind, "AI")
@@ -152,15 +160,24 @@ class AITaskViewController(QObject):
         self.memory_page.set_syncing(False)
         self._task_started_at = None
         self._task_kind = None
+        if self.task_panel is not None:
+            self.task_panel.finish(_token)
+            if self.task_panel.state == "pending":
+                self.ai_indicator.setText("●  AI 结果待审阅")
 
     def _on_cancelled(self, _token) -> None:
         label = TASK_LABELS.get(getattr(_token, "kind", None), "AI")
         self.append_output(f"AI {label}任务已取消，未写入生成结果。")
         self.set_status("AI 任务已取消")
+        if self.task_panel is not None:
+            self.task_panel.set_state("cancelled", "任务已取消，未写入生成结果。")
 
     def _on_failed(self, _token, message: str) -> None:
         label = TASK_LABELS.get(getattr(_token, "kind", None), "AI")
         safe_message = limit_output_entry(message, 6_000)
         self.append_output(f"{label}任务失败\n{safe_message}")
         self.set_status("AI 任务失败")
-        QMessageBox.critical(self.parent, "DeepSeek Harness 调用失败", safe_message)
+        if self.task_panel is not None:
+            self.task_panel.set_state("failed", "任务失败：" + safe_message[:400])
+        else:
+            QMessageBox.critical(self.parent, "DeepSeek Harness 调用失败", safe_message)

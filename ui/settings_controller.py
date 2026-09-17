@@ -47,8 +47,9 @@ class SettingsController(QObject):
         self._config = normalize_config(config)
 
     def apply(self, config: dict, message: str = "设置已保存") -> dict:
-        self._config = normalize_config(config)
-        save_config(self._config)
+        candidate = normalize_config(config)
+        save_config(candidate)
+        self._config = candidate
         self._apply_runtime_settings()
         self.config_changed.emit(self.config, message)
         return self.config
