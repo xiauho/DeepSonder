@@ -41,6 +41,12 @@ foreach ($Target in @($BuildRoot, $DistRoot, $BundleRoot, $ReleaseRoot)) {
 
 Push-Location $ProjectRoot
 try {
+    & $PythonExecutable -c "import json; d=json.load(open('docs/feature-status.json',encoding='utf-8')); bad=[f['id'] for f in d['features'] if f['requirement']=='required' and f['status']!='supported']; assert not bad, bad"
+    if ($LASTEXITCODE -ne 0) { throw "本系列必需功能尚未完成。" }
+    $SourceRevision = (& git rev-parse HEAD).Trim()
+    if ($LASTEXITCODE -ne 0) { throw "无法获取发布源码提交。" }
+    $SourceStatus = @(& git status --porcelain)
+    if ($LASTEXITCODE -ne 0 -or $SourceStatus.Count -gt 0) { throw "发布构建必须来自干净的已提交工作区。" }
     if (-not $SkipTests) {
         & $PythonExecutable scripts/run_tests.py
         if ($LASTEXITCODE -ne 0) {
@@ -61,6 +67,8 @@ try {
         Copy-Item -LiteralPath (Join-Path $ProjectRoot $Document) `
             -Destination (Join-Path $BundleRoot $Document) -Force
     }
+    Copy-Item -LiteralPath (Join-Path $ProjectRoot "docs\releases\$Version.md") `
+        -Destination (Join-Path $BundleRoot "RELEASE_NOTES.md") -Force
     Copy-Item -LiteralPath (Join-Path $ProjectRoot "licenses") `
         -Destination (Join-Path $BundleRoot "licenses") -Recurse -Force
     $Smoke = Start-Process -FilePath $BundleExecutable `
@@ -96,6 +104,11 @@ try {
         platform = "windows"
         architecture = "x64"
         update_channel = $null
+        source_revision = $SourceRevision
+        source_dirty = $false
+        build_python = (& $PythonExecutable -c "import platform; print(platform.python_version())").Trim()
+        build_pyside6 = (& $PythonExecutable -c "import PySide6; print(PySide6.__version__)").Trim()
+        build_pyinstaller = (& $PythonExecutable -c "import PyInstaller; print(PyInstaller.__version__)").Trim()
         asset = [ordered]@{
             name = $AssetName
             size = $Asset.Length
@@ -105,6 +118,8 @@ try {
     } | ConvertTo-Json | Set-Content `
         -LiteralPath (Join-Path $ReleaseRoot "release-manifest.json") -Encoding utf8
 
+    & $PythonExecutable scripts/verify_release.py $ReleaseRoot
+    if ($LASTEXITCODE -ne 0) { throw "发布包审计失败。" }
     Write-Output "DeepSonder-PySide6 v$Version Windows x64 打包完成。"
     Write-Output "发布目录：$ReleaseRoot"
     Write-Output "SHA-256：$Hash"

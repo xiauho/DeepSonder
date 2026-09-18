@@ -6,6 +6,12 @@ DeepSonder 的 PySide6 桌面系列，面向长篇小说项目的本地写作、
 
 展示品牌使用 **DeepSonder**，程序与发布标识使用 **DeepSonder-PySide6**。当前版本见 [VERSION](VERSION)，变更记录见 [更新日志](CHANGELOG.md)。
 
+## 下载首个测试版
+
+[DeepSonder 0.1.0-beta（PySide6）](https://github.com/xiauho/DeepSonder/releases/tag/pyside6-v0.1.0-beta) 提供 Windows x64 便携 ZIP。完整解压后运行 `DeepSonder-PySide6.exe`，无需安装 Python。AI 功能需要另行安装并配置 DeepSeek Harness。
+
+安装、校验、AI 配置和已知限制见 [本版发布说明](docs/releases/0.1.0-beta.md)。这是公开测试版，请先备份写作项目。
+
 ## 开发运行
 
 需要 Python 3.12：
