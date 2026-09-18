@@ -133,6 +133,14 @@ def render_context_reports(reports: list[PromptContextReport]) -> str:
             f"<p class='muted'>实际提交 {report.submitted_prompt_chars:,} 字符"
             f" · 启动命令 {report.command_chars:,} 字符</p>"
         )
+        if report.outcome != "pending":
+            blocks.append(
+                f"<p class='muted'>调用 {report.invocation_ms / 1000:.1f} 秒"
+                f" · 探测 {report.probe_ms / 1000:.1f} 秒"
+                f" · 生成 {report.generation_ms / 1000:.1f} 秒"
+                f" · 回执重试 {report.retry_ms / 1000:.1f} 秒"
+                f" · 返回 {report.output_chars:,} 字符</p>"
+            )
         if report.estimated_input_tokens:
             budget_text = (
                 f" / {report.input_token_budget:,}"

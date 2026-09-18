@@ -1,3 +1,4 @@
+from tests.style_fixtures import set_style
 import tempfile
 from pathlib import Path
 from unittest import TestCase
@@ -110,9 +111,8 @@ class AIContextSnapshotTests(TestCase):
                 project, "chapter_01", text, task_kind="check"
             )
 
-            project.style_guide_path.write_text(
-                "# 写作风格指南\n\n冷峻克制。\n", encoding="utf-8"
-            )
+            set_style(project.root,
+                "# 写作风格指南\n\n冷峻克制。\n")
 
             self.assertFalse(
                 expansion_snapshot.matches(

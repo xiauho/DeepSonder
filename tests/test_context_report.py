@@ -287,3 +287,50 @@ class ContextReportRenderingTests(TestCase):
         rendered = render_context_reports([report])
         self.assertIn("自动重试 1 次", rendered)
         self.assertIn("首次异常：未找到回执", rendered)
+
+
+class InvocationTimingTests(TestCase):
+    def test_probe_generation_retry_are_separate_and_redacted(self):
+        reports = []
+        client = DSHClient(report_callback=reports.append)
+        self.addCleanup(client.cleanup)
+        clock = [0.0]
+        def probe(**kwargs):
+            clock[0] += 2
+            return True
+        attempts = [0]
+        ack = acknowledged(client, "私有正文")
+        def execute(prompt, **kwargs):
+            attempts[0] += 1
+            clock[0] += 3 if attempts[0] == 1 else 4
+            return "missing receipt" if attempts[0] == 1 else ack(prompt, **kwargs)
+        with patch("core.dsh_client.time.perf_counter", side_effect=lambda: clock[0]), \
+             patch.object(client, "_ensure_file_transport_support", side_effect=probe), \
+             patch.object(client, "_execute_prompt", side_effect=execute):
+            client.generate("系统", "私有输入", context_report=empty_report())
+        report = reports[0]
+        self.assertEqual((report.probe_ms, report.generation_ms, report.retry_ms), (2000, 3000, 4000))
+        self.assertEqual(report.invocation_ms, 9000)
+        self.assertEqual(report.output_chars, 4)
+        self.assertEqual(report.file_ack_retry_count, 1)
+        self.assertNotIn("私有", json.dumps(report.to_dict(), ensure_ascii=False))
+        rendered = render_context_reports(reports)
+        self.assertIn("调用 9.0 秒", rendered)
+        self.assertIn("回执重试 4.0 秒", rendered)
+
+    def test_timeout_records_attempt_duration_and_cleans_file(self):
+        reports = []
+        client = DSHClient(report_callback=reports.append)
+        self.addCleanup(client.cleanup)
+        client._file_transport_supported = True
+        clock = [0.0]
+        def fail(*args, **kwargs):
+            clock[0] += 5
+            raise RuntimeError("调用超时")
+        with patch("core.dsh_client.time.perf_counter", side_effect=lambda: clock[0]), \
+             patch.object(client, "_execute_prompt", side_effect=fail):
+            with self.assertRaisesRegex(RuntimeError, "超时"):
+                client.generate("系统", "任务", context_report=empty_report())
+        self.assertEqual(reports[0].generation_ms, 5000)
+        self.assertEqual(reports[0].outcome, "timeout")
+        self.assertTrue(reports[0].task_file_cleaned)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QSize, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -41,17 +41,19 @@ class LeftPanel(QWidget):
     new_timeline_requested = Signal()
     toggle_requested = Signal()
     locate_current_requested = Signal()
+    style_requested = Signal()
 
     PATH_ROLE = int(Qt.ItemDataRole.UserRole)
     CATEGORY_ROLE = PATH_ROLE + 1
     ICON_ROLE = PATH_ROLE + 2
     IMPORTANCE_ROLE = PATH_ROLE + 3
     GROUP_NUMBER_ROLE = PATH_ROLE + 4
-    STATUS_COLUMN_WIDTH = 94
+    TITLE_ROLE = PATH_ROLE + 5
+    STATUS_COLUMN_WIDTH = 64
     COMPACT_TREE_WIDTH = 300
     IMPORTANCE_LABELS = {
         "core": "核心",
-        "non_core": "非核心",
+        "non_core": "",
         "always": "常驻",
     }
     IMPORTANCE_TOOLTIPS = {
@@ -61,7 +63,7 @@ class LeftPanel(QWidget):
     }
     GROUP_ICONS = {
         "总大纲": "account_tree",
-        "写作风格": "stylus",
+        "本书文风": "stylus",
         "章节": "auto_stories",
         "角色": "group",
         "世界观": "public",
@@ -77,10 +79,12 @@ class LeftPanel(QWidget):
         self._scope = "chapters"
         self._scope_states: dict[str, dict] = {}
         self._selected_path: str | None = None
+        self._current_document: str | None = None
         self._icon_color = "#63748A"
         self._accent_color = "#2F80ED"
         self._muted_color = "#63748A"
         self._compact_mode = False
+        self._style_available = True
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 16, 10, 12)
@@ -141,6 +145,7 @@ class LeftPanel(QWidget):
         header_layout.addWidget(toggle_btn)
         layout.addWidget(header)
         scope_row = QHBoxLayout()
+        scope_row.setSpacing(0)
         self.scope_buttons = {}
         scope_group = QButtonGroup(self)
         for scope, label in (("chapters", "章节"), ("canon", "资料")):
@@ -149,6 +154,7 @@ class LeftPanel(QWidget):
             button.setAccessibleName(f"浏览{label}")
             button.setObjectName("editorModeButton")
             button.setCheckable(True)
+            button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             scope_group.addButton(button)
             button.clicked.connect(lambda _checked=False, value=scope: self.set_scope(value))
             scope_row.addWidget(button, 1)
@@ -168,7 +174,7 @@ class LeftPanel(QWidget):
         search_row = QHBoxLayout()
         search_row.addWidget(self.search, 1)
         self.locate_button = QToolButton()
-        self.locate_button.setText("定位")
+        self.locate_button.setText("定位当前")
         self.locate_button.setToolTip("在目录中定位当前文档，并清除搜索条件")
         self.locate_button.setAccessibleName("定位当前文档")
         self.locate_button.setEnabled(False)
@@ -181,14 +187,19 @@ class LeftPanel(QWidget):
         self.tree.setObjectName("projectTree")
         self.tree.setHeaderHidden(True)
         self.tree.setColumnCount(2)
-        self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.tree.header().setStretchLastSection(False)
+        self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
         self.tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
         self.tree.setColumnWidth(1, self.STATUS_COLUMN_WIDTH)
-        self.tree.setIndentation(0)
+        self.tree.viewport().installEventFilter(self)
+        self.tree.setIndentation(16)
         self.tree.setRootIsDecorated(False)
+        self.tree.setExpandsOnDoubleClick(False)
         self.tree.setIconSize(QSize(18, 18))
         self.tree.setAnimated(True)
         self.tree.setUniformRowHeights(True)
+        self.tree.itemExpanded.connect(self._update_group_icon)
+        self.tree.itemCollapsed.connect(self._update_group_icon)
         self.tree.itemClicked.connect(self._on_item_clicked)
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._show_context_menu)
@@ -207,6 +218,18 @@ class LeftPanel(QWidget):
         self._nav_hint.setObjectName("navHint")
         self._nav_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self._nav_hint)
+        self.style_footer = QFrame()
+        footer_layout = QVBoxLayout(self.style_footer)
+        footer_layout.setContentsMargins(0, 6, 0, 0)
+        separator = QFrame(); separator.setFrameShape(QFrame.Shape.HLine)
+        footer_layout.addWidget(separator)
+        self.style_button = IconTextButton("stylus", "本书文风")
+        self.style_button.setAccessibleName("本书文风")
+        self.style_button.setToolTip("管理分区域文风要求、参考样文与审校例外")
+        self.style_button.clicked.connect(self.style_requested)
+        self.style_button.setEnabled(False)
+        footer_layout.addWidget(self.style_button)
+        layout.addWidget(self.style_footer)
         self._update_tree_layout()
         self._apply_scope_controls()
 
@@ -214,19 +237,31 @@ class LeftPanel(QWidget):
         super().resizeEvent(event)
         self._update_tree_layout()
 
+    def eventFilter(self, watched, event):
+        if hasattr(self, "tree") and watched is self.tree.viewport() and event.type() == QEvent.Type.Resize:
+            self._update_tree_layout()
+        return super().eventFilter(watched, event)
+
     def _update_tree_layout(self) -> None:
-        """Give document titles the full row when the navigation is narrow."""
-        if not hasattr(self, "tree"):
+        """Size hidden-header columns against the actual viewport, including scrollbars."""
+        if not hasattr(self, "tree") or getattr(self, "_updating_tree_layout", False):
             return
-        compact = self.tree.width() < self.COMPACT_TREE_WIDTH
-        if compact == self._compact_mode:
-            return
-        self._compact_mode = compact
-        self.tree.setColumnHidden(1, compact)
-        if not compact:
-            self.tree.setColumnWidth(1, self.STATUS_COLUMN_WIDTH)
-        if hasattr(self, "_nav_hint"):
-            self._apply_scope_controls()
+        self._updating_tree_layout = True
+        try:
+            width = self.tree.viewport().width()
+            compact = width < self.COMPACT_TREE_WIDTH
+            changed = compact != self._compact_mode
+            self._compact_mode = compact
+            self.tree.setColumnHidden(1, compact)
+            status_width = max(self.STATUS_COLUMN_WIDTH, self.tree.fontMetrics().horizontalAdvance("常驻") + 24)
+            self.tree.setColumnWidth(1, status_width)
+            self.tree.setColumnWidth(0, max(20, width - (0 if compact else status_width)))
+            if changed:
+                for item in self.document_items():
+                    if item.data(0, self.IMPORTANCE_ROLE):
+                        self._apply_importance_appearance(item)
+        finally:
+            self._updating_tree_layout = False
 
     def _remember_scope(self) -> None:
         self._scope_states[self._scope] = {
@@ -243,9 +278,37 @@ class LeftPanel(QWidget):
         self.scope_buttons[self._scope].setChecked(True)
         self.add_chapter_button.setVisible(chapters)
         self.add_canon_button.setVisible(not chapters)
-        self.search.setPlaceholderText("搜索章节" if chapters else "搜索角色、大纲或设定")
+        self.search.setPlaceholderText("搜索章节…" if chapters else "搜索资料…")
         self.search.setAccessibleName(self.search.placeholderText())
         self._nav_hint.setText("单击打开 · 右键管理章节" if chapters else "单击打开 · 右键管理资料与加载策略")
+        self._nav_hint.setWordWrap(True)
+        self.style_footer.setVisible(not chapters)
+        self._update_locate_button()
+
+    def document_items(self):
+        """Yield every document, including the flat planning/timeline rows."""
+        for index in range(self.tree.topLevelItemCount()):
+            item = self.tree.topLevelItem(index)
+            if item.data(0, self.PATH_ROLE):
+                yield item
+            for child_index in range(item.childCount()):
+                child = item.child(child_index)
+                if child.data(0, self.PATH_ROLE):
+                    yield child
+
+    def set_style_available(self, available: bool):
+        self._style_available = available
+        self.style_button.setEnabled(self._project is not None and available)
+
+    def set_current_document(self, path):
+        self._current_document = str(path) if path else None
+        self._update_locate_button()
+
+    def _update_locate_button(self):
+        item = next((item for item in self.document_items()
+                     if item.data(0, self.PATH_ROLE) == self._current_document), None)
+        in_scope = item is not None and ((item.data(0, self.CATEGORY_ROLE) == "章节") == (self._scope == "chapters"))
+        self.locate_button.setEnabled(in_scope)
 
     def set_scope(self, scope: str) -> None:
         scope = "canon" if scope == "canon" else "chapters"
@@ -285,6 +348,7 @@ class LeftPanel(QWidget):
             group = root.child(index)
             icon_name = group.data(0, self.ICON_ROLE) or "folder"
             group.setIcon(0, material_icon(str(icon_name), self._icon_color, 18))
+            if not group.data(0, self.PATH_ROLE): self._update_group_icon(group)
             for child_index in range(group.childCount()):
                 child = group.child(child_index)
                 child.setIcon(0, material_icon("description", self._icon_color, 18))
@@ -308,7 +372,9 @@ class LeftPanel(QWidget):
         self.tree.clear()
         self.project_label.setText(project.name if project else "尚未打开项目")
         self.project_label.setToolTip(project.name if project else "尚未打开项目")
+        self.style_button.setEnabled(project is not None and self._style_available)
         if project is None:
+            self._apply_scope_controls()
             self._filter_tree(self.search.text())
             return
 
@@ -322,33 +388,30 @@ class LeftPanel(QWidget):
                     project.outline_dir / "future_plan.md",
                 ],
             ),
-            ("写作风格", "02", [store.style_guide_path]),
+            ("时间线", "02", [project.canon_dir / "timeline.md"]),
             ("章节", "03", store.list_chapters()),
             ("角色", "04", store.list_characters()),
             ("世界观", "05", store.list_world()),
             ("体系设定", "06", store.list_power()),
-            ("时间线", "07", [project.canon_dir / "timeline.md"]),
+
         ]
         category_map = {"体系设定": "体系设定"}
         for label, number, paths in groups:
             existing = [path for path in paths if path.exists()]
-            core_count = (
-                len(store.list_core_systems()) if label == "体系设定" else 0
-            )
+            flat = label in {"总大纲", "时间线"}
             group_text = f"{label} · {len(existing)}"
-            if label == "体系设定":
-                group_text += f" · 核心 {core_count}"
             group = QTreeWidgetItem([group_text, ""])
             group.setData(0, self.CATEGORY_ROLE, category_map.get(label, label))
             group.setData(0, self.ICON_ROLE, self.GROUP_ICONS.get(label, "folder"))
             group.setData(0, self.GROUP_NUMBER_ROLE, number)
-            group.setFlags(group.flags() & ~Qt.ItemFlag.ItemIsSelectable)
             group.setFirstColumnSpanned(True)
             group_font = group.font(0)
             group_font.setWeight(QFont.Weight.DemiBold)
             group.setFont(0, group_font)
             group.setIcon(0, material_icon(self.GROUP_ICONS.get(label, "folder"), self._icon_color, 18))
-            self.tree.addTopLevelItem(group)
+            if not flat:
+                self.tree.addTopLevelItem(group)
+                group.setFirstColumnSpanned(True)
             for path in existing:
                 display_name = store.chapter_display_name(path)
                 status = ""
@@ -370,15 +433,23 @@ class LeftPanel(QWidget):
                 )
                 child.setToolTip(0, f"{display_name}\n{path}")
                 child.setData(0, self.PATH_ROLE, str(path))
+                child.setData(0, self.TITLE_ROLE, display_name)
                 child.setData(0, self.CATEGORY_ROLE, category_map.get(label, label))
                 if importance:
                     child.setData(0, self.IMPORTANCE_ROLE, importance)
-                child.setIcon(0, material_icon("description", self._icon_color, 18))
-                group.addChild(child)
+                icon_name = self.GROUP_ICONS[label] if flat else "description"
+                child.setData(0, self.ICON_ROLE, icon_name)
+                child.setIcon(0, material_icon(icon_name, self._icon_color, 18))
+                if flat:
+                    self.tree.addTopLevelItem(child)
+                    child.setFirstColumnSpanned(True)
+                else:
+                    group.addChild(child)
                 if importance:
                     self._apply_importance_appearance(child)
             expanded = self._scope_states.get(self._scope, {}).get("expanded", {})
             group.setExpanded(expanded.get(label, True))
+            if not flat: self._update_group_icon(group)
         self._filter_tree(self.search.text())
         self._restore_selection()
         self._update_tree_layout()
@@ -390,52 +461,50 @@ class LeftPanel(QWidget):
         self._reveal_scope_for_path(Path(path))
         target = str(Path(path))
         self._selected_path = target
-        root = self.tree.invisibleRootItem()
-        for index in range(root.childCount()):
-            group = root.child(index)
-            for child_index in range(group.childCount()):
-                child = group.child(child_index)
-                if child.data(0, self.PATH_ROLE) == target:
-                    group.setExpanded(True)
-                    self.tree.setCurrentItem(child)
-                    self.tree.scrollToItem(child)
-                    self._on_item_clicked(child, 0)
-                    return
+        for child in self.document_items():
+            if child.data(0, self.PATH_ROLE) == target:
+                if child.parent(): child.parent().setExpanded(True)
+                self.tree.setCurrentItem(child)
+                self.tree.scrollToItem(child)
+                self._on_item_clicked(child, 0)
+                return
 
     def reveal_path(self, path: Path | str) -> bool:
         """Select and scroll to a file without emitting a new open request."""
         self._reveal_scope_for_path(Path(path))
         target = str(Path(path))
         self._selected_path = target
-        root = self.tree.invisibleRootItem()
-        for index in range(root.childCount()):
-            group = root.child(index)
-            for child_index in range(group.childCount()):
-                child = group.child(child_index)
-                if child.data(0, self.PATH_ROLE) == target:
-                    group.setExpanded(True)
-                    self.tree.setCurrentItem(child)
-                    self.tree.scrollToItem(child)
-                    return True
+        for child in self.document_items():
+            if child.data(0, self.PATH_ROLE) == target:
+                if child.parent(): child.parent().setExpanded(True)
+                self.tree.setCurrentItem(child)
+                self.tree.scrollToItem(child)
+                return True
         return False
 
     def _restore_selection(self) -> None:
         if not self._selected_path:
             return
-        target = self._selected_path
-        root = self.tree.invisibleRootItem()
-        for index in range(root.childCount()):
-            group = root.child(index)
-            for child_index in range(group.childCount()):
-                child = group.child(child_index)
-                if child.data(0, self.PATH_ROLE) == target and not child.isHidden():
-                    group.setExpanded(True)
-                    self.tree.setCurrentItem(child)
-                    self.tree.scrollToItem(child)
-                    return
+        for child in self.document_items():
+            if child.data(0, self.PATH_ROLE) == self._selected_path and not child.isHidden():
+                if child.parent():
+                    if child.parent().isHidden() or not child.parent().isExpanded(): continue
+                self.tree.setCurrentItem(child)
+                self.tree.scrollToItem(child)
+                return
+
+    def _update_group_icon(self, item):
+        if item.data(0, self.PATH_ROLE):
+            return
+        icon = ("expand_more" if item.isExpanded() else "chevron_right") if item.childCount() else item.data(0, self.ICON_ROLE)
+        item.setIcon(0, material_icon(icon or "folder", self._icon_color, 18))
+        item.setToolTip(0, "点击展开或收起" if item.childCount() else "暂无条目，可从上方新建资料")
 
     def _on_item_clicked(self, item: QTreeWidgetItem, column: int) -> None:
         path_str = item.data(0, self.PATH_ROLE)
+        if not path_str:
+            item.setExpanded(not item.isExpanded())
+            return
         if path_str:
             self._selected_path = str(path_str)
             category = item.data(0, self.CATEGORY_ROLE) or ""
@@ -576,17 +645,15 @@ class LeftPanel(QWidget):
             self._update_system_group_label(group)
 
     def _update_system_group_label(self, group: QTreeWidgetItem) -> None:
-        core_count = sum(
-            group.child(index).data(0, self.IMPORTANCE_ROLE) == "core"
-            for index in range(group.childCount())
-        )
-        group.setText(
-            0,
-            f"体系设定 · {group.childCount()} · 核心 {core_count}",
-        )
+        group.setText(0, f"体系设定 · {group.childCount()}")
 
     def _apply_importance_appearance(self, item: QTreeWidgetItem) -> None:
         importance = item.data(0, self.IMPORTANCE_ROLE) or "non_core"
+        title = item.data(0, self.TITLE_ROLE) or item.text(0)
+        status = self.IMPORTANCE_LABELS.get(importance, "")
+        item.setText(0, f"{title} · {status}" if self._compact_mode and status else title)
+        item.setText(1, status)
+        item.setToolTip(0, f"{title}\n{item.data(0, self.PATH_ROLE)}\n{self.IMPORTANCE_TOOLTIPS.get(importance, '')}")
         is_emphasized = importance in {"core", "always"}
         color = self._accent_color if is_emphasized else self._muted_color
         item.setForeground(1, QBrush(QColor(color)))
@@ -613,6 +680,11 @@ class LeftPanel(QWidget):
         for index in range(root.childCount()):
             group = root.child(index)
             in_scope = (group.data(0, self.CATEGORY_ROLE) == "章节") == (self._scope == "chapters")
+            if group.data(0, self.PATH_ROLE):
+                visible = in_scope and (not needle or needle in group.text(0).casefold())
+                group.setHidden(not visible)
+                total_visible += int(visible)
+                continue
             visible_children = 0
             for child_index in range(group.childCount()):
                 child = group.child(child_index)

@@ -9,6 +9,7 @@ from ui.project_session import ProjectSession
 
 class FakeAI(QObject):
     succeeded = Signal(object, object)
+    finished = Signal(object)
     def __init__(self):
         super().__init__()
         self.release_result = Mock()

@@ -3,7 +3,7 @@
 Layout:
     project.json
     writing/
-        style_guide.md
+        style_library.json
     outline/
         main_arc.md
         chapters/<chapter_id>.md
@@ -45,24 +45,6 @@ DEFAULT_STORY_STATE = {
 }
 
 DEFAULT_CHAPTER_SUMMARIES = {}
-DEFAULT_STYLE_GUIDE = (
-    "# 写作风格指南\n\n"
-    "<!-- 填写本项目长期使用的表达偏好。扩写、续写和文风审校共用此指南；未填写时只使用基本表达原则。 -->\n\n"
-    "## 总体气质\n\n"
-    "<!-- 例如：冷峻克制、轻快幽默、细腻舒缓。请使用特征描述，不建议填写作者姓名。 -->\n\n"
-    "## 叙事视角\n\n"
-    "<!-- 例如：第三人称限知，主要跟随主角感知。 -->\n\n"
-    "## 句式与节奏\n\n"
-    "<!-- 例如：动作场景短句为主，日常场景适度放缓。 -->\n\n"
-    "## 对话风格\n\n"
-    "<!-- 例如：对白简短，通过冲突和试探传递信息。 -->\n\n"
-    "## 描写偏好\n\n"
-    "<!-- 例如：优先动作、空间和感官细节，减少抽象总结。 -->\n\n"
-    "## 避免事项\n\n"
-    "<!-- 例如：避免连续排比、过度比喻、总结式升华和网络流行语。 -->\n\n"
-    "## 作者自有样例\n\n"
-    "<!-- 可粘贴少量由你拥有权利、能够代表本书风格的原创段落。 -->\n"
-)
 DEFAULT_TIMELINE = "# 时间线\n\n| 时间 | 事件 |\n|---|---|\n"
 CORE_POWER_FILENAME = "_核心规则.md"
 DEFAULT_CORE_POWER_RULES = (
@@ -153,11 +135,8 @@ class NovelProject:
         cls._write_json(root / "project.json", meta)
 
         # Skeleton files
-        atomic_write_text(
-            root / "writing" / "style_guide.md",
-            DEFAULT_STYLE_GUIDE,
-            encoding="utf-8",
-        )
+        from .style_library import empty_library, LIBRARY_PATH
+        cls._write_json(root / LIBRARY_PATH, empty_library())
         atomic_write_text(
             root / "outline" / "main_arc.md",
             "# 总大纲\n\n- 主线：\n- 支线：\n- 伏笔：\n", encoding="utf-8"
@@ -318,7 +297,6 @@ class NovelProject:
     def list_all_editable_files(self) -> list[tuple[str, Path]]:
         """Return (category, path) pairs for the left navigation tree."""
         items: list[tuple[str, Path]] = [
-            ("写作风格", self.style_guide_path),
             ("大纲", self.outline_dir / "main_arc.md"),
             ("大纲", self.outline_dir / "future_plan.md"),
             ("时间线", self.canon_dir / "timeline.md"),

@@ -8,7 +8,10 @@ from .storage import atomic_write_text
 
 LIBRARY_PATH = Path("writing/style_library.json")
 SCENES = ("通用", "对话", "动作", "心理", "环境", "转场")
-PROFILE_FIELDS = ("叙事距离", "对话", "描写", "节奏", "避免事项")
+PROFILE_FIELDS = ("总体气质", "叙事距离", "对话", "描写", "节奏", "避免事项", "其他要求")
+PROFILE_LABELS = {"总体气质": "总体气质", "叙事距离": "叙事视角与距离", "对话": "对话风格",
+                  "描写": "描写偏好", "节奏": "句式与节奏", "避免事项": "避免事项", "其他要求": "其他要求"}
+STYLE_BUDGET = 2500
 
 def digest(text):
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
@@ -28,7 +31,7 @@ def validate(value):
         raise ValueError("文风启用状态无效")
     profile = value.get("profile", {})
     if not isinstance(profile, dict) or any(k not in PROFILE_FIELDS or not isinstance(v, str) or len(v) > 600 for k, v in profile.items()):
-        raise ValueError("画像每项最多 600 字")
+        raise ValueError("文风要求每项最多 600 字")
     scenes = value.get("chapter_scenes", {})
     if not isinstance(scenes, dict) or len(scenes) > 10000 or any(not isinstance(k, str) or v not in SCENES for k, v in scenes.items()):
         raise ValueError("章节场景设置无效")
@@ -80,15 +83,21 @@ def save_library(root, value, *, expected_revision):
     return result
 
 def render_library(root, chapter_id="", *, budget=1800):
-    value = load_library(root)
-    if budget < 160 or not value["enabled"]:
+    return render_library_value(load_library(root), chapter_id, budget=budget)
+
+
+def render_library_value(value, chapter_id="", *, budget=1800):
+    if budget <= 0:
         return ""
     scene = value["chapter_scenes"].get(chapter_id, "通用")
-    parts = ["【作者确认的文风画像】（与 style_guide.md 冲突时以作者原要求为准）"]
-    parts += [f"{k}：{v}" for k, v in value["profile"].items() if v.strip()]
-    text = "\n".join(parts)
+    fields = [f"{PROFILE_LABELS[k]}：{value['profile'][k].strip()}" for k in PROFILE_FIELDS
+              if value["profile"].get(k, "").strip()]
+    text = "【本书文风要求】（优先于参考样文）\n" + "\n".join(fields) if fields else ""
     if len(text) > budget:
-        text = text[:max(0, budget - 12)] + "（画像预算截断）"
+        marker = "（文风要求预算截断）"
+        text = text[:max(0, budget - len(marker))] + marker[:budget]
+    if not value["enabled"] or budget < 160:
+        return text
     count = 0
     candidates = sorted(value["samples"], key=lambda s: (s["scene"] != scene, s["id"]))
     for sample in candidates:

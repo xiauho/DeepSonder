@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
+from .memory_progress import MemoryProgress, ProgressCallback, memory_phase, publish_progress
 from .app_paths import app_cache_dir
 from .chapter_facts import ChapterFactLedger, FactRecord
 from .context_budget import compact_story_state
@@ -27,7 +28,7 @@ from .token_budget import (
 
 
 MEMORY_SUGGESTION_SCHEMA_VERSION = 2
-MEMORY_PROPOSAL_PROMPT_VERSION = 5
+MEMORY_PROPOSAL_PROMPT_VERSION = 6
 MEMORY_CACHE_SCHEMA_VERSION = 1
 DIGEST_SHARD_SCHEMA_VERSION = 1
 DEFAULT_REDUCE_BATCH_TOKENS = 8_000
@@ -464,14 +465,18 @@ def generate_chapter_memory_proposal(
     base_state_scope: str = "",
     source_state_hash: str = "",
     force_refresh: bool = False,
+    progress_callback: ProgressCallback | None = None,
 ) -> ChapterMemoryProposal:
     """Reduce a fact ledger and produce one locally validated memory proposal."""
+    _check_cancel(cancel_event)
     full_canon_context = str(canon_context or "")
     context_hash = canonical_hash(full_canon_context)
     canon_context = full_canon_context[:12_000]
     proposal_cache = cache or ChapterMemoryCache(project)
     cached = None if force_refresh else proposal_cache.load(ledger, base_state, context_hash)
     if cached is not None:
+        _check_cancel(cancel_event)
+        publish_progress(progress_callback, MemoryProgress("proposal", state="cached", cache_hits=1))
         return _replace_proposal(
             cached,
             base_state_scope=base_state_scope,
@@ -483,6 +488,8 @@ def generate_chapter_memory_proposal(
     prompt_canon = canon_context
     base_state_hash = canonical_hash(base_state)
     cached_reduction = proposal_cache.load_reduction(ledger)
+    if cached_reduction is not None:
+        publish_progress(progress_callback, MemoryProgress("reduction", state="cached", cache_hits=1))
     source: dict[str, Any] = (
         {**cached_reduction, "base_state_hash": base_state_hash}
         if cached_reduction is not None
@@ -545,13 +552,18 @@ def generate_chapter_memory_proposal(
                 estimator=estimator,
             )
             options = {"cancel_event": cancel_event} if cancel_event is not None else {}
-            raw = dsh.generate_json(
-                shard_prompt.system_prompt,
-                shard_prompt.user_prompt,
-                context_report=shard_prompt.report,
-                **options,
-            )
-            shards.append(parse_digest_shard(raw, allowed_ids))
+            with memory_phase(
+                progress_callback, "reduction", current=batch_index,
+                total=len(batches), round_number=round_number,
+            ):
+                raw = dsh.generate_json(
+                    shard_prompt.system_prompt,
+                    shard_prompt.user_prompt,
+                    context_report=shard_prompt.report,
+                    **options,
+                )
+                _check_cancel(cancel_event)
+                shards.append(parse_digest_shard(raw, allowed_ids))
             reduction_calls += 1
         source = {
             "mode": "digest_shards",
@@ -572,22 +584,25 @@ def generate_chapter_memory_proposal(
     if source.get("mode") == "digest_shards" and reduction_calls:
         proposal_cache.save_reduction(ledger, source)
     options = {"cancel_event": cancel_event} if cancel_event is not None else {}
-    raw = dsh.generate_json(
-        prompt.system_prompt,
-        prompt.user_prompt,
-        context_report=prompt.report,
-        **options,
-    )
-    proposal = parse_memory_proposal(
-        raw,
-        ledger,
-        base_state,
-        expected_context_hash=context_hash,
-        base_state_scope=base_state_scope,
-        source_state_hash=source_state_hash,
-    )
-    proposal = _replace_proposal(proposal, reduction_calls=reduction_calls)
-    proposal_cache.save(proposal)
+    with memory_phase(progress_callback, "proposal"):
+        raw = dsh.generate_json(
+            prompt.system_prompt,
+            prompt.user_prompt,
+            context_report=prompt.report,
+            **options,
+        )
+    _check_cancel(cancel_event)
+    with memory_phase(progress_callback, "validation"):
+        proposal = parse_memory_proposal(
+            raw,
+            ledger,
+            base_state,
+            expected_context_hash=context_hash,
+            base_state_scope=base_state_scope,
+            source_state_hash=source_state_hash,
+        )
+        proposal = _replace_proposal(proposal, reduction_calls=reduction_calls)
+        proposal_cache.save(proposal)
     return proposal
 
 

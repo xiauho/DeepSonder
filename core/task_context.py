@@ -34,7 +34,6 @@ def context_paths(
         project.memory_dir / "foreshadowing.json",
     ]
     if task_kind == "expand":
-        paths.append(project.style_guide_path)
         chapter = project.load_chapter(chapter_id)
         query = "\n".join(
             part for part in (chapter.title, chapter.outline, chapter.plot_brief) if part
@@ -47,7 +46,6 @@ def context_paths(
     elif task_kind == "continuation":
         # Continuation relevance includes the existing正文, so any character
         # card can affect selection even when the planning fields do not name it.
-        paths.append(project.style_guide_path)
         paths.extend(project.list_characters())
         paths.extend(project.list_world())
         paths.extend(project.list_power())
@@ -56,9 +54,9 @@ def context_paths(
         paths.extend(project.list_world())
         paths.extend(project.list_power())
     from .style_library import LIBRARY_PATH
-    from .writing_style import WRITING_KINDS, STYLE_PATH, EXCEPTIONS_PATH
+    from .writing_style import WRITING_KINDS, EXCEPTIONS_PATH
     if task_kind in WRITING_KINDS:
-        paths.extend((project.root / STYLE_PATH, project.root / EXCEPTIONS_PATH, project.root / LIBRARY_PATH))
+        paths.extend((project.root / EXCEPTIONS_PATH, project.root / LIBRARY_PATH))
     unique: dict[str, Path] = {}
     for path in paths:
         resolved = str(Path(path).resolve())

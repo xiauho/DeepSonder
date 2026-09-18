@@ -1,3 +1,4 @@
+from tests.style_fixtures import set_style
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
@@ -53,10 +54,8 @@ class PromptBuilderTests(TestCase):
     def test_style_guide_is_applied_only_to_novel_generation_prompts(self) -> None:
         with TemporaryDirectory() as tmp:
             project = NovelProject.create(Path(tmp) / "novel", "测试作品")
-            project.style_guide_path.write_text(
-                "# 写作风格指南\n\n## 总体气质\n冷峻克制。\n\n## 避免事项\n避免总结式升华。\n",
-                encoding="utf-8",
-            )
+            set_style(project.root,
+                "# 写作风格指南\n\n## 总体气质\n冷峻克制。\n\n## 避免事项\n避免总结式升华。\n")
 
             _system, expansion_user = prompt_texts(
                 prompt_builder.build_expansion_prompt(project, "chapter_01", 3000)

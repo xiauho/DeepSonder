@@ -18,7 +18,6 @@ from .foreshadowing import (
 from .project import (
     DEFAULT_CORE_POWER_RULES,
     DEFAULT_STORY_STATE,
-    DEFAULT_STYLE_GUIDE,
     NovelProject,
 )
 from .project_data import ProjectDataStore
@@ -196,8 +195,6 @@ def _migration_payloads_v0_to_v1(root: Path) -> dict[Path, str]:
     store = ProjectDataStore(project)
     payloads: dict[Path, str] = {}
 
-    if not project.style_guide_path.exists():
-        payloads[project.style_guide_path] = DEFAULT_STYLE_GUIDE
     if not project.core_power_path.exists():
         payloads[project.core_power_path] = DEFAULT_CORE_POWER_RULES
 
@@ -258,7 +255,6 @@ def _validate_current_project(root: Path) -> None:
     """Validate schema-owned files without repairing or rewriting them."""
     project = NovelProject(root)
     required_files = (
-        project.style_guide_path,
         project.core_power_path,
         project.memory_dir / "story_state.json",
         project.memory_dir / "chapter_summaries.json",

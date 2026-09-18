@@ -5,7 +5,7 @@ from unittest import TestCase, SkipTest
 from unittest.mock import Mock, patch
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 from PySide6.QtCore import QCoreApplication
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtGui import QCloseEvent, QFontDatabase
 from PySide6.QtWidgets import QApplication
 from core.config import DEFAULT_CONFIG
 from core.project import NovelProject
@@ -20,6 +20,14 @@ class AITaskPanelTests(TestCase):
         if existing and not isinstance(existing, QApplication):
             raise SkipTest('Requires QApplication')
         cls.app = existing or QApplication([])
+        cls.font_id = -1
+        if Path('C:/Windows/Fonts/msyh.ttc').exists():
+            cls.font_id = QFontDatabase.addApplicationFont('C:/Windows/Fonts/msyh.ttc')
+
+    @classmethod
+    def tearDownClass(cls):
+        if cls.font_id >= 0:
+            QFontDatabase.removeApplicationFont(cls.font_id)
 
     def setUp(self):
         self.tmp = TemporaryDirectory()
@@ -121,3 +129,66 @@ class AITaskPanelTests(TestCase):
         self.app.processEvents()
         self.assertEqual(self.window.width(), 1100)
         self.assertIn('long_name', self.window.task_panel.scope.toolTip())
+
+
+    def test_memory_progress_is_queued_and_ignores_old_or_cancelled_runs(self):
+        import threading
+        from core.memory_progress import MemoryProgress
+        w = self.window
+        token = AITaskToken('memory', 'chapter_01')
+        w.ai_task_view_controller._on_started(token)
+        controller = w.ai_workflow_controller
+        run_id = object()
+        controller._memory_run_id = run_id
+        event = MemoryProgress('facts', current=2, total=4)
+        # Emit from a real background thread: no widget should change there.
+        worker = threading.Thread(target=lambda: controller.memory_progress_received.emit(run_id, token.cancel_event, event))
+        worker.start()
+        worker.join()
+        self.assertNotIn('提取事实 2/4', w.task_panel.detail.text())
+        self.app.processEvents()
+        self.assertIn('提取事实 2/4', w.task_panel.detail.text())
+        with patch('ui.ai_task_view_controller.time.monotonic', return_value=w.ai_task_view_controller._task_started_at + 12):
+            w.ai_task_view_controller._refresh_elapsed()
+        self.assertIn('已用 12 秒', w.task_panel.detail.text())
+        controller._on_memory_progress(object(), token.cancel_event, MemoryProgress('proposal'))
+        self.assertIn('提取事实 2/4', w.task_panel.detail.text())
+        token.cancel_event.set()
+        w.task_panel.set_state('cancelling', '正在取消')
+        controller._on_memory_progress(run_id, token.cancel_event, MemoryProgress('proposal'))
+        w.ai_task_view_controller._refresh_elapsed()
+        self.assertEqual(w.task_panel.detail.text(), '正在取消')
+        controller._on_memory_finished(token)
+        self.assertIsNone(controller._memory_run_id)
+        w.ai_task_view_controller._on_finished(token)
+        self.assertFalse(w.ai_task_view_controller._elapsed_timer.isActive())
+
+    def test_memory_progress_wraps_at_narrow_width_in_both_themes(self):
+        from ui.theme import apply_theme
+        from core.memory_progress import MemoryProgress
+        token = AITaskToken('memory', 'chapter_01')
+        w = self.window
+        w.ai_task_view_controller._on_started(token)
+        controller = w.ai_workflow_controller
+        run_id = object()
+        controller._memory_run_id = run_id
+        try:
+            for theme in ('light', 'dark'):
+                for font_size in (14, 20):
+                    with self.subTest(theme=theme, font_size=font_size):
+                        apply_theme(self.app, {'theme': theme, 'ui_font_size': font_size})
+                        w.resize(1100, 760)
+                        controller._on_memory_progress(run_id, token.cancel_event,
+                            MemoryProgress('facts', current=12, total=24))
+                        w.ai_task_view_controller._refresh_elapsed()
+                        self.app.processEvents()
+                        self.assertTrue(w.task_panel.detail.wordWrap())
+                        self.assertLessEqual(w.task_panel.detail.geometry().right(), w.task_panel.width())
+                        self.assertGreaterEqual(w.task_panel.detail.height(),
+                            w.task_panel.detail.heightForWidth(w.task_panel.detail.width()))
+                        self.assertTrue(w.task_panel.cancel_button.isEnabled())
+                        self.assertIn('提取事实 12/24', w.task_panel.detail.text())
+        finally:
+            controller._on_memory_finished(token)
+            w.ai_task_view_controller._on_finished(token)
+            apply_theme(self.app, DEFAULT_CONFIG)

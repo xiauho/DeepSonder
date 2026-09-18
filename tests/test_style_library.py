@@ -33,11 +33,33 @@ class StyleLibraryTests(unittest.TestCase):
         self.assertTrue(all(row["status"]=="included" for row in usage))
         self.assertNotIn("text",usage[0])
     def test_disabled_and_no_partial_sample(self):
-        self.value["enabled"]=False;self.save();self.assertEqual(load_style(self.root),"")
+        self.value["enabled"]=False;self.save();self.assertIn("保持克制",load_style(self.root));self.assertNotIn("STYLE_SAMPLE",load_style(self.root))
         self.assertNotIn("STYLE_SAMPLE",render_style("画像\n<STYLE_SAMPLE id=x>半条"))
     def test_guide_priority_and_limits(self):
         self.save();path=self.root/"writing/style_guide.md";path.write_text("作者要求"*700,encoding="utf-8")
-        self.assertEqual(load_style(self.root),"作者要求"*700)
+        self.assertNotIn("作者要求",load_style(self.root))
+        self.assertIn("保持克制",load_style(self.root))
+        self.assertLessEqual(len(load_style(self.root)), STYLE_BUDGET)
+    def test_seven_fields_apply_with_samples_disabled_and_blanks_omitted(self):
+        self.value = empty_library()
+        self.value["profile"] = {name: f"要求{index}" for index, name in enumerate(PROFILE_FIELDS)}
+        self.save()
+        rendered = load_style(self.root)
+        for index, name in enumerate(PROFILE_FIELDS):
+            self.assertIn(f"{PROFILE_LABELS[name]}：要求{index}", rendered)
+        self.value["profile"] = {name: "  " for name in PROFILE_FIELDS}
+        self.save()
+        self.assertEqual(load_style(self.root), "")
+
+    def test_retired_guide_does_not_change_writing_snapshot(self):
+        from core.project import NovelProject
+        from core.task_context import AIContextSnapshot
+        project = NovelProject.create(self.root / "book", "test")
+        before = AIContextSnapshot.capture(project, "chapter_01", "正文", task_kind="continuation")
+        project.style_guide_path.write_text("不会生效的旧要求", encoding="utf-8")
+        self.assertTrue(before.matches(project, "chapter_01", "正文", task_kind="continuation"))
+        self.assertEqual(load_style(project.root), "")
+
     def test_reject_invalid_payload_without_write(self):
         self.value["samples"][0]["text"]="x"*4001
         with self.assertRaises(ValueError):self.save()
@@ -49,7 +71,7 @@ class StyleLibraryTests(unittest.TestCase):
         from core.task_context import AIContextSnapshot
         before=AIContextSnapshot.capture(project,"chapter_01","正文",task_kind="continuation")
         self.assertIn(project.root/LIBRARY_PATH,context_paths(project,"chapter_01",task_kind="continuation"))
-        save_library(project.root,self.value,expected_revision="")
+        save_library(project.root,self.value,expected_revision=revision(project.root))
         after=AIContextSnapshot.capture(project,"chapter_01","正文",task_kind="continuation")
         self.assertNotEqual(before.context_hash,after.context_hash)
     def test_generation_report_matches_actual_samples(self):
@@ -57,7 +79,7 @@ class StyleLibraryTests(unittest.TestCase):
         from core.prompt_builder import build_expansion_prompt
         project=NovelProject.create(self.root/"project","test")
         self.value["chapter_scenes"]={"chapter_01":"对话"}
-        save_library(project.root,self.value,expected_revision="")
+        save_library(project.root,self.value,expected_revision=revision(project.root))
         bundle=build_expansion_prompt(project,"chapter_01",1000)
         self.assertIn("STYLE_SAMPLE",bundle.user_prompt)
         self.assertEqual(len(bundle.report.style_samples),2)

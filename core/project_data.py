@@ -443,11 +443,7 @@ class ProjectDataStore:
         return item if isinstance(item, dict) else {}
 
     def load_style_guide(self, chapter_id: str = "") -> str:
-        """Return author-written style rules without template-only comments.
-
-        A newly seeded guide contains headings and HTML comments that help the
-        author fill it in. Those hints must not become accidental AI rules.
-        """
+        """Render structured book requirements and eligible reference samples."""
         from .writing_style import load_style
         return load_style(self.project.root, chapter_id)
 

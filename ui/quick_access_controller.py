@@ -21,19 +21,16 @@ class QuickAccessController:
         project = window.project
         if project is not None:
             root = project.root.resolve()
-            tree = window.left_panel.tree
-            for i in range(tree.topLevelItemCount()):
-                group = tree.topLevelItem(i)
-                for j in range(group.childCount()):
-                    child = group.child(j)
-                    path = Path(child.data(0, window.left_panel.PATH_ROLE))
-                    try:
-                        relative = path.resolve().relative_to(root).as_posix()
-                    except (ValueError, OSError):
-                        continue
-                    category = child.data(0, window.left_panel.CATEGORY_ROLE)
-                    entries.append(QuickEntry(str(path), child.text(0), f"{category} · {relative}",
-                        category=category, project_root=str(root)))
+            for child in window.left_panel.document_items():
+                path = Path(child.data(0, window.left_panel.PATH_ROLE))
+                try:
+                    relative = path.resolve().relative_to(root).as_posix()
+                except (ValueError, OSError):
+                    continue
+                category = child.data(0, window.left_panel.CATEGORY_ROLE)
+                title = child.data(0, window.left_panel.TITLE_ROLE) or child.text(0)
+                entries.append(QuickEntry(str(path), title, f"{category} · {relative}",
+                    category=category, project_root=str(root)))
             record = window.workspace_state.data["projects"].get(str(root), {})
             documents = record.get("documents", {}) if isinstance(record, dict) else {}
             recent = list(reversed(documents)) if isinstance(documents, dict) else []
@@ -95,6 +92,8 @@ class QuickAccessController:
         if entry.mode == "commands":
             window.actions[entry.key].trigger()
             return True
+        if window.project and Path(entry.key).resolve() == window.project.style_guide_path.resolve():
+            return window.ai_workflow_controller.manage_style_library()
         focused = window.window_state_controller.focus_mode
         window._on_file_selected(entry.category, entry.key)
         if window.editor.current_path() != entry.key:

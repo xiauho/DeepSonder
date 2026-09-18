@@ -63,8 +63,9 @@ def run(output, *, limit=24, dry_run=False, client=None):
         client = client or configured_client()
         with tempfile.TemporaryDirectory(prefix="deepsonder-writing-eval-") as directory:
             project = NovelProject.create(Path(directory)/"novel", "独立文风评测")
-            project.style_guide_path.parent.mkdir(parents=True, exist_ok=True)
-            project.style_guide_path.write_text(STYLE, encoding="utf-8")
+            from core.style_library import empty_library, save_library, revision
+            style = empty_library(); style["profile"] = {"总体气质": STYLE}
+            save_library(project.root, style, expected_revision=revision(project.root))
             for case in cases:
                 system, user = prompts(case); outputs={}; elapsed={}
                 # Alternate call order to reduce fixed-order effects.

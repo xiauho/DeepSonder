@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-09-17",
+  "updated_at": "2026-09-18",
   "product": "DeepSonder-PySide6",
   "maintenance_policy": "independent",
   "features": [
@@ -23,7 +23,7 @@
       "id": "memory.extract",
       "requirement": "required",
       "status": "supported",
-      "notes": "角色地点支持明确移动表达、地点量词规范化及附近地点指代（需人工确认）；保留前后内外等方位区别；否定、命令、计划和无角色到达依据继续阻断；阻断输出目标、新值与事实锚点。"
+      "notes": "记忆更新提供阶段进度、实时已用时间、缓存命中及调用分段耗时；默认分块策略对预算允许的中等章节采用单块提取，事实输出去重精简但保留证据。角色地点支持明确移动表达、地点量词规范化及附近地点指代（需人工确认）；保留前后内外等方位区别；否定、命令、计划和无角色到达依据继续阻断；阻断输出目标、新值与事实锚点。"
     },
     {
       "id": "character.recognize",
@@ -64,7 +64,7 @@
       "id": "workspace.chapter_canon_navigation",
       "requirement": "required",
       "status": "supported",
-      "note": "Separate chapter/canon browsing with per-scope search, selection, expansion and scroll state; explicit navigation reveals its target."
+      "note": "Separate chapter/canon browsing with per-scope search, selection, expansion and scroll state; direct planning/timeline documents and expandable canon groups. Fixed book-style settings shortcut, scope-aware locate, compact item-level system importance labels; quick-open and restart restoration support flat documents."
     },
     {
       "id": "ai.task_panel_and_deferred_review",
@@ -142,7 +142,7 @@
       "id": "ai.shared_writing_style",
       "requirement": "required",
       "status": "supported",
-      "note": "Project writing/style_guide.md shared by desktop prose generation, retries, supplements, scoped tasks and schema-v2 generation. Fact/check prompts omit style. Style participates in stale-result checks."
+      "note": "Three-tab book-style dialog: seven structured requirement fields, reference samples and review exceptions. writing/style_library.json is the sole style source; the sample switch never disables requirements. Retired style_guide.md is not loaded or created. Shared across desktop generation, retries, supplements, scoped tasks and schema-v2; fact/check prompts omit style. Explicit confirmation, external-edit checks, write-failure rollback and stale-result protection remain intact."
     },
     {
       "id": "ai.prose_style_review",

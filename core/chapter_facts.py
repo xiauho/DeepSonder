@@ -13,6 +13,7 @@ from typing import Any
 from .app_paths import app_cache_dir
 from .context_report import PromptBundle, PromptContextReport, SectionUsage
 from .json_utils import JSONExtractionError, extract_json
+from .memory_progress import MemoryProgress, ProgressCallback, memory_phase, publish_progress
 from .project import NovelProject
 from .storage import atomic_write_text
 from .task_controller import AITaskCancelled
@@ -27,7 +28,7 @@ from .token_budget import (
 
 
 FACT_LEDGER_SCHEMA_VERSION = 1
-FACT_PROMPT_VERSION = 2
+FACT_PROMPT_VERSION = 3
 FACT_CATEGORIES = frozenset(
     {
         "event",
@@ -189,6 +190,12 @@ location 类事实的 value 应优先写正文能够直接支持的简洁规范�
 群体移动时，subject 写正文中的群体称谓；若正文同时明确点名成员在场，可另提取
 带角色名的 event 或 character_state 事实，便于安全更新个人位置。
 
+输出要精炼：chunk_summary 建议不超过 120 字；subject、predicate、value 使用简洁表述。
+优先保留事件、人物状态、位置、物品、关系、时间、世界规则和未解决线索的实质变化。
+同一锚点的同一事实不要换词重复，不要把同一变化拆成多条空泛描述。
+不得为追求简短遗漏独立事实、不同时间的状态变化、矛盾证据，或角色到达地点的依据。
+事实较多时仍须完整保留，不按条数截断；氛围和修辞不单独列为事实。
+
 章节：{str(chapter_title or chunk.chapter_id).strip()}
 章节 ID：{chunk.chapter_id}
 分块 ID：{chunk.chunk_id}
@@ -264,6 +271,43 @@ category 仅允许：{", ".join(sorted(FACT_CATEGORIES))}。
     return PromptBundle(system_prompt, user_prompt, report)
 
 
+def memory_chunks(
+    chapter_id: str,
+    content: str,
+    chapter_title: str,
+    *,
+    chunk_token_budget: int,
+    overlap_tokens: int,
+    input_token_budget: int,
+    estimator: ConservativeTokenEstimator,
+) -> tuple[ChapterChunk, ...]:
+    """Fit a medium chapter in one bounded request; never enlarge custom chunks.
+
+    Use at most half the business input budget for chapter content.
+    The exact prompt is also checked with transport wrapper headroom.
+    Longer chapters retain the established paragraph-aware chunk boundaries.
+    """
+    target = chunk_token_budget
+    ceiling = min(8_000, input_token_budget // 2)
+    if (
+        target == DEFAULT_CHUNK_TOKEN_BUDGET
+        and ceiling > target
+        and estimator.estimate(content) <= ceiling
+    ):
+        candidates = chunk_chapter(chapter_id, content, target_tokens=ceiling,
+                                   overlap_tokens=overlap_tokens, estimator=estimator)
+        if len(candidates) == 1:
+            try:
+                build_chunk_facts_prompt(chapter_title, candidates[0],
+                    input_token_budget=input_token_budget - 512, estimator=estimator)
+            except RuntimeError:
+                pass
+            else:
+                return candidates
+    return chunk_chapter(chapter_id, content, target_tokens=target,
+                         overlap_tokens=overlap_tokens, estimator=estimator)
+
+
 def extract_chapter_fact_ledger(
     project: NovelProject,
     chapter_id: str,
@@ -275,28 +319,35 @@ def extract_chapter_fact_ledger(
     estimator: ConservativeTokenEstimator = DEFAULT_TOKEN_ESTIMATOR,
     cache: FactLedgerCache | None = None,
     cancel_event: threading.Event | None = None,
+    progress_callback: ProgressCallback | None = None,
 ) -> ChapterFactLedger:
     """Extract every chapter chunk or load its validated cached result."""
+    if cancel_event is not None and cancel_event.is_set():
+        raise AITaskCancelled()
     chapter = project.load_chapter(chapter_id)
     content = chapter.content
-    chunks = chunk_chapter(
-        chapter_id,
-        content,
-        target_tokens=chunk_token_budget,
-        overlap_tokens=overlap_tokens,
-        estimator=estimator,
-    )
+    with memory_phase(progress_callback, "chunking"):
+        chunks = memory_chunks(
+            chapter_id, content, chapter.title,
+            chunk_token_budget=chunk_token_budget,
+            overlap_tokens=overlap_tokens,
+            input_token_budget=input_token_budget,
+            estimator=estimator,
+        )
     ledger_cache = cache or FactLedgerCache(project)
     results: list[ChunkFacts] = []
     cache_hits = 0
     extracted = 0
-    for chunk in chunks:
+    for index, chunk in enumerate(chunks, 1):
         if cancel_event is not None and cancel_event.is_set():
             raise AITaskCancelled()
         result = ledger_cache.load(chunk)
         if result is not None:
             cache_hits += 1
             results.append(result)
+            publish_progress(progress_callback, MemoryProgress(
+                "facts", state="cached", current=index, total=len(chunks), cache_hits=cache_hits
+            ))
             continue
         prompt = build_chunk_facts_prompt(
             chapter.title,
@@ -305,17 +356,22 @@ def extract_chapter_fact_ledger(
             estimator=estimator,
         )
         options = {"cancel_event": cancel_event} if cancel_event is not None else {}
-        raw = dsh.generate_json(
-            prompt.system_prompt,
-            prompt.user_prompt,
-            context_report=prompt.report,
-            **options,
-        )
-        result = parse_chunk_facts(raw, chunk)
-        ledger_cache.save(chunk, result)
+        with memory_phase(progress_callback, "facts", current=index,
+                          total=len(chunks), cache_hits=cache_hits):
+            raw = dsh.generate_json(
+                prompt.system_prompt,
+                prompt.user_prompt,
+                context_report=prompt.report,
+                **options,
+            )
+            if cancel_event is not None and cancel_event.is_set():
+                raise AITaskCancelled()
+            result = parse_chunk_facts(raw, chunk)
+            ledger_cache.save(chunk, result)
         extracted += 1
         results.append(result)
-    facts, unknowns = merge_chunk_facts(results)
+    with memory_phase(progress_callback, "merge"):
+        facts, unknowns = merge_chunk_facts(results)
     return ChapterFactLedger(
         chapter_id=chapter_id,
         chapter_hash=chapter_content_hash(content),

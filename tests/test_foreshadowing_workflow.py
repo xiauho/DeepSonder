@@ -20,6 +20,7 @@ from ui.project_session import ProjectSession
 
 class FakeAIController(QObject):
     succeeded = Signal(object, object)
+    finished = Signal(object)
 
     def __init__(self):
         super().__init__()

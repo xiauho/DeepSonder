@@ -48,14 +48,14 @@ class ProjectSessionTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 session.load(Path(tmp) / "missing")
 
-    def test_load_adds_style_guide_to_legacy_project(self) -> None:
+    def test_load_does_not_recreate_retired_style_guide(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project = NovelProject.create(Path(tmp) / "proj", "测试")
-            project.style_guide_path.unlink()
+            project.style_guide_path.unlink(missing_ok=True)
             (project.root / PROJECT_MANIFEST_RELATIVE_PATH).unlink()
 
             session = ProjectSession()
             loaded = session.load(project.root)
 
-            self.assertTrue(loaded.style_guide_path.is_file())
+            self.assertFalse(loaded.style_guide_path.is_file())
             self.assertTrue(session.last_migration_result.migrated)

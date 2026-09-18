@@ -1,3 +1,4 @@
+from tests.style_fixtures import set_style
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
@@ -26,16 +27,14 @@ class ProjectDataStoreTests(TestCase):
             project = NovelProject.create(Path(tmp) / "proj", "测试")
             store = ProjectDataStore(project)
 
-            self.assertTrue(store.style_guide_path.is_file())
+            self.assertFalse(store.style_guide_path.is_file())
             self.assertEqual(store.load_style_guide(), "")
 
-            store.style_guide_path.write_text(
-                "# 写作风格指南\n\n<!-- 填写提示 -->\n\n## 总体气质\n冷峻克制，避免总结式升华。\n",
-                encoding="utf-8",
-            )
+            set_style(project.root,
+                "# 写作风格指南\n\n\n\n## 总体气质\n冷峻克制，避免总结式升华。\n")
             loaded = store.load_style_guide()
             self.assertIn("冷峻克制", loaded)
-            self.assertNotIn("填写提示", loaded)
+            self.assertNotIn("作者确认的文风画像", loaded)
 
     def test_next_chapter_id_uses_maximum_number_and_skips_conflicts(self) -> None:
         with TemporaryDirectory() as tmp:

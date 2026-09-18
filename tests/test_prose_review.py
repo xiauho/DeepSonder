@@ -1,3 +1,4 @@
+from tests.style_fixtures import set_style
 import threading
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -75,7 +76,7 @@ class ProseReviewTests(TestCase):
         save_exceptions(self.project.root,['原句'])
         self.assertFalse(snap.matches(self.project,'chapter_01',self.source,task_kind='style_review'))
         snap=AIContextSnapshot.capture(self.project,'chapter_01',self.source,task_kind='selection_expand')
-        self.project.style_guide_path.write_text('克制，保留人物口吻',encoding='utf-8')
+        set_style(self.project.root, '克制，保留人物口吻')
         self.assertFalse(snap.matches(self.project,'chapter_01',self.source,task_kind='selection_expand'))
 
     def test_exception_roundtrip_and_malformed_file_fails_closed(self):
@@ -85,7 +86,7 @@ class ProseReviewTests(TestCase):
         with self.assertRaises(ValueError): load_exceptions(self.project.root)
 
     def test_one_generation_call_style_and_request_injected_no_write(self):
-        self.project.style_guide_path.write_text('# 风格\n克制冷静\n',encoding='utf-8')
+        set_style(self.project.root, '# 风格\n克制冷静\n')
         dsh=Mock(); dsh.prompt_build_budget.return_value=20000; dsh.generate_json.return_value=self.payload()
         before=self.project.load_chapter('chapter_01').raw
         result=run_prose_task(self.project,'chapter_01',dsh,source=self.source,start=self.start,end=self.end,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 
-from PySide6.QtCore import QObject
+from PySide6.QtCore import QObject, QTimer
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 
@@ -68,6 +68,10 @@ class AITaskViewController(QObject):
         self._has_output = bool(output_panel.toPlainText())
         self._task_started_at: float | None = None
         self._task_kind: str | None = None
+        self._status_base = ""
+        self._elapsed_timer = QTimer(self)
+        self._elapsed_timer.setInterval(1000)
+        self._elapsed_timer.timeout.connect(self._refresh_elapsed)
 
         # QPlainTextEdit otherwise keeps every block for the lifetime of the
         # widget.  The visible panel is a diagnostic stream, not an archive.
@@ -108,6 +112,18 @@ class AITaskViewController(QObject):
         return True
 
     def set_status(self, message: str) -> None:
+        self._status_base = message
+        self._display_status(message)
+
+    def _refresh_elapsed(self) -> None:
+        if self._task_started_at is None or self._task_kind != "memory":
+            return
+        if self.task_panel is not None and self.task_panel.state != "running":
+            return
+        elapsed = max(0, int(time.monotonic() - self._task_started_at))
+        self._display_status(f"{self._status_base} · 已用 {elapsed} 秒")
+
+    def _display_status(self, message: str) -> None:
         self.status_message.setText(message)
         if self.task_panel is not None and self.task_panel.state in {"running", "reviewing"}:
             self.task_panel.detail.setText(message)
@@ -128,6 +144,8 @@ class AITaskViewController(QObject):
         self._task_started_at = time.monotonic()
         self._task_kind = getattr(_token, "kind", None)
         label = TASK_LABELS.get(self._task_kind, "AI")
+        if self._task_kind == "memory":
+            self._elapsed_timer.start()
         for key in ("expand", "continuation", "check", "memory"):
             self.actions[key].setEnabled(False)
         self.task_progress.show()
@@ -143,6 +161,7 @@ class AITaskViewController(QObject):
         self.window_state_controller.show_output((690, 190))
 
     def _on_finished(self, _token) -> None:
+        self._elapsed_timer.stop()
         label = TASK_LABELS.get(self._task_kind, "AI")
         elapsed = ""
         if self._task_started_at is not None:

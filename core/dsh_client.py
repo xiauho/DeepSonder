@@ -21,6 +21,7 @@ import tempfile
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -87,6 +88,15 @@ class _TaskFileReceiptError(RuntimeError):
             "DeepSeek Harness 的任务文件回执无效，"
             "无法确认业务提示词已跨段读取。"
         )
+
+
+@contextmanager
+def _measure_elapsed(timings: dict[str, float], key: str):
+    started = time.perf_counter()
+    try:
+        yield
+    finally:
+        timings[key] = (time.perf_counter() - started) * 1000
 
 
 class DSHClient:
@@ -196,6 +206,9 @@ class DSHClient:
         context_report: PromptContextReport | None = None,
     ) -> str:
         """Run dsh with argv as control plane and one task file as data plane."""
+        invocation_started = time.perf_counter()
+        timings: dict[str, float] = {}
+        output_chars = 0
         combined = self._combine_prompts(system_prompt, user_prompt)
         estimated_input_tokens = max(
             self.token_estimator.estimate_pair(system_prompt, user_prompt),
@@ -223,10 +236,12 @@ class DSHClient:
                     f"（估算 {estimated_input_tokens} > {self.input_token_budget}）。"
                     "请缩减上下文、降低分块大小或先执行摘要后重试。"
                 )
-            if not self._ensure_file_transport_support(
-                timeout=min(effective_timeout, 30),
-                cancel_event=cancel_event,
-            ):
+            with _measure_elapsed(timings, "probe_ms"):
+                supported = self._ensure_file_transport_support(
+                    timeout=min(effective_timeout, 30),
+                    cancel_event=cancel_event,
+                )
+            if not supported:
                 transport = "file_unavailable"
                 raise RuntimeError(
                     "DeepSeek Harness 无法验证读取 DeepSonder 的临时任务文件。"
@@ -235,13 +250,14 @@ class DSHClient:
             task_file = self._write_task_file(combined)
             transmitted_prompt = self._file_loader_prompt(task_file.path.name)
             self._last_command_chars = 0
-            result = self._execute_prompt(
-                transmitted_prompt,
-                session_id=session_id,
-                timeout=effective_timeout,
-                cancel_event=cancel_event,
-                submitted_prompt_length=len(combined),
-            )
+            with _measure_elapsed(timings, "generation_ms"):
+                result = self._execute_prompt(
+                    transmitted_prompt,
+                    session_id=session_id,
+                    timeout=effective_timeout,
+                    cancel_event=cancel_event,
+                    submitted_prompt_length=len(combined),
+                )
             if task_file is not None:
                 try:
                     result = self._validate_file_response(result, task_file)
@@ -251,13 +267,14 @@ class DSHClient:
                     # nonce challenge for one bounded formatting retry.
                     file_ack_retry_count = 1
                     file_ack_error = first_error.reason
-                    result = self._execute_prompt(
-                        self._file_loader_prompt(task_file.path.name, retry=True),
-                        session_id=session_id,
-                        timeout=effective_timeout,
-                        cancel_event=cancel_event,
-                        submitted_prompt_length=len(combined),
-                    )
+                    with _measure_elapsed(timings, "retry_ms"):
+                        result = self._execute_prompt(
+                            self._file_loader_prompt(task_file.path.name, retry=True),
+                            session_id=session_id,
+                            timeout=effective_timeout,
+                            cancel_event=cancel_event,
+                            submitted_prompt_length=len(combined),
+                        )
                     try:
                         result = self._validate_file_response(result, task_file)
                     except _TaskFileReceiptError as retry_error:
@@ -268,6 +285,7 @@ class DSHClient:
                         ) from None
                 file_ack_verified = True
             outcome = "success"
+            output_chars = len(result)
             return result
         except AITaskCancelled:
             outcome = "cancelled"
@@ -280,6 +298,9 @@ class DSHClient:
             task_file_cleaned = task_file is None or not task_file.path.exists()
             if context_report is not None:
                 completed_report = context_report.complete_invocation(
+                    invocation_ms=(time.perf_counter() - invocation_started) * 1000,
+                    output_chars=output_chars,
+                    **timings,
                     transport=transport,
                     submitted_prompt_chars=len(combined),
                     command_chars=self._last_command_chars,

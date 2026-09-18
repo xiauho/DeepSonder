@@ -24,6 +24,8 @@ from .accepted_memory import memory_base_state_for
 from .context_budget import build_ai_context
 from .context_profiles import SUMMARY_CONTEXT_PROFILE
 from .dsh_client import DSHClient
+from .memory_progress import ProgressCallback, memory_phase
+from .task_controller import AITaskCancelled
 from .project import NovelProject
 from .token_budget import (
     DEFAULT_CHUNK_OVERLAP_TOKENS,
@@ -50,8 +52,10 @@ class AIWorkflowService:
         chunk_overlap_tokens: int = DEFAULT_CHUNK_OVERLAP_TOKENS,
         fact_cache_root: Path | None = None,
         memory_cache_root: Path | None = None,
+        progress_callback: ProgressCallback | None = None,
     ):
         self.dsh = dsh
+        self.progress_callback = progress_callback
         self.input_token_budget = int(
             input_token_budget
             if input_token_budget is not None
@@ -182,6 +186,7 @@ class AIWorkflowService:
             estimator=estimator,
             cache=cache,
             cancel_event=cancel_event,
+            progress_callback=self.progress_callback,
         )
 
     def update_memory(
@@ -198,22 +203,25 @@ class AIWorkflowService:
             chapter_id,
             cancel_event=cancel_event,
         )
-        context = build_ai_context(
-            project,
-            chapter_id,
-            profile=SUMMARY_CONTEXT_PROFILE,
-            relevance_query="\n".join(
-                item.subject for item in ledger.facts if item.subject.strip()
-            ),
-        )
-        if chapter_content_hash(context.chapter.content) != ledger.chapter_hash:
-            raise RuntimeError("章节正文在事实提取期间发生变化，请重新运行记忆更新。")
-        source_state = project.load_story_state()
-        base_state, base_state_scope = memory_base_state_for(
-            project,
-            chapter_id,
-            source_state,
-        )
+        if cancel_event is not None and cancel_event.is_set():
+            raise AITaskCancelled()
+        with memory_phase(self.progress_callback, "context"):
+            context = build_ai_context(
+                project,
+                chapter_id,
+                profile=SUMMARY_CONTEXT_PROFILE,
+                relevance_query="\n".join(
+                    item.subject for item in ledger.facts if item.subject.strip()
+                ),
+            )
+            if chapter_content_hash(context.chapter.content) != ledger.chapter_hash:
+                raise RuntimeError("章节正文在事实提取期间发生变化，请重新运行记忆更新。")
+            source_state = project.load_story_state()
+            base_state, base_state_scope = memory_base_state_for(
+                project,
+                chapter_id,
+                source_state,
+            )
         estimator = getattr(self.dsh, "token_estimator", DEFAULT_TOKEN_ESTIMATOR)
         return generate_chapter_memory_proposal(
             project,
@@ -228,4 +236,5 @@ class AIWorkflowService:
             base_state_scope=base_state_scope,
             source_state_hash=canonical_hash(source_state),
             force_refresh=force_refresh,
+            progress_callback=self.progress_callback,
         )

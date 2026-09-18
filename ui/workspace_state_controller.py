@@ -146,15 +146,13 @@ class WorkspaceStateController(QObject):
         try:
             path = (project.root / relative).resolve()
             path.relative_to(project.root.resolve())
+            if path == project.style_guide_path.resolve():
+                return None  # A settings shortcut must not open a modal on startup.
             # Only a path already present in the navigation inventory may be reopened.
-            tree = self.window.left_panel.tree
-            for index in range(tree.topLevelItemCount()):
-                parent = tree.topLevelItem(index)
-                for child_index in range(parent.childCount()):
-                    child = parent.child(child_index)
-                    candidate = child.data(0, Qt.ItemDataRole.UserRole)
-                    if isinstance(candidate, (str, Path)) and Path(candidate).resolve() == path and path.is_file():
-                        return path
+            for item in self.window.left_panel.document_items():
+                candidate = item.data(0, Qt.ItemDataRole.UserRole)
+                if isinstance(candidate, (str, Path)) and Path(candidate).resolve() == path and path.is_file():
+                    return path
         except (OSError, ValueError):
             pass
         return None

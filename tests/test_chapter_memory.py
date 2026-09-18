@@ -683,6 +683,7 @@ class ChapterMemoryWorkflowTests(TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             project = NovelProject.create(Path(tmp) / "project", "测试")
             dsh = ReducingDSH()
+            progress = []
             proposal = generate_chapter_memory_proposal(
                 project,
                 ledger,
@@ -690,9 +691,13 @@ class ChapterMemoryWorkflowTests(TestCase):
                 base_state={"current_chapter": 1, "characters": {}},
                 input_token_budget=4_000,
                 reduce_batch_tokens=1_000,
+                progress_callback=progress.append,
                 cache=ChapterMemoryCache(project, Path(tmp) / "cache"),
             )
 
+            reduced = [e for e in progress if e.stage == "reduction" and e.state == "done"]
+            self.assertEqual(len(reduced), proposal.reduction_calls)
+            self.assertTrue(all(1 <= e.current <= e.total and e.round_number >= 1 for e in reduced))
             self.assertGreater(proposal.reduction_calls, 0)
             self.assertEqual(len(dsh.calls), proposal.reduction_calls + 1)
             self.assertLessEqual(

@@ -67,6 +67,11 @@ class PromptContextReport:
     token_estimator: str = ""
     model_context_window_tokens: int = 0
     context_strategy: str = ""
+    invocation_ms: float = 0.0
+    probe_ms: float = 0.0
+    generation_ms: float = 0.0
+    retry_ms: float = 0.0
+    output_chars: int = 0
 
     @property
     def health(self) -> str:
@@ -111,9 +116,19 @@ class PromptContextReport:
         token_estimator: str | None = None,
         model_context_window_tokens: int | None = None,
         context_strategy: str | None = None,
+        invocation_ms: float = 0.0,
+        probe_ms: float = 0.0,
+        generation_ms: float = 0.0,
+        retry_ms: float = 0.0,
+        output_chars: int = 0,
     ) -> "PromptContextReport":
         return replace(
             self,
+            invocation_ms=max(0.0, float(invocation_ms)),
+            probe_ms=max(0.0, float(probe_ms)),
+            generation_ms=max(0.0, float(generation_ms)),
+            retry_ms=max(0.0, float(retry_ms)),
+            output_chars=max(0, int(output_chars)),
             transport=str(transport or "unknown"),
             submitted_prompt_chars=max(0, int(submitted_prompt_chars)),
             command_chars=max(0, int(command_chars)),

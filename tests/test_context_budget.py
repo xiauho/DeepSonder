@@ -1,3 +1,4 @@
+from tests.style_fixtures import set_style
 import json
 import tempfile
 from pathlib import Path
@@ -160,10 +161,8 @@ class BudgetedPromptTests(TestCase):
         self.assertIn("夜色中的列城亮起灯火。\n\n只输出以下标记之间的小说正文", user)
 
     def test_long_style_guide_is_bounded_and_prompt_stays_under_hard_limit(self) -> None:
-        self.project.style_guide_path.write_text(
-            "# 写作风格指南\n\n" + "冷峻短句，保持紧张感。" * 1000 + "不应保留的尾部标记",
-            encoding="utf-8",
-        )
+        set_style(self.project.root,
+            "# 写作风格指南\n\n" + "冷峻短句，保持紧张感。" * 300 + "不应保留的尾部标记")
 
         prompt = build_write_prompt(self.project, "chapter_02", 2000)
         system, user = prompt.system_prompt, prompt.user_prompt

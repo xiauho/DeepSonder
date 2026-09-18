@@ -256,8 +256,8 @@ class MainWindow(QMainWindow):
         self.workspace_state = WorkspaceStateController(self, ui_state_path)
         self.quick_access_controller = QuickAccessController(self)
         self.left_panel.locate_current_requested.connect(self._locate_current_document)
-        self.editor.document_loaded.connect(lambda: self.left_panel.locate_button.setEnabled(True))
-        self.editor.document_about_to_change.connect(lambda: self.left_panel.locate_button.setEnabled(False))
+        self.editor.document_loaded.connect(lambda: self.left_panel.set_current_document(self.editor.current_path()))
+        self.editor.document_about_to_change.connect(lambda: self.left_panel.set_current_document(None))
         self._refresh_auto_save_timer()
         QTimer.singleShot(80, self._restore_last_project)
 
@@ -343,7 +343,7 @@ class MainWindow(QMainWindow):
         action("selection_expand", "选区扩写…", lambda: self.ai_workflow_controller.prose_task("selection_expand"))
         action("style_polish", "选区文风润色…", lambda: self.ai_workflow_controller.prose_task("style_polish"))
         action("style_review", "文风审校（去 AI 味）…", lambda: self.ai_workflow_controller.prose_task("style_review"))
-        action("style_library", "本书文风与样文…", lambda: self.ai_workflow_controller.manage_style_library())
+        action("style_library", "本书文风…", lambda: self.ai_workflow_controller.manage_style_library())
         action("style_exceptions", "管理本书文风例外…", lambda: self.ai_workflow_controller.manage_style_exceptions())
         action("check", "一致性检查", self.check_consistency, "Ctrl+Shift+C")
         action("memory", "更新故事记忆", self.update_memory, "Ctrl+Shift+M")
@@ -610,6 +610,10 @@ class MainWindow(QMainWindow):
         self.dashboard_page.memory_requested.connect(lambda: self._show_route("memory"))
         self.dashboard_page.canon_requested.connect(lambda: self._show_route("canon"))
         self.left_panel.file_selected.connect(self._on_file_selected)
+        self.left_panel.style_requested.connect(self.actions["style_library"].trigger)
+        self.actions["style_library"].changed.connect(
+            lambda: self.left_panel.set_style_available(self.actions["style_library"].isEnabled())
+        )
         self.left_panel.new_chapter_requested.connect(self.new_chapter)
         self.left_panel.new_canon_requested.connect(self.new_canon_entry)
         self.left_panel.system_importance_requested.connect(self.set_system_importance)
@@ -1493,6 +1497,9 @@ class MainWindow(QMainWindow):
         self.left_panel.select_path(path)
 
     def _on_file_selected(self, category: str, path_str: str) -> None:
+        if self.project and Path(path_str).resolve() == self.project.style_guide_path.resolve():
+            self.ai_workflow_controller.manage_style_library()
+            return
         current = self.editor.current_path()
         if current and Path(current) == Path(path_str):
             return

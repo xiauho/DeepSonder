@@ -28,13 +28,13 @@ class ProjectServiceTests(unittest.TestCase):
     def test_open_migrates_legacy_project_before_activation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project = NovelProject.create(Path(tmp) / "legacy", "旧项目")
-            project.style_guide_path.unlink()
+            project.style_guide_path.unlink(missing_ok=True)
             (project.root / PROJECT_MANIFEST_RELATIVE_PATH).unlink()
 
             opened = self.service.open_project(project.root)
 
             self.assertTrue(opened.migration.migrated)
-            self.assertTrue(opened.project.style_guide_path.is_file())
+            self.assertFalse(opened.project.style_guide_path.is_file())
             self.assertTrue(
                 (opened.project.root / PROJECT_MANIFEST_RELATIVE_PATH).is_file()
             )

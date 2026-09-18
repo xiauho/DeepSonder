@@ -48,6 +48,16 @@ class WorkspacePersistenceTests(unittest.TestCase):
         for _ in range(3):
             self.app.processEvents()
 
+    def test_flat_timeline_restores_on_restart(self):
+        window = self.window()
+        path = self.project.canon_dir / "timeline.md"
+        window.left_panel.select_path(path)
+        window.workspace_state.flush()
+        window.close()
+        reopened = self.window()
+        self.assertEqual(Path(reopened.editor.current_path()), path)
+        self.assertIsNone(reopened.left_panel.tree.currentItem().parent())
+
     def test_restart_restores_document_selection_scroll_and_panel_preferences(self):
         window = self.window()
         cursor = window.editor.text_edit.textCursor()

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from PySide6.QtCore import QObject, QTimer, Signal
+from PySide6.QtCore import QObject, QTimer, Signal, Qt
 from PySide6.QtWidgets import QDialog, QMessageBox
 
 from core import ai_protocol
@@ -55,6 +55,7 @@ class AIWorkflowController(QObject):
     pieces for the desktop application's expand/check/memory use cases.
     """
 
+    memory_progress_received = Signal(object, object, object)
     output_requested = Signal(str)
     status_requested = Signal(str)
     review_requested = Signal(object)
@@ -101,6 +102,11 @@ class AIWorkflowController(QObject):
         self.defer_result_review = defer_result_review
         self._pending_review = None
         self._reviewing = False
+        self._memory_run_id = None
+        self.memory_progress_received.connect(
+            self._on_memory_progress, Qt.ConnectionType.QueuedConnection
+        )
+        ai_controller.finished.connect(self._on_memory_finished)
 
         ai_controller.succeeded.connect(self._on_task_succeeded)
         report_signal = getattr(ai_engine_controller, "context_reported", None)
@@ -222,34 +228,43 @@ class AIWorkflowController(QObject):
                 start=start, end=end, kind=kind, request=requirements, cancel_event=cancel_event),
             task_context={"start": start, "end": end, "request": requirements})
 
-    def manage_style_library(self) -> None:
-        from core.style_library import load_library, save_library, revision
+    def manage_style_library(self, *, exceptions=False) -> bool:
+        from application.book_style_service import load_book_style, save_book_style
         from ui.style_library_dialog import StyleLibraryDialog
         project = self.project_session.project
         if project is None or self.has_pending_result or self.ai_controller.is_running():
-            return
+            self._emit_status("请先打开项目并完成当前 AI 任务或结果审阅。")
+            return False
+        save = self.save_if_dirty or self.document_controller.save_if_dirty
+        if not save():
+            return False
+        dialog = None
         try:
-            expected = revision(project.root)
-            dialog = StyleLibraryDialog(load_library(project.root), self.editor.current_chapter_id() or "", self.parent)
-            if dialog.exec() == QDialog.DialogCode.Accepted and project is self.project_session.project:
-                save_library(project.root, dialog.value, expected_revision=expected)
-                self._emit_status("本书文风与样文已确认保存；下次生成时生效")
+            value, quotes, expected = load_book_style(project.root)
+            dialog = StyleLibraryDialog(value, self.editor.current_chapter_id() or "", self.parent,
+                                        quotes=quotes)
+            if exceptions: dialog.tabs.setCurrentIndex(2)
+            while dialog.exec() == QDialog.DialogCode.Accepted:
+                if project is not self.project_session.project:
+                    return False
+                try:
+                    changed = save_book_style(project.root, dialog.value,
+                                              dialog.quotes(), expected=expected)
+                except (OSError, ValueError) as exc:
+                    dialog.error.setText(str(exc) + " 当前填写仍保留，可复制后取消并重新打开。")
+                    continue
+                if changed: self.project_session.notify_data_changed(changed, kind="file")
+                self._emit_status("本书文风已确认保存；下次写作任务生效")
+                break
+            return True
         except (OSError, ValueError) as exc:
             QMessageBox.warning(self.parent, "文风资料未保存", str(exc))
+            return False
+        finally:
+            if dialog is not None: dialog.deleteLater()
 
     def manage_style_exceptions(self) -> None:
-        from core.writing_style import load_exceptions, save_exceptions
-        from ui.prose_review_dialog import StyleExceptionsDialog
-        project = self.project_session.project
-        if project is None or self.has_pending_result or self.ai_controller.is_running():
-            return
-        try:
-            dialog = StyleExceptionsDialog(load_exceptions(project.root), self.parent)
-            if dialog.exec() == QDialog.DialogCode.Accepted and project is self.project_session.project:
-                save_exceptions(project.root, dialog.quotes())
-                self._emit_status("本书文风例外已保存")
-        except (OSError, ValueError) as exc:
-            QMessageBox.warning(self.parent, "文风例外未保存", str(exc))
+        self.manage_style_library(exceptions=True)
 
     def _on_prose_done(self, token, result) -> None:
         from core.prose_review import apply_patches
@@ -375,17 +390,57 @@ class AIWorkflowController(QObject):
         if request is None:
             return
         project, chapter_id, workflow = request
-        self._start(
+        if self.ai_controller.is_running():
+            self._emit_status("当前任务完成后再试一次。")
+            return
+        run_id = object()
+        self._memory_run_id = run_id
+
+        def run_memory(cancel_event):
+            workflow.progress_callback = lambda event: self.memory_progress_received.emit(
+                run_id, cancel_event, event
+            )
+            return workflow.update_memory(
+                project, chapter_id, cancel_event=cancel_event, force_refresh=force_refresh
+            )
+
+        started = self._start(
             "memory",
             chapter_id,
             f"正在提炼章节摘要与故事状态 · {chapter_id}",
-            lambda cancel_event: workflow.update_memory(
-                project,
-                chapter_id,
-                cancel_event=cancel_event,
-                force_refresh=force_refresh,
-            ),
+            run_memory,
         )
+        if not started:
+            self._memory_run_id = None
+
+    def _on_memory_finished(self, token) -> None:
+        if token.kind == "memory":
+            self._memory_run_id = None
+
+    def _on_memory_progress(self, run_id, cancel_event, event) -> None:
+        if run_id is not self._memory_run_id or cancel_event.is_set():
+            return
+        labels = {
+            "chunking": "准备章节", "facts": "提取事实", "merge": "合并事实",
+            "context": "准备相关资料", "reduction": "归并事实",
+            "proposal": "生成记忆提案", "validation": "校验记忆提案",
+        }
+        label = labels.get(event.stage, event.stage)
+        if event.round_number:
+            label += f"（第 {event.round_number} 轮）"
+        if event.total:
+            label += f" {event.current}/{event.total}"
+        if event.state == "running":
+            self._emit_status(label + "…")
+        else:
+            suffix = "已复用缓存" if event.state == "cached" else (
+                "已完成" if event.state == "done" else "已中断"
+            )
+            message = f"{label} · {suffix} · {event.elapsed_ms / 1000:.1f} 秒"
+            if event.cache_hits:
+                message += f" · 缓存命中 {event.cache_hits}"
+            self._emit_output(message)
+            self._emit_status(label + " · " + suffix)
 
     def jump_to_issue(self, issue: object) -> bool:
         """Open the reported chapter and reveal its exact quoted passage."""
@@ -580,7 +635,7 @@ class AIWorkflowController(QObject):
             chapter_id,
             core_system_paths=core_system_paths,
             core_power_path=store.core_power_path,
-            style_guide_path=store.style_guide_path,
+            style_guide_path=project.root / "writing/style_library.json",
             style_guide_active=bool(store.load_style_guide()),
             parent=self.parent,
         )

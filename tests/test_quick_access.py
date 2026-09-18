@@ -1,3 +1,5 @@
+from tests.style_fixtures import set_style
+from core.style_library import load_library
 import os
 import tempfile
 import unittest
@@ -68,6 +70,78 @@ class QuickAccessTests(unittest.TestCase):
         dialog.show()
         self.events()
         return dialog
+
+    def test_old_style_document_is_not_restored_as_startup_modal(self):
+        root = str(self.project.root.resolve())
+        self.window.workspace_state.data["projects"][root] = {"last": "writing/style_guide.md"}
+        self.assertIsNone(self.window.workspace_state.last_document(self.project))
+
+    def test_footer_opens_same_manager_and_flat_documents_are_searchable(self):
+        self.window.left_panel.set_scope("canon")
+        with patch.object(self.window.ai_workflow_controller, "manage_style_library", return_value=True) as manage:
+            self.window.left_panel.style_button.click()
+            manage.assert_called_once()
+        for path in (self.project.outline_dir / "main_arc.md", self.project.canon_dir / "timeline.md"):
+            self.assertTrue(self.controller.activate(self.entry(path)))
+            self.assertEqual(self.window.editor.current_path(), str(path))
+            self.assertTrue(self.window.left_panel.locate_button.isEnabled())
+
+    def test_style_tree_and_quick_open_share_manager(self):
+        current = self.window.editor.current_path()
+        entry = self.entry("style_library")
+        self.assertEqual(entry.title, "本书文风…")
+        with patch.object(self.window.ai_workflow_controller, "manage_style_library", return_value=True) as manage:
+            self.window._on_file_selected("本书文风", str(self.project.style_guide_path))
+            self.assertTrue(self.controller.activate(entry))
+            self.assertEqual(manage.call_count, 2)
+        self.assertEqual(self.window.editor.current_path(), current)
+
+    def test_style_manager_preserves_draft_when_save_fails(self):
+        controller = self.window.ai_workflow_controller
+        with patch.object(controller, "save_if_dirty", return_value=False), patch("ui.style_library_dialog.StyleLibraryDialog") as dialog:
+            self.assertFalse(controller.manage_style_library())
+            dialog.assert_not_called()
+
+    def test_style_manager_conflict_keeps_draft_and_external_content(self):
+        from ui.style_library_dialog import StyleLibraryDialog
+        calls = []
+        def submit(dialog):
+            calls.append(True)
+            if len(calls) == 1:
+                dialog.fields["总体气质"].setPlainText("待保存的要求")
+                set_style(self.project.root, "外部修改")
+                dialog._submit()
+                return QDialog.DialogCode.Accepted
+            self.assertEqual(dialog.fields["总体气质"].toPlainText(), "待保存的要求")
+            self.assertIn("其他窗口修改", dialog.error.text())
+            return QDialog.DialogCode.Rejected
+        with patch.object(StyleLibraryDialog, "exec", submit):
+            self.window.ai_workflow_controller.manage_style_library()
+        self.assertEqual(load_library(self.project.root)["profile"]["总体气质"], "外部修改")
+        self.assertEqual(len(calls), 2)
+
+    def test_style_manager_cancel_leaves_all_style_files_unchanged(self):
+        from application.book_style_service import snapshot
+        from ui.style_library_dialog import StyleLibraryDialog
+        before = snapshot(self.project.root)
+        def cancel(dialog):
+            dialog.fields["总体气质"].setPlainText("不应保存")
+            dialog.enabled.setChecked(True)
+            return QDialog.DialogCode.Rejected
+        with patch.object(StyleLibraryDialog, "exec", cancel):
+            self.window.ai_workflow_controller.manage_style_library()
+        self.assertEqual(snapshot(self.project.root), before)
+
+    def test_style_manager_confirmation_persists_requirements(self):
+        from ui.style_library_dialog import StyleLibraryDialog
+        def accept(dialog):
+            dialog.fields["总体气质"].setPlainText("统一管理的本书要求")
+            dialog._submit()
+            return QDialog.DialogCode.Accepted
+        with patch.object(StyleLibraryDialog, "exec", accept):
+            self.assertTrue(self.window.ai_workflow_controller.manage_style_library())
+        self.assertEqual(load_library(self.project.root)["profile"]["总体气质"], "统一管理的本书要求")
+        self.assertEqual(self.window.editor.current_path(), str(self.chapter))
 
     def test_keyboard_selects_without_opening_until_enter(self):
         entries = [QuickEntry("a", "第一项", "章节"), QuickEntry("b", "第二项", "资料")]

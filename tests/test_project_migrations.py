@@ -40,7 +40,7 @@ class ProjectMigrationTests(TestCase):
             state = project.load_story_state()
             state["foreshadowing"] = ["古剑来历"]
             project.save_story_state(state)
-            project.style_guide_path.unlink()
+            project.style_guide_path.unlink(missing_ok=True)
             project.core_power_path.unlink()
             (project.memory_dir / "foreshadowing.json").unlink()
             project.system_registry_path.write_text(
@@ -68,7 +68,7 @@ class ProjectMigrationTests(TestCase):
             self.assertEqual([item["title"] for item in notes], ["古剑来历"])
             registry = project.system_registry_path.read_text(encoding="utf-8")
             self.assertIn("canon/power/能力体系设定.md", registry)
-            self.assertTrue(project.style_guide_path.is_file())
+            self.assertFalse(project.style_guide_path.is_file())
             self.assertTrue(project.core_power_path.is_file())
 
     def test_write_failure_restores_all_existing_and_new_files(self) -> None:
@@ -129,12 +129,12 @@ class ProjectMigrationTests(TestCase):
     def test_current_schema_missing_required_file_is_not_silently_repaired(self) -> None:
         with TemporaryDirectory() as tmp:
             project = NovelProject.create(Path(tmp) / "proj", "测试")
-            project.style_guide_path.unlink()
+            project.core_power_path.unlink(missing_ok=True)
 
             with self.assertRaisesRegex(ProjectMigrationError, "缺少必需文件"):
                 migrate_project(project.root)
 
-            self.assertFalse(project.style_guide_path.exists())
+            self.assertFalse(project.core_power_path.exists())
 
     def test_interrupted_migration_is_recovered_before_retry(self) -> None:
         with TemporaryDirectory() as tmp:

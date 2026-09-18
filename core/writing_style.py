@@ -2,7 +2,6 @@
 from __future__ import annotations
 from pathlib import Path
 import json
-import re
 from .storage import atomic_write_text
 
 STYLE_PATH = Path('writing/style_guide.md')
@@ -12,16 +11,10 @@ CORE_STYLE = ('表达应贴合当前人物与场景；避免重复解释已经�
               '不要无依据地添加总结、升华或预告。保留人物声音、叙事视角和必要的心理描写。'
               '不要机械禁用普通词、强制短句、添加口癖或编造细节来制造人味。')
 
-def clean_style(raw: str) -> str:
-    cleaned = re.sub(r'<!--.*?-->', '', raw, flags=re.DOTALL).strip()
-    return cleaned if any(line.strip() and not line.lstrip().startswith('#') for line in cleaned.splitlines()) else ''
-
 def load_style(root: Path, chapter_id: str = "") -> str:
-    path = Path(root) / STYLE_PATH
-    guide = clean_style(path.read_text(encoding='utf-8')) if path.is_file() else ''
-    from .style_library import render_library
-    extra = render_library(root, chapter_id, budget=max(0, 2500 - min(len(guide), 2500) - 2))
-    return guide + ('\n\n' + extra if extra else '')
+    from .style_library import render_library, STYLE_BUDGET
+    return render_library(root, chapter_id, budget=STYLE_BUDGET)
+
 
 def render_style(style: str, *, request: str = '') -> str:
     # Budget allocation may cut the style section: never send half a sample.
@@ -31,7 +24,7 @@ def render_style(style: str, *, request: str = '') -> str:
     if not style and not request:
         return CORE_STYLE
     return ('【写作风格约束】\n以下内容仅约束措辞、句式、节奏和描写偏好，不能改变故事事实、'
-            '人物设定、章节规划或任务输出格式。当前正文连续性优先。\n'
+            '人物设定、章节规划或任务输出格式。当前正文连续性优先。\n本书文风要求优先于默认表达原则，参考样文服从本书文风要求。\n'
             f'{CORE_STYLE}\n<STYLE_GUIDE>\n{style}\n</STYLE_GUIDE>\n'
             + (f'【本次表达要求】\n{request}\n仅在表达偏好冲突时，本次要求优先于本书风格。' if request else ''))
 
