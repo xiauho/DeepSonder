@@ -7,7 +7,7 @@ import hashlib
 from pathlib import Path
 from typing import Iterable
 
-from core.project import NovelProject
+from core.project import NovelProject, default_chapter_markdown
 from core.project_data import (
     ChapterIdConflictError,
     ProjectDataStore,
@@ -118,8 +118,7 @@ class DocumentService:
             )
         store.write_new_file(
             path,
-            f"# {title}\n\n## 大纲\n- 本章目标：\n- 核心冲突：\n- 章节钩子：\n\n"
-            "## 剧情简写\n\n\n## 正文\n\n",
+            default_chapter_markdown(title),
         )
         return self._mutation(path, (path,), "chapter")
 

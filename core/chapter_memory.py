@@ -7,7 +7,7 @@ import hashlib
 import json
 import re
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -465,6 +465,8 @@ def generate_chapter_memory_proposal(
     base_state_scope: str = "",
     source_state_hash: str = "",
     force_refresh: bool = False,
+    refresh_reduction: bool = False,
+    retry_feedback: str = "",
     progress_callback: ProgressCallback | None = None,
 ) -> ChapterMemoryProposal:
     """Reduce a fact ledger and produce one locally validated memory proposal."""
@@ -473,7 +475,7 @@ def generate_chapter_memory_proposal(
     context_hash = canonical_hash(full_canon_context)
     canon_context = full_canon_context[:12_000]
     proposal_cache = cache or ChapterMemoryCache(project)
-    cached = None if force_refresh else proposal_cache.load(ledger, base_state, context_hash)
+    cached = None if (force_refresh or refresh_reduction or retry_feedback) else proposal_cache.load(ledger, base_state, context_hash)
     if cached is not None:
         _check_cancel(cancel_event)
         publish_progress(progress_callback, MemoryProgress("proposal", state="cached", cache_hits=1))
@@ -487,7 +489,7 @@ def generate_chapter_memory_proposal(
     prompt_state = relevant_state
     prompt_canon = canon_context
     base_state_hash = canonical_hash(base_state)
-    cached_reduction = proposal_cache.load_reduction(ledger)
+    cached_reduction = None if refresh_reduction else proposal_cache.load_reduction(ledger)
     if cached_reduction is not None:
         publish_progress(progress_callback, MemoryProgress("reduction", state="cached", cache_hits=1))
     source: dict[str, Any] = (
@@ -499,6 +501,8 @@ def generate_chapter_memory_proposal(
             **_ledger_payload(ledger),
         }
     )
+    if retry_feedback:
+        source["validation_feedback"] = retry_feedback[:6000]
     reduction_calls = 0
     prompt = _try_build_memory_prompt(
         ledger,
@@ -570,6 +574,8 @@ def generate_chapter_memory_proposal(
             "base_state_hash": base_state_hash,
             "shards": [item.to_dict() for item in shards],
         }
+        if retry_feedback:
+            source["validation_feedback"] = retry_feedback[:6000]
         prompt = _try_build_memory_prompt(
             ledger,
             source,
@@ -582,7 +588,7 @@ def generate_chapter_memory_proposal(
 
     _check_cancel(cancel_event)
     if source.get("mode") == "digest_shards" and reduction_calls:
-        proposal_cache.save_reduction(ledger, source)
+        proposal_cache.save_reduction(ledger, {k: v for k, v in source.items() if k != "validation_feedback"})
     options = {"cancel_event": cancel_event} if cancel_event is not None else {}
     with memory_phase(progress_callback, "proposal"):
         raw = dsh.generate_json(
@@ -630,6 +636,8 @@ def build_memory_proposal_prompt(
     system_prompt = (
         "你是 DeepSonder 的章节记忆归并器。只能依据给定事实生成摘要、状态 Patch 和冲突候选。"
         "不得补写剧情，不得返回完整故事状态。只输出合法 JSON。"
+        "如来源含 validation_feedback，应针对上次失败纠正目标与引用；不能补造事实，"
+        "无法支持的 change 应省略，摘要也不得重复该未经支持的更新。"
     )
     model_source = {
         key: value
@@ -962,6 +970,60 @@ def parse_cached_memory_proposal(
     )
 
 
+def partial_memory_proposal(
+    proposal: ChapterMemoryProposal, base_state: dict[str, Any],
+) -> ChapterMemoryProposal | None:
+    """Build a conservative, independently revalidated subset for explicit review.
+
+    Global/model/fact conflicts are never bypassed. The unanchored original
+    summary is replaced with retained anchored events, not silently reused.
+    """
+    if canonical_hash(base_state) != proposal.base_state_hash:
+        raise MemoryProposalError("章前故事状态已变化，请重新生成记忆提案。")
+    blockers = [c for c in proposal.conflicts if c.severity == "blocker"]
+    if not blockers or any(c.kind not in {"unsupported_patch", "patch_collision", "invalid_transition"}
+                           or not c.op_ids for c in blockers):
+        return None
+    excluded = {op for c in blockers for op in c.op_ids}
+    bad_ids = {fid for c in blockers for fid in c.evidence_fact_ids}
+    bad_targets = {c.target for c in blockers}
+    while True:
+        rejected = [p for p in proposal.patches if p.op_id in excluded
+                    or _patch_target(p) in bad_targets or bad_ids.intersection(p.evidence_fact_ids)]
+        expanded = excluded | {p.op_id for p in rejected}
+        if expanded == excluded:
+            break
+        excluded = expanded
+        bad_ids.update(fid for p in rejected for fid in p.evidence_fact_ids)
+        bad_targets.update(_patch_target(p) for p in rejected)
+    patches = tuple(p for p in proposal.patches if p.op_id not in excluded)
+    if not patches:
+        return None
+    digest_fields = {field: tuple(e for e in getattr(proposal.digest, field)
+                                 if not bad_ids.intersection(e.fact_ids)) for field in DIGEST_FIELDS}
+    events = digest_fields["key_events"]
+    # Keep complete event texts; do not truncate a claim mid-sentence.
+    summary = "（部分记忆）"
+    for event in events:
+        if len(summary) + len(event.text) + 1 <= 300:
+            summary += event.text + "。"
+    if summary == "（部分记忆）":
+        return None
+    facts = tuple(f for f in proposal.evidence_facts if f.fact_id not in bad_ids)
+    state, local = apply_memory_patches(base_state, patches, {f.fact_id: f for f in facts}, proposal.chapter_id)
+    if any(c.severity == "blocker" for c in local):
+        return None
+    retained = tuple(c for c in proposal.conflicts if c.severity != "blocker"
+                     and not bad_ids.intersection(c.evidence_fact_ids)
+                     and not excluded.intersection(c.op_ids) and c.target not in bad_targets)
+    note = _local_conflict("partial_adoption", "warning", "记忆范围",
+                           "仅采用独立通过校验的更新；摘要按保留的事件重建，未覆盖被排除内容。",
+                           (), ())
+    return replace(proposal, patches=patches, digest=ChapterDigest(summary, **digest_fields),
+                   conflicts=_dedupe_conflicts((*retained, *local, note)), resulting_state=state,
+                   evidence_facts=facts, cache_hit=False, completion_message="部分记忆提案已生成")
+
+
 def apply_memory_patches(
     base_state: dict[str, Any],
     patches: tuple[MemoryPatch, ...],
@@ -1172,6 +1234,14 @@ def _nearby_location_facts(left: FactRecord, right: FactRecord) -> bool:
     return bool(a and b and a[1] == b[1] and 0 <= int(a[2]) - int(b[2]) <= 8)
 
 
+def _named_location_subject(text: str, subject: str) -> bool:
+    """Only exact names in an explicit coordinated subject, never substrings."""
+    if _UNREALIZED_LOCATION.search(text) or re.search(r"看见|看着|目睹|听说|等待|除外|除了", text):
+        return False
+    return bool(re.search(r"(?:^|[与和及、])\s*" + re.escape(subject)
+                          + r"\s*(?:$|[与和及、])", text.casefold()))
+
+
 def _character_location_support(
     patch: MemoryPatch, evidence: list[FactRecord]
 ) -> tuple[bool, bool]:
@@ -1190,11 +1260,13 @@ def _character_location_support(
                 actor = clause[:movement.start()].strip()
                 if re.search(r"看见|看着|目睹|听说|听见|让|命|要求|希望|等待", actor):
                     continue
-                named_actor = subject in actor
+                named_actor = _named_location_subject(
+                    re.sub(r"(?:已经|终于|共同|已)$", "", actor).strip(), subject
+                )
                 implicit_actor = not actor or actor in {"已", "已经", "终于", "随队", "共同"}
-                if not named_actor and not (implicit_actor and fact.subject.casefold() == subject):
+                if not named_actor and not (implicit_actor and _named_location_subject(fact.subject, subject)):
                     continue
-            elif not (fact.category == "location" and fact.subject.casefold() == subject
+            elif not (fact.category == "location" and _named_location_subject(fact.subject, subject)
                       and clause == fact.value and not _UNREALIZED_LOCATION.search(fact.predicate)
                       and not re.search(_LOCATION_VERBS, fact.predicate)):
                 continue

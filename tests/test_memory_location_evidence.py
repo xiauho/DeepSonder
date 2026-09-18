@@ -115,3 +115,31 @@ class LocationEvidenceTests(TestCase):
         self.assertIn("拟写入：山门", result.preview_text())
         self.assertIn("未到达山门", result.conflict_evidence_text())
         self.assertIn("chapter_01:p0032", result.conflict_evidence_text())
+
+    def test_joint_named_subject_split_predicate_and_destination(self):
+        for subject in ("林舟与苏婉", "苏婉、林舟", "林舟和苏婉", "苏婉及林舟"):
+            for predicate in ("到达集合地点", "抵达", "位于"):
+                with self.subTest(subject=subject, predicate=predicate):
+                    result = self.proposal(predicate, subject=subject, category="location",
+                                           value="祖师雕塑所在的广场", destination="祖师雕塑所在的广场")
+                    self.assertFalse(result.has_blockers)
+
+    def test_joint_subject_does_not_transfer_other_actors_or_unrealized_arrival(self):
+        for subject, predicate in (
+            ("众人", "到达"), ("林舟舟与苏婉", "到达"),
+            ("林舟与苏婉", "未到达"), ("林舟与苏婉", "准备到达"),
+            ("林舟与苏婉", "命令弟子到达"), ("林舟与苏婉", "看见弟子到达"),
+            ("林舟与苏婉", "苏婉到达"), ("林舟与苏婉", "林舟舟到达"),
+            ("林舟与苏婉", "回忆昨夜到达"), ("林舟与未到达的苏婉", "到达"),
+        ):
+            with self.subTest(subject=subject, predicate=predicate):
+                self.assertTrue(self.proposal(predicate, subject=subject, category="location",
+                                              value="山门").has_blockers)
+
+    def test_actor_adverbs_and_names_containing_conjunctions(self):
+        from core.chapter_memory import _named_location_subject
+        self.assertTrue(_named_location_subject("安和与苏婉", "安和"))
+        self.assertTrue(_named_location_subject("安和", "安和"))
+        self.assertFalse(_named_location_subject("安和舟与苏婉", "安和"))
+        for predicate in ("林舟已经到达山门", "林舟与苏婉共同到达山门"):
+            self.assertFalse(self.proposal(predicate).has_blockers)

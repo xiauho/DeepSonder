@@ -320,6 +320,7 @@ def extract_chapter_fact_ledger(
     cache: FactLedgerCache | None = None,
     cancel_event: threading.Event | None = None,
     progress_callback: ProgressCallback | None = None,
+    force_refresh: bool = False,
 ) -> ChapterFactLedger:
     """Extract every chapter chunk or load its validated cached result."""
     if cancel_event is not None and cancel_event.is_set():
@@ -341,7 +342,7 @@ def extract_chapter_fact_ledger(
     for index, chunk in enumerate(chunks, 1):
         if cancel_event is not None and cancel_event.is_set():
             raise AITaskCancelled()
-        result = ledger_cache.load(chunk)
+        result = None if force_refresh else ledger_cache.load(chunk)
         if result is not None:
             cache_hits += 1
             results.append(result)

@@ -76,6 +76,14 @@ DEFAULT_SPACE_SYSTEM = (
 )
 
 
+def default_chapter_markdown(title: str) -> str:
+    """Shared initial content for project creation and newly added chapters."""
+    return (
+        f"# {title}\n\n## 大纲\n- 本章目标：\n- 核心冲突：\n- 章节钩子：\n\n"
+        "## 剧情简写\n\n\n## 正文\n\n"
+    )
+
+
 def chapter_number_from_id(chapter_id: str) -> int | None:
     """Chapter ordinal for ids following the app's ``chapter_07`` naming.
 
@@ -193,7 +201,7 @@ class NovelProject:
         if not chapter_01.exists():
             atomic_write_text(
                 chapter_01,
-                "# 第一章 初始\n\n## 大纲\n- 在这里写本章剧情目标\n\n## 正文\n在这里开始写作。\n",
+                default_chapter_markdown("第一章 初始"),
                 encoding="utf-8",
             )
 

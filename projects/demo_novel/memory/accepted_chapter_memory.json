@@ -1,0 +1,495 @@
+{
+  "schema_version": 1,
+  "chapters": {
+    "chapter_02": {
+      "schema_version": 1,
+      "chapter_id": "chapter_02",
+      "source_hash": "3096b92d5279a1f427412f900c4bb64b10b02ea7a5e6e01421cc3623b1528739",
+      "summary_hash": "9fddf0cfeb87e40f5b30396f73675e55101165d18e642d7c75d372b590f1e85f",
+      "digest": {
+        "summary": "林夜在青云宗后山湿石旁被冷醒，右手攥着一柄来历不明的黑色断剑，记忆中断在昨夜追一道疑似父亲的人影之后。内门弟子苏婉发现他并带他下山，途中长老传音召集全体弟子；两人抵达祖师殿前广场，得知魔教三万教众已入山界、三层护山大阵开启。长老分派弟子守阵，苏婉离开，林夜被分到崔岩一队。",
+        "key_events": [
+          {
+            "text": "林夜在青云宗后山青石一带的湿石旁被冷醒，自认身为外门弟子本不该在此处。",
+            "fact_ids": [
+              "fact_176ba38c1867693e9f73",
+              "fact_b4945132ad241dedf536",
+              "fact_e9058c4d25b5dcc475e2",
+              "fact_22acb7af823f097951b3"
+            ]
+          },
+          {
+            "text": "他回忆昨夜见雾中走路姿势熟悉、被他认作父亲的人影而跟出宿舍，绕过值夜灯棚追入后山林子，呼喊无回应；此后记忆完全空白，不知自己如何晕倒。",
+            "fact_ids": [
+              "fact_2b12fbb0707ba818b946",
+              "fact_98a34565df5da95613ef",
+              "fact_e4a36f218a29b8c8ce85",
+              "fact_814c2c79592d627dd280"
+            ]
+          },
+          {
+            "text": "醒来后右手及右臂尚能活动，但后脑闷胀作痛、起身时腿软。",
+            "fact_ids": [
+              "fact_9b857a22c1bbd2ae3ba7"
+            ]
+          }
+        ],
+        "character_changes": [
+          {
+            "text": "林夜由被冷醒、后脑闷胀作痛且腿软的状态。",
+            "fact_ids": [
+              "fact_b4945132ad241dedf536",
+              "fact_9b857a22c1bbd2ae3ba7"
+            ]
+          }
+        ],
+        "location_changes": [],
+        "item_changes": [],
+        "relationship_changes": [],
+        "timeline_changes": []
+      },
+      "evidence_facts": [
+        {
+          "fact_id": "fact_176ba38c1867693e9f73",
+          "category": "location",
+          "subject": "林夜",
+          "predicate": "在青云宗后山湿石旁醒来，后颈贴湿石",
+          "value": "青云宗后山",
+          "anchor": "chapter_02:p0002",
+          "certainty": "explicit"
+        },
+        {
+          "fact_id": "fact_b4945132ad241dedf536",
+          "category": "character_state",
+          "subject": "林夜",
+          "predicate": "被冷醒，身上带寒意",
+          "value": "冻醒",
+          "anchor": "chapter_02:p0001",
+          "certainty": "explicit"
+        },
+        {
+          "fact_id": "fact_9b857a22c1bbd2ae3ba7",
+          "category": "character_state",
+          "subject": "林夜",
+          "predicate": "右手及右臂尚能活动，但后脑胀痛、起身时腿软",
+          "value": "有意识可动，后脑闷胀作痛、腿软",
+          "anchor": "chapter_02:p0004",
+          "certainty": "explicit"
+        },
+        {
+          "fact_id": "fact_e9058c4d25b5dcc475e2",
+          "category": "location",
+          "subject": "林夜",
+          "predicate": "辨出所在处为宗门后山青石一带，再往下十几步有被雷劈断又活过来的老槐；再往内属内门师兄练剑地界",
+          "value": "青云宗后山",
+          "anchor": "chapter_02:p0005",
+          "certainty": "explicit"
+        },
+        {
+          "fact_id": "fact_22acb7af823f097951b3",
+          "category": "character_state",
+          "subject": "林夜",
+          "predicate": "自认身为外门弟子，不该在这个地方",
+          "value": "认知到自己越界在不该在之处",
+          "anchor": "chapter_02:p0006",
+          "certainty": "explicit"
+        },
+        {
+          "fact_id": "fact_2b12fbb0707ba818b946",
+          "category": "event",
+          "subject": "林夜",
+          "predicate": "回忆昨夜：在通铺上睡不着，见窗外雾中有走路姿势熟悉的人影（他认作其父），遂跟出宿舍",
+          "value": "雾中随父影出门",
+          "anchor": "chapter_02:p0007",
+          "certainty": "explicit"
+        },
+        {
+          "fact_id": "fact_98a34565df5da95613ef",
+          "category": "event",
+          "subject": "林夜",
+          "predicate": "绕过值夜灯棚进入后山林子追赶该影子，追至喘不上气、呼喊无回应",
+          "value": "追入后山林子，无人回头",
+          "anchor": "chapter_02:p0007",
+          "certainty": "explicit"
+        },
+        {
+          "fact_id": "fact_814c2c79592d627dd280",
+          "category": "character_state",
+          "subject": "林夜",
+          "predicate": "昨夜之后的记忆完全空白，不知自己如何晕倒",
+          "value": "记忆中断，晕倒原因不明",
+          "anchor": "chapter_02:p0008",
+          "certainty": "explicit"
+        },
+        {
+          "fact_id": "fact_e4a36f218a29b8c8ce85",
+          "category": "event",
+          "subject": "林夜",
+          "predicate": "压着喉咙喊了一声“爹”，只惊起两只鸟雀",
+          "value": "呼喊无回应",
+          "anchor": "chapter_02:p0009",
+          "certainty": "explicit"
+        },
+        {
+          "fact_id": "fact_cde72a4d5690b4a9a3ce",
+          "category": "item",
+          "subject": "林夜",
+          "predicate": "右手不知何时攥紧，掌中握着一柄很小的黑色短剑，剑身沾汗与干结暗红",
+          "value": "持有黑色断剑（剑身沾汗与暗红痕）",
+          "anchor": "chapter_02:p0011",
+          "certainty": "explicit"
+        },
+        {
+          "fact_id": "fact_dccc5d5217dbe668b1ce",
+          "category": "item",
+          "subject": "黑色断剑",
+          "predicate": "非铁质，通体全黑不反光，剑很短（略长于小臂），从中间齐口断开，断口钝旧，无鞘无柄，剑根裹几层硬旧布",
+          "value": "全黑无光断剑，断口旧钝，无鞘无柄，剑根缠硬旧布",
+          "anchor": "chapter_02:p0013",
+          "certainty": "explicit"
+        },
+        {
+          "fact_id": "fact_0f84731b36e87ed72fac",
+          "category": "item",
+          "subject": "黑色断剑",
+          "predicate": "手一松便格外沉重下坠，林夜不得不重新握紧，随身携带",
+          "value": "沉重异常，松手即坠",
+          "anchor": "chapter_02:p0019",
+          "certainty": "explicit"
+        },
+        {
+          "fact_id": "fact_6f6a19f9bf3d44d3aeca",
+          "category": "event",
+          "subject": "林夜",
+          "predicate": "拾剑时心口跳得沉重，用指腹擦拭断口只见黑痕、擦不净，遂不敢再擦并查看四周泥地",
+          "value": "对断剑心存异样忌惮",
+          "anchor": "chapter_02:p0014",
+          "certainty": "explicit"
+        },
+        {
+          "fact_id": "fact_ca79c2fd07a70cc1ab35",
+          "category": "event",
+          "subject": "林夜",
+          "predicate": "检查泥地，只见到自己从林子那头一路歪斜急促走来的脚印，另有一处自己趴倒的积水坑；无别人脚印",
+          "value": "泥地仅存自己脚印与趴倒痕迹",
+          "anchor": "chapter_02:p0016",
+          "certainty": "explicit"
+        },
+        {
+          "fact_id": "fact_eff3144e1bdebc1dc613",
+          "category": "foreshadowing",
+          "subject": "林夜",
+          "predicate": "记忆空缺处像被人硬剪去一段布、前后尚留线头，不像睡着造成",
+          "value": "记忆疑被人为截断",
+          "anchor": "chapter_02:p0018",
+          "certainty": "explicit"
+        },
+        {
+          "fact_id": "fact_056482b565902bd82030",
+          "category": "event",
+          "subject": "苏婉",
+          "predicate": "从坡上转下，脚步很稳、脚尖几乎不带泥星，在离林夜五六步处停住，先看其脸再看其背在身后的手",
+          "value": "出现并停在林夜五六步外，注意其藏手",
+          "anchor": "chapter_02:p0023",
+          "certainty": "explicit"
+        },
+        {
+          "fact_id": "fact_e494de09198559508678",
+          "category": "relationship",
+          "subject": "苏婉",
+          "predicate": "自我介绍为内门弟子，与林夜互通姓名（林夜称其苏师姐）",
+          "value": "内门苏婉与林夜互识",
+          "anchor": "chapter_02:p0026",
+          "certainty": "explicit"
+        },
+        {
+          "fact_id": "fact_d3d9aca8f24f225e22f3",
+          "category": "event",
+          "subject": "苏婉",
+          "predicate": "追问林夜为何在此，林夜答夜里出门晕在此地刚醒，苏婉未再追问",
+          "value": "林夜隐瞒实情，苏婉止问",
+          "anchor": "chapter_02:p0027",
+          "certainty": "explicit"
+        },
+        {
+          "fact_id": "fact_4af82e2537ee764f8730",
+          "category": "event",
+          "subject": "苏婉",
+          "predicate": "问林夜脸色不好、头上是否有伤；林夜答撞了一下",
+          "value": "苏婉发现林夜头部有伤",
+          "anchor": "chapter_02:p0028",
+          "certainty": "explicit"
+        },
+        {
+          "fact_id": "fact_4cc725908253bea47e3a",
+          "category": "event",
+          "subject": "苏婉",
+          "predicate": "命林夜跟她下山，不许留在后山",
+          "value": "要带林夜下山",
+          "anchor": "chapter_02:p0030",
+          "certainty": "explicit"
+        },
+        {
+          "fact_id": "fact_d8f400e2deb62fadfe89",
+          "category": "event",
+          "subject": "魔教",
+          "predicate": "苏婉告知魔教的人来了",
+          "value": "魔教来袭",
+          "anchor": "chapter_02:p0032",
+          "certainty": "explicit"
+        },
+        {
+          "fact_id": "fact_c7a445e9057b98e72768",
+          "category": "event",
+          "subject": "魔教",
+          "predicate": "云岭探子昨夜传回消息：三万教众过断魂涧，前队已压到青云山界内",
+          "value": "三万教众越断魂涧入侵青云山界，前队已入境",
+          "anchor": "chapter_02:p0034",
+          "certainty": "explicit"
+        },
+        {
+          "fact_id": "fact_6ed4a3f0cc3ac6c693b7",
+          "category": "event",
+          "subject": "青云宗",
+          "predicate": "昨夜起关闭山门，外门执事点人，几个执事在前山各处寻找散在外头的人；苏婉在后山巡查",
+          "value": "宗门闭山并搜查散落弟子，苏婉奉命巡后山",
+          "anchor": "chapter_02:p0034",
+          "certainty": "explicit"
+        },
+        {
+          "fact_id": "fact_3f8598beef8be894462a",
+          "category": "world_rule",
+          "subject": "青云宗",
+          "predicate": "宗门规模远不及三万之数，连杂役、外门、内门及常年闭关长老合计也凑不出零头",
+          "value": "全宗人数远少于三万",
+          "anchor": "chapter_02:p0036",
+          "certainty": "explicit"
+        },
+        {
+          "fact_id": "fact_1bca2944ad58670e5550",
+          "category": "world_rule",
+          "subject": "青云宗护山大阵",
+          "predicate": "三层护山阵以山势结阵、祖上传下，可挡一时，但阵脚一处被撬开整座阵就会漏",
+          "value": "三层护山阵依山势而立，阵脚为要害",
+          "anchor": "chapter_02:p0038",
+          "certainty": "explicit"
+        },
+        {
+          "fact_id": "fact_b2e9fbe663e252309f6c",
+          "category": "character_state",
+          "subject": "苏婉",
+          "predicate": "说“漏”字时声音比前几句轻，实际担心但不在脸上显露",
+          "value": "心中忧虑而表面镇定",
+          "anchor": "chapter_02:p0039",
+          "certainty": "explicit"
+        },
+        {
+          "fact_id": "fact_09b5f3b0f73f8d5a50e6",
+          "category": "item",
+          "subject": "黑色断剑",
+          "predicate": "贴在林夜小臂上，冰冷如新从水里捞出",
+          "value": "持续冰凉",
+          "anchor": "chapter_02:p0040",
+          "certainty": "explicit"
+        },
+        {
+          "fact_id": "fact_53adba18c848f7409e9d",
+          "category": "event",
+          "subject": "林夜",
+          "predicate": "旁敲侧击问苏婉宗门是否有哪一脉的剑是黑色的，被问后谎称在林子里看到切面像剑的黑石头",
+          "value": "隐瞒断剑、试探黑剑来历",
+          "anchor": "chapter_02:p0041",
+          "certainty": "explicit"
+        },
+        {
+          "fact_id": "fact_9bd92b98041a428b7e44",
+          "category": "world_rule",
+          "subject": "铸剑常识",
+          "predicate": "苏婉称铸剑用铁、钢、玄铁皆为青灰之色，显黑须靠剑衣与锻法，全黑之剑未曾听过",
+          "value": "苏婉认知中不存在通体全黑的剑",
+          "anchor": "chapter_02:p0044",
+          "certainty": "explicit"
+        },
+        {
+          "fact_id": "fact_7d29f1f214ff1ca42844",
+          "category": "character_state",
+          "subject": "林夜",
+          "predicate": "听苏婉说没听过黑剑后心中异样下沉，把持剑的手又往身后藏了半寸",
+          "value": "对断剑来历更存疑并刻意隐藏",
+          "anchor": "chapter_02:p0045",
+          "certainty": "explicit"
+        },
+        {
+          "fact_id": "fact_631565047d63575be5ef",
+          "category": "event",
+          "subject": "长老",
+          "predicate": "以传音术传令全体弟子即刻前往祖师雕塑处集合、不得延误擅离；苏婉辨出是长老传音并按住腰侧",
+          "value": "长老传音召集全体弟子",
+          "anchor": "chapter_02:p0047",
+          "certainty": "explicit"
+        },
+        {
+          "fact_id": "fact_bd509741c93eabdf6feb",
+          "category": "world_rule",
+          "subject": "长老传音",
+          "predicate": "声音不从某一方向来，而是直接落在人耳中，如有人贴在耳边说话",
+          "value": "传音直入耳中、无方向来源",
+          "anchor": "chapter_02:p0049",
+          "certainty": "explicit"
+        },
+        {
+          "fact_id": "fact_e64e62f5ac9a87afdd0a",
+          "category": "event",
+          "subject": "苏婉与林夜",
+          "predicate": "苏婉令林夜同去广场，两人沿下斜山路几乎小跑下山，穿出林子后踏上被踩亮的青石路",
+          "value": "二人赶赴祖师殿前广场",
+          "anchor": "chapter_02:p0052",
+          "certainty": "explicit"
+        },
+        {
+          "fact_id": "fact_69e524eaa0062672a449",
+          "category": "location",
+          "subject": "祖师殿前广场",
+          "predicate": "位于祖师殿前，青石铺到殿阶下，四角各立一根刻符纹石柱；晨光照符纹泛金；已聚外门灰袍与内门月白弟子数百人",
+          "value": "祖师殿前广场（青石铺地、四角石柱）",
+          "anchor": "chapter_02:p0054",
+          "certainty": "explicit"
+        },
+        {
+          "fact_id": "fact_7f0f458acd9205fa72e3",
+          "category": "event",
+          "subject": "长老",
+          "predicate": "在殿前台阶向广场宣布：魔教前队已入山界，三层护山大阵俱已开启；阵脚二十四处，缺一处阵就露一线",
+          "value": "宣布敌情与阵脚共二十四处",
+          "anchor": "chapter_02:p0056",
+          "certainty": "explicit"
+        },
+        {
+          "fact_id": "fact_acc1e580c1b516fba7ea",
+          "category": "event",
+          "subject": "长老",
+          "predicate": "下令内门弟子随各峰执事守阵眼，外门弟子听崔岩调派去各处阵脚搬石、填符、补缺",
+          "value": "分派内门守阵眼、外门随崔岩修阵脚",
+          "anchor": "chapter_02:p0056",
+          "certainty": "explicit"
+        },
+        {
+          "fact_id": "fact_7495aa65800472fc653d",
+          "category": "location",
+          "subject": "祖师殿",
+          "predicate": "殿门半开，殿内石像被香火熏黑、眉眼不清；殿前石阶下摆两只半人高铜炉，炉口无火",
+          "value": "祖师殿（石像熏黑、铜炉无火）",
+          "anchor": "chapter_02:p0057",
+          "certainty": "explicit"
+        },
+        {
+          "fact_id": "fact_41a6f17939a8d26e06bc",
+          "category": "character_state",
+          "subject": "林夜",
+          "predicate": "站在人群偏后，入宗那年只在殿外磕过头，从未如此靠近祖师殿",
+          "value": "首次如此接近祖师殿",
+          "anchor": "chapter_02:p0057",
+          "certainty": "explicit"
+        },
+        {
+          "fact_id": "fact_259246f89ec44b351aab",
+          "category": "event",
+          "subject": "崔岩",
+          "predicate": "立于阶下最前，穿洗得发白的内门青袍、肩背剑，应声领命后分批点人分派",
+          "value": "领命分派外门弟子",
+          "anchor": "chapter_02:p0058",
+          "certainty": "explicit"
+        },
+        {
+          "fact_id": "fact_818a635476dc34d39afe",
+          "category": "event",
+          "subject": "崔岩",
+          "predicate": "指定外门甲、乙两班随他去东面第三处（阵脚）",
+          "value": "率外门甲乙两班赴东面第三处",
+          "anchor": "chapter_02:p0059",
+          "certainty": "explicit"
+        },
+        {
+          "fact_id": "fact_fc74f9b911a3e160d3c4",
+          "category": "relationship",
+          "subject": "苏婉",
+          "predicate": "松开林夜袖子往内门那边归队，走前叮嘱他跟着崔师兄、别乱走",
+          "value": "苏婉归内门队列，嘱林夜随崔岩",
+          "anchor": "chapter_02:p0060",
+          "certainty": "explicit"
+        },
+        {
+          "fact_id": "fact_4190c995cdbc0f67c24a",
+          "category": "character_state",
+          "subject": "林夜",
+          "predicate": "被人流推着前行，应声后右手贴上小臂，隔衣料仍觉断剑冰凉",
+          "value": "随人流行动，断剑隔衣仍冰",
+          "anchor": "chapter_02:p0061",
+          "certainty": "explicit"
+        }
+      ],
+      "context_hash": "d8511d2d3824b69dae033f46c40efedd832bb8c633b3672884ee942f1806f5cd",
+      "accepted_at": "2026-09-18T13:52:26.887384+00:00",
+      "state": {
+        "current_chapter": 2,
+        "current_location": "青云宗后山",
+        "characters": {
+          "林夜": {
+            "location": "青云宗后山",
+            "state": "冻醒，后脑闷胀作痛、腿软",
+            "power_level": "炼气三层",
+            "items": [
+              "残缺古剑"
+            ],
+            "relations": {
+              "苏婉": "初识"
+            }
+          },
+          "苏婉": {
+            "location": "青云宗后山",
+            "state": "正常",
+            "power_level": "筑基初期",
+            "items": [],
+            "relations": {
+              "林夜": "初识"
+            }
+          }
+        }
+      },
+      "base_state": {
+        "current_chapter": 1,
+        "current_location": "青云宗后山",
+        "characters": {
+          "林夜": {
+            "location": "青云宗后山",
+            "state": "刚醒来，轻微头痛",
+            "power_level": "炼气三层",
+            "items": [
+              "残缺古剑"
+            ],
+            "relations": {
+              "苏婉": "初识"
+            }
+          },
+          "苏婉": {
+            "location": "青云宗后山",
+            "state": "正常",
+            "power_level": "筑基初期",
+            "items": [],
+            "relations": {
+              "林夜": "初识"
+            }
+          }
+        }
+      },
+      "base_state_scope": "recorded_base:chapter_02",
+      "base_state_through_chapter": 1,
+      "base_dependency_hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "base_dependency_count": 0,
+      "state_through_chapter": 2,
+      "state_dependency_hash": "e95425e0263b252eda07be0ccb84a0108b44e86f9f5ba09dfd4452fdc9e0ef62",
+      "state_dependency_count": 1,
+      "record_hash": "f6dcfa129b9707c97cc86e1ec7e150ad28f593eadb33de36eee96a182df28483"
+    }
+  }
+}

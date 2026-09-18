@@ -1,10 +1,10 @@
 {
-  "current_chapter": 1,
+  "current_chapter": 2,
   "current_location": "青云宗后山",
   "characters": {
     "林夜": {
       "location": "青云宗后山",
-      "state": "刚醒来，轻微头痛",
+      "state": "冻醒，后脑闷胀作痛、腿软",
       "power_level": "炼气三层",
       "items": [
         "残缺古剑"

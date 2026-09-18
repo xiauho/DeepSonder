@@ -71,7 +71,7 @@ class DeferredAIReviewTests(TestCase):
         with patch('ui.ai_workflow_controller.QMessageBox') as dialog:
             dialog.return_value.clickedButton.return_value = None
             self.workflow._on_memory_done(AITaskToken('memory', 'chapter_01'), proposal)
-            dialog.return_value.setDetailedText.assert_called_once_with(proposal.conflict_evidence_text())
+            self.assertIn(proposal.conflict_evidence_text(), dialog.return_value.setDetailedText.call_args.args[0])
         output = self.workflow._emit_output.call_args.args[0]
         self.assertIn("拟写入：山门", output)
         self.assertIn("未到达山门", output)
@@ -129,3 +129,52 @@ class DeferredAIReviewTests(TestCase):
             self.workflow.review_pending_result()
         self.workflow.editor.replace_chapter_body.assert_not_called()
         self.ai.release_result.assert_called_once_with(self.token)
+
+    def test_partial_memory_requires_second_confirmation_and_shows_exclusions(self):
+        from test_memory_recovery import mixed_proposal
+        proposal, state = mixed_proposal()
+        project = Mock()
+        project.load_story_state.return_value = state
+        self.session._project = project
+        self.workflow._task_context_matches = Mock(return_value=True)
+        self.workflow.ai_result_coordinator.confirm_memory = Mock(return_value=SimpleNamespace(status="cancelled"))
+        self.workflow.ai_result_service.commit_memory_proposal = Mock()
+        self.workflow.ai_result_service.downstream_memory_chapters = Mock(return_value=())
+        buttons = {}
+        def add_button(text, role):
+            buttons[text] = object()
+            return buttons[text]
+        with patch('ui.ai_workflow_controller.QMessageBox') as box:
+            box.return_value.addButton.side_effect = add_button
+            box.return_value.clickedButton.side_effect = lambda: buttons['审阅可用部分']
+            self.workflow._on_memory_done(AITaskToken('memory', 'chapter_01'), proposal)
+        kwargs = self.workflow.ai_result_coordinator.confirm_memory.call_args.kwargs
+        self.assertEqual(kwargs['patch_count'], 1)
+        self.assertIn('未采用的更新', kwargs['details'])
+        self.assertIn('原摘要未采用', kwargs['details'])
+        self.assertNotIn('北港', kwargs['summary'])
+        self.workflow.ai_result_service.commit_memory_proposal.assert_not_called()
+
+    def test_retry_keeps_original_chapter_and_rechecks_sources(self):
+        from test_memory_recovery import mixed_proposal
+        from core.chapter_memory import canonical_hash
+        proposal, state = mixed_proposal()
+        project = Mock()
+        project.load_story_state.return_value = state
+        project.load_chapter.return_value = SimpleNamespace(content="林舟得到铜钱。林舟未到达北港。")
+        self.session._project = project
+        self.workflow.editor.current_chapter_id.return_value = 'chapter_01'
+        self.workflow.editor.is_dirty.return_value = False
+        self.workflow.update_memory = Mock()
+        self.workflow._retry_memory_proposal(project, proposal, True)
+        kwargs = self.workflow.update_memory.call_args.kwargs
+        self.assertTrue(kwargs['refresh_facts'])
+        self.assertIn('未到达', kwargs['retry_feedback'])
+        self.workflow.update_memory.reset_mock()
+        self.workflow.editor.current_chapter_id.return_value = 'chapter_02'
+        self.workflow._retry_memory_proposal(project, proposal, False)
+        self.workflow.update_memory.assert_not_called()
+        self.workflow.editor.current_chapter_id.return_value = 'chapter_01'
+        project.load_story_state.return_value = {**state, 'current_location':'别处'}
+        self.workflow._retry_memory_proposal(project, proposal, False)
+        self.workflow.update_memory.assert_not_called()

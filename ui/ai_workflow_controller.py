@@ -8,11 +8,13 @@ from pathlib import Path
 from typing import Callable
 
 from PySide6.QtCore import QObject, QTimer, Signal, Qt
-from PySide6.QtWidgets import QDialog, QMessageBox
+from PySide6.QtWidgets import QDialog, QDialogButtonBox, QMessageBox
 
 from core import ai_protocol
 from core.character_cards import create_character_cards, missing_character_cards
-from core.chapter_memory import ChapterMemoryProposal
+from core.chapter_memory import ChapterMemoryProposal, canonical_hash, partial_memory_proposal
+from core.accepted_memory import memory_base_state_for
+from core.text_chunking import chapter_content_hash
 from core.continuation import (
     ContinuationNotAvailable,
     ContinuationRunResult,
@@ -402,7 +404,8 @@ class AIWorkflowController(QObject):
             editor_text=chapter.raw,
         )
 
-    def update_memory(self, *, force_refresh: bool = False) -> None:
+    def update_memory(self, *, force_refresh: bool = False, refresh_facts: bool = False,
+                      retry_feedback: str = "") -> None:
         request = self._prepare_request()
         if request is None:
             return
@@ -418,7 +421,8 @@ class AIWorkflowController(QObject):
                 run_id, cancel_event, event
             )
             return workflow.update_memory(
-                project, chapter_id, cancel_event=cancel_event, force_refresh=force_refresh
+                project, chapter_id, cancel_event=cancel_event, force_refresh=force_refresh,
+                refresh_facts=refresh_facts, retry_feedback=retry_feedback
             )
 
         started = self._start(
@@ -1333,6 +1337,29 @@ class AIWorkflowController(QObject):
         self._emit_output("已应用一处最小正文修复，尚未自动保存。")
         self._emit_status("AI 修复已应用，请审阅后保存")
 
+    def _retry_memory_proposal(self, project, proposal, refresh_facts: bool) -> None:
+        # The task snapshot may already have been released by the deferred reviewer.
+        # Recheck the captured source instead of retrying whatever chapter is now open.
+        if (self.project_session.project is not project
+                or self.editor.current_chapter_id() != proposal.chapter_id
+                or self.editor.is_dirty()):
+            self._emit_status("项目或章节已变化，请重新运行记忆更新。")
+            return
+        try:
+            current_hash = chapter_content_hash(project.load_chapter(proposal.chapter_id).content)
+            state_hash = canonical_hash(project.load_story_state())
+            if (current_hash != proposal.chapter_hash
+                    or state_hash != (proposal.source_state_hash or proposal.base_state_hash)):
+                self._emit_status("正文或故事状态已变化，请重新运行记忆更新。")
+                return
+        except (ValueError, OSError):
+            self._emit_status("无法读取原任务来源，请重新运行记忆更新。")
+            return
+        feedback = ("上次校验失败如下。引用 ID 仅供定位旧错误；只能引用本次账本中的事实。\n"
+                    + proposal.conflict_evidence_text() + "\n" + proposal.preview_text())
+        self._emit_output("正在重新提取事实并生成提案。" if refresh_facts else "正在根据校验错误重新生成提案。")
+        self.update_memory(force_refresh=True, refresh_facts=refresh_facts, retry_feedback=feedback)
+
     def _on_memory_done(self, token, proposal: ChapterMemoryProposal) -> None:
         self._emit_output(
             f"✅ {proposal.completion_message}；"
@@ -1344,38 +1371,65 @@ class AIWorkflowController(QObject):
         if not chapter_id or project is None:
             self._emit_output("记忆提案已取消，未修改项目数据。")
             return
+        excluded_details = ""
         if proposal.has_blockers:
+            partial = None
+            if len(proposal.patches) > 1 and self._task_context_matches(token):
+                try:
+                    current = project.load_story_state()
+                    base, _ = memory_base_state_for(project, chapter_id, current) if proposal.base_state_scope else (current, "")
+                    partial = partial_memory_proposal(proposal, base)
+                except (ValueError, OSError):
+                    partial = None
             details = proposal.preview_text()
             box = QMessageBox(self.parent)
             box.setIcon(QMessageBox.Icon.Warning)
             box.setWindowTitle("记忆提案存在阻断冲突")
             box.setText("以下更新未通过证据校验，本次未写入。")
-            box.setInformativeText(details)
-            box.setDetailedText(proposal.conflict_evidence_text())
+            box.setInformativeText(
+                f"{len(proposal.patches)} 条更新中存在阻断，请展开详情查看证据。\n"
+                "定向重试：根据校验错误重新生成。\n"
+                "重提事实：重新读取正文并生成提案。"
+                + ("\n审阅可用部分：排除关联失败项后，另行确认写入。" if partial is not None else "")
+            )
+            box.setDetailedText(details + "\n\n引用事实与正文锚点：\n" + proposal.conflict_evidence_text())
             retry_button = box.addButton(
-                "重新生成提案",
+                "定向重试",
                 QMessageBox.ButtonRole.ActionRole,
             )
+            refresh_button = box.addButton("重提事实", QMessageBox.ButtonRole.ActionRole)
+            partial_button = (box.addButton("审阅可用部分", QMessageBox.ButtonRole.ActionRole)
+                              if partial is not None else None)
             box.addButton("关闭", QMessageBox.ButtonRole.RejectRole)
             box.setDefaultButton(retry_button)
+            # Stacked actions remain readable on narrow/high-DPI desktop screens.
+            button_box = box.findChild(QDialogButtonBox)
+            if button_box is not None:
+                button_box.setOrientation(Qt.Orientation.Vertical)
             box.exec()
             self._emit_output(
                 "记忆提案存在阻断冲突，故事状态未写入。\n"
                 + details + "\n\n引用事实与正文锚点：\n" + proposal.conflict_evidence_text()
             )
             self._emit_status("记忆更新被冲突检测阻止")
-            if box.clickedButton() is retry_button:
-                self._emit_output("正在跳过旧提案缓存并重新生成记忆提案。")
-                QTimer.singleShot(
-                    0,
-                    lambda: self.update_memory(force_refresh=True),
-                )
-            return
+            clicked = box.clickedButton()
+            if clicked is retry_button or clicked is refresh_button:
+                refresh = clicked is refresh_button
+                QTimer.singleShot(0, lambda: self._retry_memory_proposal(project, proposal, refresh))
+                return
+            if partial_button is None or clicked is not partial_button:
+                return
+            retained = {p.op_id for p in partial.patches}
+            excluded = [p for p in proposal.patches if p.op_id not in retained]
+            excluded_details = "\n\n未采用的更新（保留旧状态）：\n" + "\n".join(
+                f"- {p.subject or '全局'} / {p.field or p.kind} → {p.value}" for p in excluded
+            ) + "\n原摘要未采用；以下摘要仅覆盖保留的事件。"
+            proposal = partial
         downstream = self.ai_result_service.downstream_memory_chapters(
             project,
             chapter_id,
         )
-        preview_details = proposal.preview_text()
+        preview_details = proposal.preview_text() + excluded_details
         if downstream:
             preview_details += (
                 "\n\n采用影响：以下后续章节记忆及摘要将被标记失效并移除，"

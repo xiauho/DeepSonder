@@ -172,6 +172,8 @@ class AIWorkflowService:
         project: NovelProject,
         chapter_id: str,
         cancel_event: threading.Event | None = None,
+        *,
+        force_refresh: bool = False,
     ) -> ChapterFactLedger:
         """Build the new validated fact layer without changing project memory."""
         cache = FactLedgerCache(project, self.fact_cache_root)
@@ -185,6 +187,7 @@ class AIWorkflowService:
             overlap_tokens=self.chunk_overlap_tokens,
             estimator=estimator,
             cache=cache,
+            force_refresh=force_refresh,
             cancel_event=cancel_event,
             progress_callback=self.progress_callback,
         )
@@ -196,12 +199,15 @@ class AIWorkflowService:
         cancel_event: threading.Event | None = None,
         *,
         force_refresh: bool = False,
+        refresh_facts: bool = False,
+        retry_feedback: str = "",
     ) -> ChapterMemoryProposal:
         """Build an evidence-bound summary and locally applied memory patch."""
         ledger = self.build_chapter_fact_ledger(
             project,
             chapter_id,
             cancel_event=cancel_event,
+            force_refresh=refresh_facts,
         )
         if cancel_event is not None and cancel_event.is_set():
             raise AITaskCancelled()
@@ -235,6 +241,8 @@ class AIWorkflowService:
             cancel_event=cancel_event,
             base_state_scope=base_state_scope,
             source_state_hash=canonical_hash(source_state),
-            force_refresh=force_refresh,
+            force_refresh=force_refresh or refresh_facts,
+            refresh_reduction=refresh_facts,
+            retry_feedback=retry_feedback,
             progress_callback=self.progress_callback,
         )
