@@ -7,9 +7,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-from PySide6.QtCore import QCoreApplication, Qt, QTimer
+from PySide6.QtCore import QCoreApplication, QEvent, Qt, QTimer
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QDialog
+from shiboken6 import isValid
 
 from core.config import DEFAULT_CONFIG
 from core.project import NovelProject
@@ -49,13 +50,26 @@ class QuickAccessTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
         self.window = MainWindow(config={**DEFAULT_CONFIG, "auto_save": False})
         self.window.project_lifecycle_controller.persist_config = lambda _config: None
-        self.addCleanup(self.window.close)
+        self.addCleanup(self.dispose_window)
         self.window.project_session.set_project(self.project)
         self.window.left_panel.select_path(self.chapter)
         self.window.resize(1100, 720)
         self.window.show()
         self.events()
         self.controller = self.window.quick_access_controller
+
+    def dispose_window(self):
+        # close() only hides QMainWindow. Without deferred destruction, every
+        # test retains another widget tree and subsequent global style updates
+        # become progressively slower until the CI module timeout is reached.
+        # Drain queued layout/scroll restoration while their widgets are alive.
+        self.events()
+        self.window.close()
+        self.events()
+        self.window.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        self.app.processEvents()
+        self.assertFalse(isValid(self.window), "Test window survived cleanup")
 
     def events(self):
         for _ in range(3):
