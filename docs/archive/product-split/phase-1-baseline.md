@@ -1,5 +1,7 @@
 # DeepSonder product split: phase 1 baseline
 
+> 历史档案：保留当时的品牌、版本、路径与规划。本文不是当前操作指南；其中已删除的工具或旧升级步骤不适用于当前系列。当前说明见 [README](../../../README.md)，归档索引见 [历史文档](../README.md)。
+
 Captured on 2026-09-15 at commit
 `c132d9f67b98cc6c2b872ddd0ffef1a81f1562a9` before either product tree was
 removed or copied.
@@ -28,9 +30,9 @@ the Electron installer and ZIP were last written on 2026-09-14, while the
 unpacked Electron executable was regenerated on 2026-09-15. Their manifests do
 not bind a source commit, so the values are optimization baselines only.
 
-Run `scripts/measure_product_split_baseline.ps1` after future clean builds to
-produce the same measurements and SHA-256 values. Generated reports belong
-under the ignored `build/` directory.
+The one-time cross-series measurement script was retired on 2026-09-18.
+These measurements remain historical records; current builds use
+`scripts/build_windows.ps1` and produce independent PySide6 release artifacts.
 
 ## Frozen legacy-import fixture
 

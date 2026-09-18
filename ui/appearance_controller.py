@@ -20,7 +20,6 @@ class AppearanceController(QObject):
         left_panel,
         settings_page,
         theme_button,
-        action_icon_buttons: dict,
         ai_creation_button=None,
         parent=None,
     ) -> None:
@@ -31,7 +30,6 @@ class AppearanceController(QObject):
         self.settings_page = settings_page
         self.theme_button = theme_button
         self.ai_creation_button = ai_creation_button
-        self.action_icon_buttons = action_icon_buttons
         self.parent = parent
         self.config: dict = {}
 
@@ -52,9 +50,6 @@ class AppearanceController(QObject):
         palette = colors_for(self.config)
         muted = palette["muted_text_color"]
         refresh_button_icons(self.root, muted)
-        for button in self.action_icon_buttons.values():
-            color = palette["primary_text_color"] if button.objectName() == "accentButton" else muted
-            button.set_icon_color(color)
         theme_icon = "dark_mode" if self.config.get("theme") == "light" else "light_mode"
         set_button_icon(self.theme_button, theme_icon, muted, 17)
         if self.ai_creation_button is not None:

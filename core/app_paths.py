@@ -52,10 +52,5 @@ def app_cache_dir() -> Path:
     )
 
 
-def update_cache_dir() -> Path:
-    """Return the isolated legacy-helper cache; the current UI never auto-updates."""
-    return app_cache_dir() / "retired-updater"
-
-
 def _home() -> Path:
     return Path.home()

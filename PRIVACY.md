@@ -1,6 +1,6 @@
-# DeepSonder-PySide6 privacy notice
+# DeepSonder privacy notice
 
-DeepSonder-PySide6 is a local desktop application. It does not operate a DeepSonder cloud account, analytics service, telemetry endpoint, or automatic update service.
+This notice covers the **DeepSonder-PySide6** desktop series, displayed as **DeepSonder**. DeepSonder-PySide6 is a local desktop application. It does not operate a DeepSonder cloud account, analytics service, telemetry endpoint, or automatic update service.
 
 ## Local data
 
@@ -21,3 +21,5 @@ Diagnostic context reports shown by the application contain local paths, chapter
 The PySide6 package contains no Electron runtime, Node.js dependency, Sidecar service or old automatic updater. Release manifests are build-audit records for this series only and are not consumed by DeepSonder-Electron.
 
 Never commit `.env`, API keys, credentials, private projects, generated output, local profiles or task files to source control.
+
+Current release instructions are in [PACKAGING.md](PACKAGING.md). [Historical notices and release notes](docs/archive/README.md) describe earlier versions and do not define the current data flow.

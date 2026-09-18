@@ -16,8 +16,6 @@ from application.document_v2_service import DocumentV2Service
 from application.manuscript_import_service import ManuscriptImportService
 from application.project_v2_service import ProjectV2Service
 from application.reconstruction_service import ReconstructionService
-from sidecar.application import SidecarApplication
-from sidecar.protocol import RequestEnvelope
 
 
 def _wait_for(service: AITaskService, task_id: str, status: str, timeout: float = 2.0):
@@ -221,41 +219,6 @@ class AIV2TaskTests(unittest.TestCase):
                 '"summary":"摘要","facts":[],"open_threads":[]}',
                 "chapter_0001",
             )
-
-    def test_sidecar_routes_v2_ai_apply_to_manuscript_service(self) -> None:
-        def execute(*_args):
-            return ({
-                "type": "writing", "mode": "append", "text": "RPC 续写。", "charCount": 6,
-            }, None)
-
-        with tempfile.TemporaryDirectory() as tmp:
-            project = self._project(Path(tmp))
-            tasks, documents, reconstruction = self._service(execute)
-            app = SidecarApplication(
-                ai_task_service=tasks,
-                document_v2_service=documents,
-                reconstruction_service=reconstruction,
-            )
-            request = lambda method, params=None: RequestEnvelope("v2-ai", method, params or {})
-            try:
-                app.dispatch(request("project.openV2", {"path": str(project.root)}))
-                opened = app.dispatch(request(
-                    "manuscript.open", {"chapterId": "chapter_0001"}
-                )).result["document"]
-                task = app.dispatch(request("ai.start", {
-                    "kind": "continuation",
-                    "chapterId": "chapter_0001",
-                    "sourceRevision": opened["revision"],
-                    "noticeAccepted": True,
-                })).result["task"]
-                _wait_for(tasks, task["taskId"], "succeeded")
-                applied = app.dispatch(request(
-                    "ai.applyWritingResult", {"taskId": task["taskId"]}
-                ))
-                self.assertEqual(applied.events[0].name, "manuscript.changed")
-                self.assertIn("RPC 续写。", applied.result["document"]["content"])
-            finally:
-                app.shutdown()
 
     def test_production_v2_executor_covers_all_review_result_types(self) -> None:
         class FakeDSHClient:

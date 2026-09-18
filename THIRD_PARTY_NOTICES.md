@@ -1,6 +1,6 @@
 # Third-party notices
 
-Novalist uses the following third-party components. The application
+DeepSonder-PySide6 uses the following third-party components. The application
 code remains separately copyrightable and is not made subject to the GPL solely
 by using the LGPL option offered by Qt for Python.
 
@@ -29,25 +29,16 @@ The packaged license texts are available under `licenses/third-party/`:
 - Official project: <https://github.com/deepseek-ai/deepseek-harness>
 
 DeepSeek Harness is not bundled with or redistributed by this repository.
-Novalist can invoke a separately installed `dsh` command when the user enables
+DeepSonder-PySide6 can invoke a separately installed `dsh` command when the user enables
 AI-assisted features.
 
-## Electron and web frontend runtime
+## Historical frontend notices
 
-Future Electron distributions bundle Electron 44, React/React DOM 19,
-Cytoscape.js 3, CodeMirror 6, and their locked transitive dependencies.
-Electron, React, Cytoscape.js, and CodeMirror are available under the MIT
-License; transitive packages retain their own terms.
-
-- Electron: <https://github.com/electron/electron>
-- React: <https://github.com/facebook/react>
-- Cytoscape.js: <https://github.com/cytoscape/cytoscape.js>
-- CodeMirror: <https://github.com/codemirror>
-
-Electron packages include `LICENSE.electron.txt` and the Chromium notice bundle
-`LICENSES.chromium.html` at their root. Copyright notices for the directly
-bundled MIT frontend libraries are also packaged as
-`licenses/third-party/JAVASCRIPT-MIT-NOTICES.txt`.
+The current PySide6 package does not include the retired Electron frontend.
+The existing `licenses/third-party/JAVASCRIPT-MIT-NOTICES.txt` is retained as a
+historical attribution record; it does not describe a current JavaScript runtime
+dependency. Original third-party license texts and copyright notices remain
+unchanged. Earlier frontend release details are in the [archive](docs/archive/README.md).
 
 ## Bundled Stitch typography assets
 

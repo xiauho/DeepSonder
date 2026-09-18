@@ -1,4 +1,4 @@
-# Security policy
+# DeepSonder-PySide6 security policy
 
 ## Reporting a vulnerability
 
@@ -12,6 +12,15 @@ safe mitigation you have identified.
 
 ## Supported version
 
-Security fixes are applied to the latest revision on the default branch. Users
+This policy covers the current DeepSonder-PySide6 series. Report the series,
+[VERSION](VERSION) value and source revision when available. Historical
+Novalist tags and archived release notes do not indicate current support or an
+automatic upgrade path.
+
+Security fixes target the current series maintained in this repository. Users
 should also keep Python, PySide6 and DeepSeek Harness updated after checking
 compatibility with their environment.
+
+Use [current packaging instructions](PACKAGING.md) for builds and installation.
+Preserve legacy import boundaries and user-data protections when addressing a
+vulnerability. The [archive](docs/archive/README.md) is for historical reference.

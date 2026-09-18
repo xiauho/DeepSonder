@@ -62,7 +62,7 @@ from ui.document_controller import DocumentController
 from ui.quick_access_controller import QuickAccessController
 from ui.export_controller import ExportController
 from ui.editor import Editor
-from ui.icons import IconTextButton, set_button_icon
+from ui.icons import set_button_icon
 from ui.inspector import Inspector
 from ui.left_panel import LeftPanel
 from ui.memory_page import StoryMemoryPage
@@ -95,32 +95,11 @@ def fallback_chapter_after_delete(
 class MainWindow(QMainWindow):
     ROUTES = ("dashboard", "writing", "canon", "memory", "reports", "export", "settings")
     DELETE_CHAPTER_SHORTCUT = "Ctrl+Shift+Delete"
-    ACTION_ICONS = {
-        "new_chapter": "add",
-        "delete_chapter": "delete",
-        "open_project": "folder_open",
-        "save": "save",
-        "export": "ios_share",
-        "focus": "center_focus_strong",
-        "check": "fact_check",
-        "memory": "psychology",
-    }
-    ACTION_BUTTON_LABELS = {
-        "new_chapter": "新建章节",
-        "open_project": "打开项目",
-        "save": "保存",
-        "export": "导出",
-        "focus": "专注模式",
-        "check": "一致性检查",
-        "memory": "更新故事记忆",
-    }
-
     def __init__(self, parent=None, config: dict | None = None, ui_state_path=None):
         super().__init__(parent)
         self.project_session = ProjectSession(self)
         self.ai_controller = AIController(self)
         self.config = dict(config) if config is not None else load_config()
-        self._action_icon_buttons: dict[str, IconTextButton] = {}
         self.project_setup_dialog: ProjectSetupDialog | None = None
         self.legacy_import_service = LegacyProjectImportService()
         self.ai_engine_controller = AIEngineController(
@@ -202,7 +181,6 @@ class MainWindow(QMainWindow):
             left_panel=self.left_panel,
             settings_page=self.settings_page,
             theme_button=self.theme_button,
-            action_icon_buttons=self._action_icon_buttons,
             ai_creation_button=self.ai_creation_button,
             parent=self,
         )
@@ -525,25 +503,6 @@ class MainWindow(QMainWindow):
         self.outer_splitter.setSizes([720, 170])
         page_layout.addWidget(self.outer_splitter, 1)
         return page
-
-    def _action_button(self, key: str) -> IconTextButton:
-        text = self.ACTION_BUTTON_LABELS.get(key, self.actions[key].text())
-        icon_name = self.ACTION_ICONS.get(key)
-        button = IconTextButton(icon_name, text, centered=True) if icon_name else IconTextButton("circle", text, centered=True)
-        if not icon_name:
-            button.findChild(QLabel, "buttonIcon").hide()
-        action = self.actions[key]
-        button.setToolTip(action.text())
-        button.setEnabled(action.isEnabled())
-        button.clicked.connect(action.trigger)
-        action.changed.connect(lambda item=action, target=button: self._sync_action_button(item, target))
-        self._action_icon_buttons[key] = button
-        return button
-
-    @staticmethod
-    def _sync_action_button(action: QAction, button: IconTextButton) -> None:
-        button.setEnabled(action.isEnabled())
-        button.setToolTip(action.text())
 
     def _sync_panel_buttons(self) -> None:
         controller = self.window_state_controller
@@ -1726,207 +1685,6 @@ class MainWindow(QMainWindow):
             "当前为独立测试系列，不自动安装旧版更新包。",
         )
 
-    def _on_update_check_started(self, manual: bool) -> None:
-        self.actions["check_updates"].setEnabled(False)
-        if manual:
-            self.status_message.setText("正在检查 Novalist 更新…")
-
-    def _on_update_check_result(
-        self,
-        result: UpdateCheckResult,
-        manual: bool,
-    ) -> None:
-        if self.update_controller.should_present(result, manual=manual):
-            if self.update_dialog is not None:
-                self.update_dialog.show()
-                self.update_dialog.raise_()
-                self.update_dialog.activateWindow()
-                return
-            if result.latest is None:
-                return
-            dialog = UpdateDialog(result, self)
-            self.update_dialog = dialog
-            dialog.finished.connect(
-                lambda choice,
-                release=result.latest,
-                current=result.current_version: self._handle_update_choice(
-                    choice, release, current
-                )
-            )
-            dialog.finished.connect(
-                lambda _choice, target=dialog: self._clear_update_dialog(target)
-            )
-            dialog.open()
-            self.status_message.setText(f"发现新版本 {result.latest.tag_name}")
-            return
-        if manual:
-            notice_title, notice_message = no_update_notice(result)
-            QMessageBox.information(
-                self,
-                notice_title,
-                notice_message,
-            )
-            self.status_message.setText("更新检查完成")
-
-    def _handle_update_choice(
-        self,
-        choice: int,
-        release: UpdateInfo,
-        current_version: AppVersion,
-    ) -> None:
-        if choice == UpdateDialog.OPEN_RELEASE:
-            QDesktopServices.openUrl(QUrl(release.release_url))
-        elif choice == UpdateDialog.SKIP_VERSION:
-            self.update_controller.skip_version(release.tag_name)
-            self.status_message.setText(f"已忽略 {release.tag_name}")
-        elif choice == UpdateDialog.DOWNLOAD_UPDATE:
-            if not self.update_download_controller.download(release, current_version):
-                self.status_message.setText("更新下载已在进行中")
-
-    def _on_update_download_started(self, release: UpdateInfo) -> None:
-        dialog = QProgressDialog("正在准备安全下载…", "取消下载", 0, 1000, self)
-        dialog.setWindowTitle(f"下载 {release.tag_name}")
-        dialog.setWindowModality(Qt.WindowModality.WindowModal)
-        dialog.setMinimumDuration(0)
-        dialog.setAutoClose(False)
-        dialog.setAutoReset(False)
-        dialog.canceled.connect(self.update_download_controller.cancel)
-        dialog.show()
-        self.update_download_progress = dialog
-        self.actions["check_updates"].setEnabled(False)
-        self.status_message.setText(f"正在安全下载 {release.tag_name}…")
-
-    def _on_update_download_progress(self, downloaded: int, total: int) -> None:
-        dialog = self.update_download_progress
-        if dialog is None:
-            return
-        ratio = min(1000, int(downloaded * 1000 / total)) if total > 0 else 0
-        dialog.setValue(ratio)
-        dialog.setLabelText(
-            f"正在下载并校验… {downloaded / 1048576:.1f} / "
-            f"{total / 1048576:.1f} MiB"
-        )
-
-    def _on_update_download_succeeded(self, result: VerifiedUpdate) -> None:
-        self._close_update_download_progress()
-        unavailable = automatic_install_unavailable_reason()
-        message = QMessageBox(self)
-        message.setIcon(QMessageBox.Icon.Information)
-        message.setWindowTitle("更新包已安全下载")
-        message.setText(
-            f"{result.release.tag_name} 已通过大小、SHA-256 和 ZIP 安全检查。"
-        )
-        details = f"缓存位置：\n{result.archive_path}"
-        if unavailable:
-            details += f"\n\n{unavailable}"
-        else:
-            details += (
-                "\n\n可立即退出 Novalist，由独立更新器备份并替换受管程序文件；"
-                "新版启动自检失败时会自动恢复当前版本。"
-            )
-        message.setInformativeText(details)
-        message.addButton("稍后", QMessageBox.ButtonRole.RejectRole)
-        open_folder = message.addButton(
-            "打开缓存目录",
-            QMessageBox.ButtonRole.ActionRole,
-        )
-        install_now = None
-        if not unavailable:
-            install_now = message.addButton(
-                "立即重启并安装",
-                QMessageBox.ButtonRole.AcceptRole,
-            )
-            message.setDefaultButton(install_now)
-        message.exec()
-        clicked = message.clickedButton()
-        if clicked is open_folder:
-            QDesktopServices.openUrl(
-                QUrl.fromLocalFile(str(result.archive_path.parent))
-            )
-        elif install_now is not None and clicked is install_now:
-            self._pending_update_install = result
-            self.status_message.setText(
-                f"{result.release.tag_name} 已验证，正在准备自动安装…"
-            )
-            return
-        self.status_message.setText(f"{result.release.tag_name} 已下载并验证")
-
-    def _on_update_download_failed(self, message: str) -> None:
-        self._close_update_download_progress()
-        QMessageBox.warning(self, "更新下载失败", str(message))
-        self.status_message.setText("更新下载或安全校验失败")
-
-    def _on_update_download_cancelled(self) -> None:
-        self._close_update_download_progress()
-        self.status_message.setText("更新下载已取消")
-
-    def _on_update_download_finished(self) -> None:
-        self.actions["check_updates"].setEnabled(True)
-        if self._pending_update_install is not None:
-            QTimer.singleShot(0, self._launch_pending_update_install)
-
-    def _launch_pending_update_install(self) -> None:
-        result = self._pending_update_install
-        self._pending_update_install = None
-        if result is None:
-            return
-        if self.ai_controller.is_running():
-            QMessageBox.warning(
-                self,
-                "暂时无法安装更新",
-                "AI 任务仍在进行，请等待任务完成后重新检查更新并安装。",
-            )
-            return
-        if self.editor.is_dirty() and not self.save_current_file(notify=False):
-            QMessageBox.warning(
-                self,
-                "暂时无法安装更新",
-                "当前文档未能安全保存，已取消自动安装。更新包仍保留在缓存中。",
-            )
-            return
-        try:
-            launch = launch_verified_update_install(
-                result,
-                load_current_version(),
-            )
-        except (UpdateInstallLaunchError, OSError, ValueError) as exc:
-            QMessageBox.warning(self, "无法启动自动安装", str(exc))
-            QDesktopServices.openUrl(
-                QUrl.fromLocalFile(str(result.archive_path.parent))
-            )
-            self.status_message.setText("自动安装未启动，可改用手动安装")
-            return
-        self.status_message.setText(f"正在退出并安装 v{launch.target_version}…")
-        self.ai_engine_controller.cleanup()
-        app = QApplication.instance()
-        if app is not None:
-            app.quit()
-
-    def _close_update_download_progress(self) -> None:
-        dialog = self.update_download_progress
-        self.update_download_progress = None
-        if dialog is not None:
-            dialog.close()
-            dialog.deleteLater()
-
-    def _clear_update_dialog(self, dialog: UpdateDialog) -> None:
-        if self.update_dialog is dialog:
-            self.update_dialog = None
-        dialog.deleteLater()
-
-    def _on_update_check_failed(self, message: str, manual: bool) -> None:
-        if manual:
-            QMessageBox.warning(self, "检查更新失败", str(message))
-            self.status_message.setText("更新检查失败")
-
-    def _on_update_check_finished(self, _manual: bool) -> None:
-        self.actions["check_updates"].setEnabled(True)
-
-    def _on_update_config_changed(self, config: dict) -> None:
-        self.config = dict(config)
-        self.settings_controller.synchronize(self.config)
-        self.settings_page.synchronize_update_metadata(self.config)
-
     # ------------------------------------------------------------------
     # Auto-save and AI tasks
     # ------------------------------------------------------------------
@@ -2127,15 +1885,6 @@ class MainWindow(QMainWindow):
     def _update_window_title(self) -> None:
         suffix = f" — {self.project.name}" if self.project else ""
         self.setWindowTitle(f"DeepSonder-PySide6{suffix}")
-
-    @staticmethod
-    def _safe_name(value: str) -> str:
-        return ProjectLifecycleController.safe_name(value)
-
-    @staticmethod
-    def _safe_project_path(value: object) -> Path | None:
-        """Return a readable DeepSonder project path without leaking OS errors."""
-        return ProjectLifecycleController.safe_project_path(value)
 
     def _can_leave_ai_review(self) -> bool:
         if self.ai_workflow_controller.has_pending_result:

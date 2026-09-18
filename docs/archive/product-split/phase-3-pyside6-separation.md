@@ -1,5 +1,7 @@
 # Phase 3 — DeepSonder-PySide6 separation
 
+> 历史档案：保留当时的品牌、版本、路径与规划。本文不是当前操作指南；其中已删除的工具或旧升级步骤不适用于当前系列。当前说明见 [README](../../../README.md)，归档索引见 [历史文档](../README.md)。
+
 Status: implemented and under verification on 2026-09-15.
 
 ## Outcome
@@ -27,6 +29,6 @@ PySide6 tags use the `pyside6-v<version>` namespace and produce `DeepSonder-PySi
 - changed sources fail before a destination is created;
 - destinations inside the old source are rejected;
 - Python tests and packaged executable self-test pass;
-- both `docs/feature-parity.json` files report the import capability consistently.
+- this series maintains `docs/feature-status.json`; the parity file is a historical archive.
 
-The duplicated Electron renderer and its migration documentation were removed after explicit approval; their authoritative copies remain in `D:\GitHub-store\DeepSonder`. A small set of historical schema-v2/Sidecar and updater backend files remains for test-history safety after deletion review rejected that wider batch. Those files have no PySide6 entry, CI release job or package dependency and should be removed only in a separately reviewed cleanup.
+The duplicated Electron renderer and its migration documentation were removed after explicit approval; their authoritative copies remain in `D:\GitHub-store\DeepSonder`. On 2026-09-18, the retired updater, Sidecar transport, Sidecar-only preferences/content adapters, obsolete Electron build/split scripts and their dedicated tests were removed from this repository. The unused desktop callbacks and helper methods were also removed. Historical schema-v2 services, relationship graphs, structured extraction, reconstruction and evaluation remain unchanged pending a separate reuse review. Current project services, read-only import fixtures, user data and release history are retained.

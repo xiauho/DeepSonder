@@ -1,8 +1,10 @@
-# DeepSonder-PySide6
+# DeepSonder
 
 DeepSonder 的 PySide6 桌面系列，面向长篇小说项目的本地写作、故事记忆、人物识别、关系梳理、一致性检查与 AI 辅助创作。
 
-本仓库只以 `main.py` / `DeepSonder-PySide6.exe` 作为用户入口。PySide6 与 Electron 分别维护、测试和发布，不要求功能或更新同步。本系列能力状态记录在 `docs/feature-status.json`，原 `docs/feature-parity.json` 仅保留历史记录。
+本仓库只以 `main.py` / `DeepSonder-PySide6.exe` 作为用户入口。PySide6 与 Electron 分别维护、测试和发布，不要求功能或更新同步。本系列能力状态记录在 [功能清单](docs/feature-status.json)，原 [功能对照](docs/feature-parity.json) 仅保留历史记录。
+
+展示品牌使用 **DeepSonder**，程序与发布标识使用 **DeepSonder-PySide6**。当前版本见 [VERSION](VERSION)，变更记录见 [更新日志](CHANGELOG.md)。
 
 ## 开发运行
 
@@ -46,13 +48,21 @@ python main.py
 
 ```powershell
 python scripts/run_tests.py
+python -m pip install -r requirements-build.txt
 .\scripts\build_windows.ps1 -PythonExecutable python
 ```
 
-Windows 包为独立的 PyInstaller one-folder ZIP，不包含 Electron、Node.js、Sidecar 或旧自动更新器。详见 `PACKAGING.md`。
+Windows 包为独立的 PyInstaller one-folder ZIP，不包含 Electron、Node.js、Sidecar 或旧自动更新器。详见 [打包说明](PACKAGING.md)。
 
 ## 数据与网络边界
 
 项目与设置默认保存在本地。只有用户主动运行 AI 任务时，任务需要的正文和上下文才可能通过本机 `dsh` 发往其配置的服务。应用不提供旧版本自动更新或跨系列更新通道。
 
-许可证与第三方说明见 `LICENSE`、`PRIVACY.md`、`THIRD_PARTY_NOTICES.md` 和 `licenses/`。
+许可证与第三方说明见 [LICENSE](LICENSE)、[隐私说明](PRIVACY.md)、[第三方声明](THIRD_PARTY_NOTICES.md) 和 [许可证目录](licenses/README.md)。
+
+## 文档导航
+
+- [当前产品范围](PRD.md)
+- [正文创作与文风审校](docs/writing-style-review.md)
+- [贡献指南](CONTRIBUTING.md)与[安全政策](SECURITY.md)
+- [历史文档](docs/archive/README.md)：旧 Novalist 发布记录、产品拆分记录及早期规划，仅供追溯。

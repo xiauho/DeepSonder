@@ -1,3 +1,4 @@
+import subprocess
 import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -14,6 +15,19 @@ class PackagedResourceTests(TestCase):
             resource_path("VERSION"),
             Path(__file__).parents[1] / "VERSION",
         )
+
+    def test_entry_self_test_runs_outside_workspace_without_creating_profile(self) -> None:
+        entry = Path(__file__).resolve().parents[1] / "main.py"
+        with TemporaryDirectory() as tmp:
+            result = subprocess.run(
+                [sys.executable, "-B", str(entry), "--self-test"],
+                cwd=tmp,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(list(Path(tmp).iterdir()), [])
 
     def test_frozen_resources_resolve_from_meipass(self) -> None:
         with TemporaryDirectory() as tmp, patch.object(

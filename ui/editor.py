@@ -496,17 +496,6 @@ class Editor(QWidget):
         path = Path(self._current_path)
         return path.stem if self._current_category == "章节" else None
 
-    def append_text(self, text: str) -> None:
-        self.set_view_mode("source")
-        cursor = self.text_edit.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
-        if self.text_edit.toPlainText().strip():
-            cursor.insertText("\n\n" + text.strip() + "\n")
-        else:
-            cursor.insertText(text.strip() + "\n")
-        self.text_edit.setTextCursor(cursor)
-        self.text_edit.ensureCursorVisible()
-
     def append_chapter_body(self, text: str) -> None:
         """Append one continuation inside ``## 正文`` as one undoable edit."""
         self.set_view_mode("source")
@@ -577,27 +566,6 @@ class Editor(QWidget):
         self.text_edit.setTextCursor(cursor)
         self.text_edit.ensureCursorVisible()
         return True
-
-    def cursor_snapshot(self) -> tuple[int, int]:
-        cursor = self.text_edit.textCursor()
-        return cursor.position(), cursor.anchor()
-
-    def insert_text_at_snapshot(
-        self,
-        text: str,
-        position: int,
-        anchor: int | None = None,
-    ) -> None:
-        self.set_view_mode("source")
-        cursor = self.text_edit.textCursor()
-        document_length = self.text_edit.document().characterCount() - 1
-        position = max(0, min(int(position), document_length))
-        anchor = position if anchor is None else max(0, min(int(anchor), document_length))
-        cursor.setPosition(anchor)
-        cursor.setPosition(position, QTextCursor.MoveMode.KeepAnchor)
-        cursor.insertText(text.strip())
-        self.text_edit.setTextCursor(cursor)
-        self.text_edit.ensureCursorVisible()
 
     def show_find(self) -> None:
         self.set_view_mode("source")

@@ -1,5 +1,7 @@
 # Novalist v2.0.6-beta
 
+> 历史档案：保留当时的品牌、版本、路径与规划。本文不是当前操作指南；其中已删除的工具或旧升级步骤不适用于当前系列。当前说明见 [README](../../../README.md)，归档索引见 [历史文档](../README.md)。
+
 ## 本次版本
 
 - 首次提供 Windows x64 便携版软件包。解压 `Novalist-v2.0.6-beta-windows-x64.zip` 后即可运行 `Novalist.exe`，目标电脑无需预装 Python。
