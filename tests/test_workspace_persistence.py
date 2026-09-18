@@ -48,15 +48,17 @@ class WorkspacePersistenceTests(unittest.TestCase):
         for _ in range(3):
             self.app.processEvents()
 
-    def test_flat_timeline_restores_on_restart(self):
+    def test_timeline_page_restores_on_restart(self):
         window = self.window()
-        path = self.project.canon_dir / "timeline.md"
-        window.left_panel.select_path(path)
+        window.manage_timeline()
+        window.timeline_page.search.setText("密信")
         window.workspace_state.flush()
         window.close()
         reopened = self.window()
-        self.assertEqual(Path(reopened.editor.current_path()), path)
+        self.assertIs(reopened.content_stack.currentWidget(), reopened.timeline_page)
+        self.assertEqual(reopened.timeline_page.search.text(), "密信")
         self.assertIsNone(reopened.left_panel.tree.currentItem().parent())
+        self.assertEqual(reopened.left_panel.tree.currentItem().data(0,reopened.left_panel.FEATURE_ROLE), "timeline")
 
     def test_restart_restores_document_selection_scroll_and_panel_preferences(self):
         window = self.window()

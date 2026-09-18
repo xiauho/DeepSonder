@@ -22,6 +22,23 @@ from core.foreshadowing import ForeshadowingStore
 
 
 class ProjectDataStoreTests(TestCase):
+    def test_timeline_notes_start_empty_and_preserve_existing_content(self) -> None:
+        with TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            store = ProjectDataStore(project)
+            path = project.canon_dir / "timeline.md"
+            self.assertEqual(path.read_bytes(), b"")
+
+            path.unlink()
+            self.assertEqual(store.create_timeline(), path)
+            self.assertEqual(path.read_bytes(), b"")
+
+            notes = "主角出发前，先与旧友告别。\n"
+            path.write_text(notes, encoding="utf-8")
+            with self.assertRaises(FileExistsError):
+                store.create_timeline()
+            self.assertEqual(path.read_text(encoding="utf-8"), notes)
+
     def test_project_style_guide_is_seeded_but_inactive_until_authored(self) -> None:
         with TemporaryDirectory() as tmp:
             project = NovelProject.create(Path(tmp) / "proj", "测试")

@@ -43,6 +43,7 @@ SECTION_RULES: dict[str, tuple[int, str, int]] = {
     "plot_brief": (3000, "head", 0),
     "style": (2500, "head", 0),
     "content": (12000, "tail", 1),
+    "timeline_events": (8000, "whole", 0),
     "selected_foreshadowing": (5000, "head", 1),
     "core_power": (2500, "head", 1),
     "core_systems": (5000, "head", 1),
@@ -52,8 +53,7 @@ SECTION_RULES: dict[str, tuple[int, str, int]] = {
     # the chapters nearest to the current one carry the strongest continuity.
     "summaries": (6000, "tail", 3),
     "characters": (6000, "head", 4),
-    "future_plan": (2500, "head", 5),
-    "main_arc": (2500, "head", 5),
+    "story_plan": (6000, "whole", 5),
     "timeline": (4000, "head", 6),
     "world": (8000, "head", 7),
     "power": (6000, "head", 7),
@@ -90,13 +90,13 @@ class AIContext:
     related: RelatedCanon
     story_state: dict
     chapter_summaries: dict
-    main_arc: str
-    future_plan: str
+    story_plan: str
     style_guide: str
     history_view: AcceptedMemoryView | None = None
     history_query: str = ""
     history_remote_enabled: bool = True
     state_scope: str = ""
+    timeline_events: str = ""
 
     def fingerprint(self, editor_text: str | None = None) -> str:
         payload = {
@@ -120,13 +120,13 @@ class AIContext:
             },
             "story_state": self.story_state,
             "chapter_summaries": self.chapter_summaries,
-            "main_arc": self.main_arc,
-            "future_plan": self.future_plan,
+            "story_plan": self.story_plan,
             "style_guide": self.style_guide,
             "editor_text": editor_text,
             "accepted_memory": self.history_view.records if self.history_view else {},
             "history_remote_enabled": self.history_remote_enabled,
             "state_scope": self.state_scope,
+            "timeline_events": self.timeline_events,
         }
         canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
@@ -197,7 +197,14 @@ def build_task_context(
         character_query = ""
     elif character_scope == "relevance":
         character_query = ""
-    extra_relevance = str(relevance_query or "")
+    from .timeline_events import TimelineStore
+    timeline_events = (
+        TimelineStore(project).render(chapter_id)
+        if include_timeline and profile.task_kind in {
+            "default", "chapter_expansion", "continuation_current_chapter"
+        } else ""
+    )
+    extra_relevance = "\n".join(part for part in (str(relevance_query or ""), timeline_events) if part)
     if profile.relevance_scope == "planning":
         relevance_query = "\n".join(
             part for part in (chapter.title, chapter.outline, chapter.plot_brief) if part
@@ -236,12 +243,12 @@ def build_task_context(
         ),
         story_state=story_state,
         chapter_summaries=summaries,
-        main_arc=store.load_main_arc() if profile.include_main_arc else "",
-        future_plan=store.load_future_plan() if profile.include_future_plan else "",
+        story_plan=store.load_story_plan() if profile.include_story_plan else "",
         style_guide=store.load_style_guide(chapter_id) if profile.include_style else "",
         history_view=history_view,
         history_query=relevance_query,
         state_scope=state_scope,
+        timeline_events=timeline_events,
     )
 
 
@@ -290,6 +297,8 @@ def allocate_with_report(
         text = str(section.text).strip()
         if not text:
             continue
+        if section.key in {"timeline_events", "story_plan"} and len(text) > min(section.cap, remaining):
+            raise ValueError("所选事件或故事规划无法完整放入 AI 上下文，请精简素材或提高上下文预算。")
         capped_len = min(len(text), section.cap)
         if capped_len <= remaining:
             rendered = (
@@ -364,9 +373,9 @@ def gather_sections(
         ),
         "summaries": "\n\n".join(entry.rendered for entry in (*history.entries, *history.remote)) if history else "",
         "characters": related.characters,
-        "future_plan": context.future_plan,
-        "main_arc": context.main_arc,
+        "story_plan": context.story_plan,
         "timeline": related.timeline,
+        "timeline_events": context.timeline_events,
         "world": related.world,
         "power": related.power,
     }

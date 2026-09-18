@@ -20,6 +20,35 @@ class EditorPreviewTests(TestCase):
             raise SkipTest("已有 QCoreApplication，无法在同一进程升级为 QApplication")
         cls.app = instance or QApplication([])
 
+    def test_timeline_notes_title_and_empty_editor_survive_document_switches(self) -> None:
+        from application.document_service import DocumentService
+        from core.project import NovelProject
+
+        with TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            service = DocumentService()
+            path = project.canon_dir / "timeline.md"
+            chapter = project.chapters_dir / "chapter_01.md"
+            editor = Editor()
+            self.addCleanup(editor.close)
+            for _ in range(2):
+                editor.load_document(service.open_document(project, "章节", chapter))
+                self.assertIn("章节建议保留", editor.text_edit.placeholderText())
+                editor.load_document(service.open_document(project, "时间线", path))
+                self.assertEqual(editor.title_label.text(), "时间线笔记")
+                self.assertEqual(editor.text_edit.placeholderText(), "")
+                self.assertEqual(editor.text_edit.toPlainText(), "")
+                self.assertFalse(editor.is_dirty())
+                editor.set_view_mode("preview")
+                self.assertEqual(editor.preview_browser.toPlainText(), "")
+                editor.set_view_mode("source")
+            self.assertEqual(path.read_bytes(), b"")
+            editor.open_file("时间线", str(path))
+            self.assertEqual(editor.title_label.text(), "时间线笔记")
+            editor.load_document(service.open_document(project, "章节", chapter))
+            editor.clear_document()
+            self.assertEqual(editor.text_edit.placeholderText(), "")
+
     def test_preview_filter_only_removes_novalist_comments(self) -> None:
         source = (
             "<!-- novalist:character-card:v2 -->\n"

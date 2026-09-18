@@ -47,9 +47,9 @@ SECTION_LABELS = {
     "state": "故事状态",
     "summaries": "历史摘要",
     "characters": "相关角色",
-    "future_plan": "后续规划",
-    "main_arc": "主线大纲",
+    "story_plan": "故事规划",
     "timeline": "时间线",
+    "timeline_events": "本次事件素材",
     "world": "世界观",
     "power": "其他体系",
 }

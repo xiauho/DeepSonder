@@ -97,9 +97,9 @@ def build_expansion_prompt(
             "state",
             "summaries",
             "characters",
-            "future_plan",
-            "main_arc",
+            "story_plan",
             "timeline",
+            "timeline_events",
             "world",
             "power",
         ),
@@ -127,7 +127,7 @@ def build_expansion_prompt(
 请根据下方的章节规划和故事资料，将当前章节扩写成完整小说正文。
 
 扩写要求：
-1. 只使用章节规划中已经确定的剧情方向，不擅自引入重大支线。
+1. 章节规划与作者选定“本次展开”的计划事件共同确定剧情方向；两者冲突时遵守章节规划，不擅自引入重大支线。
 2. 将本章目标、核心冲突和章节钩子落实为连续的场景、行动、对话和结果。
 3. 保持人物身份、世界观规则、时间线和能力设定一致。
 4. 让本章结尾形成明确的章节钩子，但不要替后续章节提前解决核心悬念。
@@ -157,11 +157,10 @@ def build_expansion_prompt(
 【剧情简写】
 {_section(ctx, "plot_brief")}
 
-【主线大纲】
-{_section(ctx, "main_arc")}
+【故事规划（方向参考，不是已发生事实）】
+仅参考作者启用的全书方向。正文既成事实与本章规划优先；不得把未来走向写成已发生事实，不得为了实现整体结局而提前推进本章。规划尚未实现不构成一致性错误。
+{_section(ctx, "story_plan")}
 
-【后续剧情规划】
-{_section(ctx, "future_plan")}
 
 【相关章节摘要】
 {_section(ctx, "summaries")}
@@ -486,9 +485,9 @@ def build_write_prompt(
             "state",
             "summaries",
             "characters",
-            "future_plan",
-            "main_arc",
+            "story_plan",
             "timeline",
+            "timeline_events",
             "world",
             "core_power",
             "core_systems",
@@ -543,11 +542,10 @@ def build_write_prompt(
 【剧情简写】
 {_section(ctx, "plot_brief")}
 
-【主线大纲】
-{_section(ctx, "main_arc")}
+【故事规划（方向参考，不是已发生事实）】
+仅参考作者启用的全书方向。正文既成事实与本章规划优先；不得把未来走向写成已发生事实，不得为了实现整体结局而提前推进本章。规划尚未实现不构成一致性错误。
+{_section(ctx, "story_plan")}
 
-【后续剧情规划】
-{_section(ctx, "future_plan")}
 
 【相关章节摘要】
 {_section(ctx, "summaries")}
@@ -675,7 +673,7 @@ def build_check_prompt(
     sections = gather_sections(
         project,
         chapter_id,
-        ("outline", "plot_brief", "content", "state", "summaries", "characters", "main_arc", "timeline", "core_power", "core_systems", "world", "power"),
+        ("outline", "plot_brief", "content", "state", "summaries", "characters", "story_plan", "timeline", "core_power", "core_systems", "world", "power"),
         content_keep="head",
         context=context,
     )
@@ -717,8 +715,9 @@ repairability 只能使用：automatic、choice_required、manual。
 禁止使用 data 或其他未列出值作为 recommended_target；无法确定具体资料目标时使用 manual。
 只有 recommended_target 为 chapter，且 kind 为 hard_conflict 或 continuity_risk 时，repairability 才可以为 automatic。
 
-【主线大纲】
-{_section(ctx, "main_arc")}
+【故事规划（方向参考，不是已发生事实）】
+仅参考作者启用的全书方向。正文既成事实与本章规划优先；不得把未来走向写成已发生事实，不得为了实现整体结局而提前推进本章。规划尚未实现不构成一致性错误。
+{_section(ctx, "story_plan")}
 
 {_related_block(ctx) or "（暂无相关设定）"}
 
@@ -1095,6 +1094,8 @@ def _related_block(ctx: dict[str, str]) -> str:
         parts.append(
             f"【其他体系设定·低优先级背景】\n{ctx['power']}"
         )
+    if ctx.get("timeline_events"):
+        parts.append(f"【本次事件素材】\n{ctx['timeline_events']}")
     if ctx.get("timeline"):
         parts.append(f"【时间线摘要】\n{ctx['timeline']}")
     if ctx.get("characters"):

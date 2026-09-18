@@ -323,6 +323,16 @@ QFrame#findBar {
     border: 1px solid __BORDER__;
     border-radius: 10px;
 }
+QPlainTextEdit#storyPlanField {
+    background: __FIELD__;
+    color: __TEXT__;
+    border: 1px solid __BORDER__;
+    border-radius: 6px;
+    padding: 10px;
+    selection-background-color: __PRIMARY__;
+    selection-color: __ACCENT_TEXT__;
+}
+QPlainTextEdit#storyPlanField:focus { border-color: __ACCENT__; }
 QPlainTextEdit#writingEditor, QTextBrowser#markdownPreview {
     background: __FIELD__;
     border: 1px solid __BORDER__;

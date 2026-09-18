@@ -93,7 +93,7 @@ def fallback_chapter_after_delete(
 
 
 class MainWindow(QMainWindow):
-    ROUTES = ("dashboard", "writing", "canon", "memory", "reports", "export", "settings")
+    ROUTES = ("dashboard", "writing", "canon", "timeline", "memory", "reports", "export", "settings")
     DELETE_CHAPTER_SHORTCUT = "Ctrl+Shift+Delete"
     def __init__(self, parent=None, config: dict | None = None, ui_state_path=None):
         super().__init__(parent)
@@ -154,6 +154,8 @@ class MainWindow(QMainWindow):
                 "settings": self.settings_page,
             },
             writing_page=self.writing_page,
+            content_stack=self.content_stack,
+            timeline_page=self.timeline_page,
             action_bar=self.action_bar,
             app_header=self.app_header,
             menu_bar=self.menuBar(),
@@ -254,6 +256,7 @@ class MainWindow(QMainWindow):
 
         from ui.workspace_state_controller import WorkspaceStateController
         self.workspace_state = WorkspaceStateController(self, ui_state_path)
+        self.timeline_page.state_changed.connect(self.workspace_state.schedule)
         self.quick_access_controller = QuickAccessController(self)
         self.left_panel.locate_current_requested.connect(self._locate_current_document)
         self.editor.document_loaded.connect(lambda: self.left_panel.set_current_document(self.editor.current_path()))
@@ -278,13 +281,15 @@ class MainWindow(QMainWindow):
         route = self.story_navigation_controller.route_for_category(self.editor.current_category())
         if self.window_state_controller.current_route != route and not self._show_route(route):
             return
-        if self.editor.view_mode() == "preview":
+        if self.editor.is_story_plan():
+            self.editor.story_plan_form.focus_field()
+        elif self.editor.view_mode() == "preview":
             self.editor.preview_browser.setFocus()
         else:
             self.editor.text_edit.setFocus()
 
     def focus_directory(self) -> None:
-        route = "canon" if self.window_state_controller.current_route == "canon" else "writing"
+        route = self.window_state_controller.current_route if self._timeline_active() else "canon" if self.window_state_controller.current_route == "canon" else "writing"
         if not self._show_route(route):
             return
         if not self.window_state_controller.navigation_visible:
@@ -325,7 +330,8 @@ class MainWindow(QMainWindow):
         action("character_sync", "同步角色档案…", lambda: self.sync_character_card())
         action("new_world", "新建世界观条目", self.new_world_entry)
         action("new_power", "新建体系设定", self.new_power_entry)
-        action("new_timeline", "新建时间线", self.new_timeline)
+        action("new_timeline", "新建事件", self.new_timeline)
+        action("manage_timeline", "打开时间轴", self.manage_timeline)
         action("undo", "撤销", lambda: self.editor.undo(), "Ctrl+Z")
         action("redo", "重做", lambda: self.editor.redo(), "Ctrl+Y")
         action("find", "查找与替换", lambda: self.editor.show_find(), "Ctrl+F")
@@ -483,7 +489,12 @@ class MainWindow(QMainWindow):
         self.left_panel.project_menu.addAction(self.actions["trash"])
         self.inspector = Inspector()
         self.main_splitter.addWidget(self.left_panel)
-        self.main_splitter.addWidget(self.editor)
+        from ui.timeline_page import TimelinePage
+        self.timeline_page = TimelinePage()
+        self.content_stack = QStackedWidget()
+        self.content_stack.addWidget(self.editor)
+        self.content_stack.addWidget(self.timeline_page)
+        self.main_splitter.addWidget(self.content_stack)
         self.main_splitter.addWidget(self.inspector)
         self.main_splitter.setStretchFactor(0, 0)
         self.main_splitter.setStretchFactor(1, 1)
@@ -547,6 +558,7 @@ class MainWindow(QMainWindow):
         create_menu.addAction(self.actions["new_world"])
         create_menu.addAction(self.actions["new_power"])
         create_menu.addAction(self.actions["new_timeline"])
+        create_menu.addAction(self.actions["manage_timeline"])
         create_menu.addSeparator()
         create_menu.addAction(self.actions["expand"])
         create_menu.addAction(self.actions["continuation"])
@@ -596,6 +608,11 @@ class MainWindow(QMainWindow):
     def _connect_signals(self) -> None:
         self.primary_nav.quick_open_requested.connect(lambda: self.open_quick_access("documents"))
         self.primary_nav.route_requested.connect(self._show_route)
+        self.timeline_page.chapter_requested.connect(self._open_timeline_chapter)
+        self.timeline_page.notes_requested.connect(self._open_timeline_notes)
+        self.timeline_page.changed.connect(self._timeline_changed)
+        self.project_session.project_changed.connect(self.timeline_page.show_project)
+        self.project_session.data_change_detail.connect(lambda _project, _change: self.timeline_page.reload())
         self.primary_nav.new_project_requested.connect(self.new_project)
         self.primary_nav.trash_requested.connect(self.open_trash)
         self.dashboard_page.new_project_requested.connect(self.new_project)
@@ -606,10 +623,11 @@ class MainWindow(QMainWindow):
             self._open_memory_chapter
         )
         self.dashboard_page.new_chapter_requested.connect(self.new_chapter)
-        self.dashboard_page.outline_requested.connect(self._open_dashboard_main_arc)
+        self.dashboard_page.outline_requested.connect(self._open_dashboard_story_plan)
         self.dashboard_page.memory_requested.connect(lambda: self._show_route("memory"))
         self.dashboard_page.canon_requested.connect(lambda: self._show_route("canon"))
         self.left_panel.file_selected.connect(self._on_file_selected)
+        self.left_panel.timeline_requested.connect(self.manage_timeline)
         self.left_panel.style_requested.connect(self.actions["style_library"].trigger)
         self.actions["style_library"].changed.connect(
             lambda: self.left_panel.set_style_available(self.actions["style_library"].isEnabled())
@@ -651,11 +669,11 @@ class MainWindow(QMainWindow):
         )
         self.editor.exit_focus_button.clicked.connect(self._exit_focus_mode)
 
-    def _open_dashboard_main_arc(self) -> None:
+    def _open_dashboard_story_plan(self) -> None:
         project = self.project
         if project is None or not self._show_route("canon"):
             return
-        self.left_panel.select_path(project.outline_dir / "main_arc.md")
+        self.left_panel.select_path(project.outline_dir / "story_plan.json")
 
     # ------------------------------------------------------------------
     # Routing and shared shell
@@ -672,9 +690,13 @@ class MainWindow(QMainWindow):
             and not self._save_if_dirty()
         ):
             self.primary_nav.set_active(self.window_state_controller.current_route)
+            if route == "timeline" and self.editor.current_path():
+                self.left_panel.reveal_path(self.editor.current_path())
             return False
 
-        if route != "settings":
+        if route == "timeline":
+            self.timeline_page.show_project(self.project)
+        elif route != "settings":
             self.view_refresh_controller.refresh_route(route)
         else:
             self.settings_page.synchronize_config(self.config)
@@ -682,6 +704,13 @@ class MainWindow(QMainWindow):
         if route == "canon":
             self.story_navigation_controller.select_default_canon()
 
+        if route == "timeline":
+            self.left_panel.select_timeline()
+        self._refresh_document_actions()
+        self._refresh_ai_actions()
+        self._refresh_delete_action()
+        if hasattr(self, "workspace_state"):
+            self.workspace_state.capture()
         self._update_page_header(route)
         self._update_window_title()
         return True
@@ -690,6 +719,7 @@ class MainWindow(QMainWindow):
         labels = {
             "dashboard": ("项目", "项目概览与最近创作"),
             "writing": ("写作台", "章节正文、故事雷达与 AI 辅助"),
+            "timeline": ("故事时间轴", "按作者编排浏览故事事件"),
             "canon": ("故事资料", "集中维护会被正文和 AI 引用的故事事实"),
             "memory": ("故事记忆", "章节摘要、人物状态与长期线索"),
             "reports": ("检查报告", "集中查看设定一致性风险"),
@@ -828,13 +858,20 @@ class MainWindow(QMainWindow):
             return False
 
         self._show_route("dashboard")
+        timeline_state = self.workspace_state.timeline_state(project)
         restored = self.workspace_state.last_document(project)
         chapters = project.list_chapters()
         if restored is not None:
-            self.left_panel.select_path(restored)
+            if restored == project.canon_dir / "timeline.md":
+                self._on_file_selected("时间线", str(restored))
+            else:
+                self.left_panel.select_path(restored)
         elif chapters:
             self.left_panel.select_path(chapters[0])
             self._show_route("writing")
+        if timeline_state is not None:
+            self.manage_timeline()
+            self.timeline_page.restore_state(timeline_state)
         migration = self.project_session.last_migration_result
         if migration is not None and migration.migrated:
             backup = str(migration.backup_path or "")
@@ -910,6 +947,8 @@ class MainWindow(QMainWindow):
             self._show_project_setup(project)
 
     def save_current_file(self, notify: bool = True) -> bool:
+        if self._timeline_active() and notify:
+            return False
         if not self.editor.current_path():
             if notify:
                 QMessageBox.information(self, "保存", "请先打开一份可编辑的故事资料。")
@@ -1004,6 +1043,8 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def delete_current_chapter(self) -> None:
+        if self._timeline_active():
+            return
         category = self.editor.current_category()
         if category == "角色":
             current = self.editor.current_path()
@@ -1383,20 +1424,40 @@ class MainWindow(QMainWindow):
     def new_power_entry(self) -> None:
         self.new_canon_entry("power")
 
+    def manage_timeline(self) -> bool:
+        return self._show_route("timeline")
+
     def new_timeline(self) -> None:
-        if not self._require_project():
+        if self.manage_timeline():
+            self.timeline_page.new_event()
+
+    def _timeline_changed(self) -> None:
+        self.project_session.notify_data_changed([self.project.canon_dir / "timeline_events.json"], kind="timeline")
+
+    def _open_timeline_chapter(self, chapter_id: str) -> None:
+        if not self.project:
             return
-        try:
-            path = self.document_controller.create_timeline()
-        except FileExistsError:
-            QMessageBox.information(self, "时间线已存在", "当前项目已经有一份时间线。")
-            return
-        except (OSError, ValueError) as exc:
-            QMessageBox.warning(self, "创建失败", str(exc))
-            return
-        self._show_route("canon")
-        self.left_panel.select_path(path)
-        self.status_message.setText("已创建 · 时间线")
+        path = next((p for p in self.project.list_chapters() if p.stem == chapter_id), None)
+        if path is not None:
+            self._on_file_selected("章节", str(path))
+            if self.editor.current_path() == str(path):
+                self.left_panel.reveal_path(path)
+
+    def _open_timeline_notes(self) -> None:
+        if self.project:
+            path = self.project.canon_dir / "timeline.md"
+            if path.is_file():
+                self._on_file_selected("时间线", str(path))
+
+    def _timeline_active(self) -> bool:
+        return hasattr(self, "window_state_controller") and self.window_state_controller.current_route == "timeline"
+
+    def _refresh_document_actions(self) -> None:
+        for key in ("save", "undo", "redo", "find", "focus", "focus_editor", "locate_document", "inspector"):
+            if key in self.actions:
+                self.actions[key].setEnabled(not self._timeline_active() and not (
+                    self.editor.is_story_plan() and key in {"find", "inspector"}
+                ))
 
     def new_canon_entry(self, kind: str) -> None:
         if kind == "timeline":
@@ -1502,6 +1563,8 @@ class MainWindow(QMainWindow):
             return
         current = self.editor.current_path()
         if current and Path(current) == Path(path_str):
+            if self._timeline_active():
+                self._show_route(self.story_navigation_controller.route_for_category(category))
             return
         opened = self.document_controller.open_file(category, path_str)
         if not opened and self.document_controller.save_conflict_path is not None:
@@ -1513,6 +1576,7 @@ class MainWindow(QMainWindow):
                 self.story_navigation_controller.route_for_category(category)
             )
         self._refresh_delete_action()
+        self._refresh_document_actions()
         self._update_window_title()
 
     def _open_memory_chapter(self, chapter_id: str) -> None:
@@ -1580,7 +1644,9 @@ class MainWindow(QMainWindow):
     # Focus, panels and preferences
     # ------------------------------------------------------------------
     def toggle_focus_mode(self) -> None:
-        if self.window_state_controller.current_route not in {"writing", "canon"}:
+        if self._timeline_active():
+            return
+        if self.window_state_controller.current_route not in {"writing", "canon", "timeline"}:
             self._show_route("writing")
         self.window_state_controller.toggle_focus_mode()
 
@@ -1591,10 +1657,12 @@ class MainWindow(QMainWindow):
         self.window_state_controller.toggle_navigation_panel()
 
     def toggle_inspector(self) -> None:
+        if self._timeline_active():
+            return
         self.window_state_controller.toggle_inspector()
 
     def toggle_output(self) -> None:
-        if self.window_state_controller.current_route not in {"writing", "canon"}:
+        if self.window_state_controller.current_route not in {"writing", "canon", "timeline"}:
             if not self._show_route("writing"):
                 return
             self.window_state_controller.show_output()
@@ -1716,7 +1784,8 @@ class MainWindow(QMainWindow):
         if action is None:
             return
         enabled = (
-            self.project is not None
+            not self._timeline_active()
+            and self.project is not None
             and self.editor.current_category()
             in {"章节", "角色", "世界观", "体系设定", "时间线"}
             and self.editor.current_path() is not None
@@ -1748,7 +1817,7 @@ class MainWindow(QMainWindow):
         workflow = getattr(self, "ai_workflow_controller", None)
         pending = workflow is not None and workflow.has_pending_result
         running = self.ai_controller.is_running() or pending
-        chapter_open = self.project is not None and self.editor.current_chapter_id() is not None
+        chapter_open = not self._timeline_active() and self.project is not None and self.editor.current_chapter_id() is not None
         if "character_sync" in self.actions:
             self.actions["character_sync"].setEnabled(
                 self.project is not None

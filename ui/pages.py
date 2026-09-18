@@ -87,7 +87,7 @@ class DashboardPage(QWidget):
         self._recent_preview = QLabel("暂无章节正文。")
         self._recent_preview.setObjectName("dashboardPreview")
         self._recent_preview.setWordWrap(True)
-        self._main_arc_status = QLabel("待建立")
+        self._story_plan_status = QLabel("待建立")
         self._memory_status = QLabel("尚未同步")
         self._foreshadowing_status = QLabel("0 条")
         self._canon_status = QLabel("0 项")
@@ -220,7 +220,7 @@ class DashboardPage(QWidget):
         readiness_layout.addWidget(readiness_intro)
         self._readiness_buttons: list[QPushButton] = []
         for caption, value, slot in (
-            ("主线大纲", self._main_arc_status, self.outline_requested),
+            ("故事规划", self._story_plan_status, self.outline_requested),
             ("故事记忆", self._memory_status, self.memory_requested),
             ("未回收伏笔", self._foreshadowing_status, self.memory_requested),
             ("世界观与体系", self._canon_status, self.canon_requested),
@@ -295,7 +295,7 @@ class DashboardPage(QWidget):
             self._recent_title.setText("尚未选择章节")
             self._recent_meta.setText("打开项目后，可从最近编辑的章节继续。")
             self._recent_preview.setText("暂无章节正文。")
-            self._main_arc_status.setText("待建立")
+            self._story_plan_status.setText("待建立")
             self._memory_status.setText("尚未同步")
             self._foreshadowing_status.setText("0 条")
             self._canon_status.setText("0 项")
@@ -391,12 +391,13 @@ class DashboardPage(QWidget):
         open_foreshadowing_count: int,
         chapters: list,
     ) -> None:
+        from core.story_plan import FIELDS, STORY_PLAN_PATH, parse_plan
         try:
-            main_arc = store.load_main_arc()
-        except (OSError, UnicodeError):
-            main_arc = ""
-        has_main_arc = self._has_meaningful_markdown(main_arc)
-        self._main_arc_status.setText("已建立" if has_main_arc else "待完善")
+            plan = parse_plan((store.project.root / STORY_PLAN_PATH).read_text(encoding="utf-8"))
+            authored = any(plan[key].strip() for key, _, _ in FIELDS)
+            self._story_plan_status.setText("用于 AI" if authored and plan["enabled"] else "作者草稿" if authored else "可选填写")
+        except (OSError, ValueError):
+            self._story_plan_status.setText("无法读取")
         try:
             state = store.load_story_state()
         except (OSError, ValueError):
@@ -419,11 +420,7 @@ class DashboardPage(QWidget):
         memory_is_behind = bool(chapters) and (
             not isinstance(current_chapter, int) or current_chapter < latest_chapter
         )
-        if not has_main_arc:
-            self._set_next_step(
-                "outline", "先完善主线大纲，让后续章节和一致性检查有明确基准。", "完善主线"
-            )
-        elif memory_is_behind:
+        if memory_is_behind:
             self._set_next_step(
                 "memory", "故事记忆尚未覆盖最新章节，建议先同步关键状态。", "同步记忆"
             )

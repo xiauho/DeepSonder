@@ -10,7 +10,7 @@ class WindowStateController(QObject):
 
     panels_changed = Signal()
 
-    WRITING_ROUTES = frozenset(("writing", "canon"))
+    WRITING_ROUTES = frozenset(("writing", "canon", "timeline"))
 
     def __init__(
         self,
@@ -31,9 +31,13 @@ class WindowStateController(QObject):
         outer_splitter,
         focus_action,
         exit_focus_button,
+        content_stack=None,
+        timeline_page=None,
         parent=None,
     ) -> None:
         super().__init__(parent)
+        self.content_stack = content_stack
+        self.timeline_page = timeline_page
         self.primary_nav = primary_nav
         self.page_stack = page_stack
         self.pages = pages
@@ -74,12 +78,14 @@ class WindowStateController(QObject):
             self.exit_focus_mode()
         self._current_route = route
         if route in self.WRITING_ROUTES:
-            self.left_panel.set_scope("canon" if route == "canon" else "all")
+            self.left_panel.set_scope("canon" if route in {"canon", "timeline"} else "all")
             self.page_stack.setCurrentWidget(self.writing_page)
         else:
             self.page_stack.setCurrentWidget(self.pages[route])
+        if self.content_stack is not None:
+            self.content_stack.setCurrentWidget(self.timeline_page if route == "timeline" else self.editor)
         self._set_focus_chrome(True)
-        self.primary_nav.set_active(route)
+        self.primary_nav.set_active("canon" if route == "timeline" else route)
         QTimer.singleShot(0, self._restore_side_panel_sizes)
 
     def toggle_focus_mode(self) -> None:
@@ -91,7 +97,10 @@ class WindowStateController(QObject):
         self.editor.layout().setContentsMargins(margins, top, margins, bottom)
         self.focus_action.setText("退出专注模式" if self._focus_mode else "专注模式")
         if self._focus_mode:
-            self.editor.text_edit.setFocus()
+            if self.editor.is_story_plan():
+                self.editor.story_plan_form.focus_field()
+            else:
+                self.editor.text_edit.setFocus()
 
     def exit_focus_mode(self) -> None:
         if self._focus_mode:
@@ -139,7 +148,7 @@ class WindowStateController(QObject):
         self.status_bar.setVisible(visible)
         self._apply_action_bar_visibility(visible)
         self.left_panel.setVisible(visible and self.navigation_visible)
-        self.inspector.setVisible(visible and self.inspector_visible)
+        self.inspector.setVisible(visible and self.inspector_visible and self._current_route != "timeline" and not self.editor.is_story_plan())
         self.exit_focus_button.setVisible(not visible)
         self.output_container.setVisible(visible and self._output_visible)
         if visible:

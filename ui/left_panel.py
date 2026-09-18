@@ -42,6 +42,7 @@ class LeftPanel(QWidget):
     toggle_requested = Signal()
     locate_current_requested = Signal()
     style_requested = Signal()
+    timeline_requested = Signal()
 
     PATH_ROLE = int(Qt.ItemDataRole.UserRole)
     CATEGORY_ROLE = PATH_ROLE + 1
@@ -49,6 +50,7 @@ class LeftPanel(QWidget):
     IMPORTANCE_ROLE = PATH_ROLE + 3
     GROUP_NUMBER_ROLE = PATH_ROLE + 4
     TITLE_ROLE = PATH_ROLE + 5
+    FEATURE_ROLE = PATH_ROLE + 6
     STATUS_COLUMN_WIDTH = 64
     COMPACT_TREE_WIDTH = 300
     IMPORTANCE_LABELS = {
@@ -62,7 +64,7 @@ class LeftPanel(QWidget):
         "always": "常驻：始终生效，不参与核心/非核心分级。",
     }
     GROUP_ICONS = {
-        "总大纲": "account_tree",
+        "故事规划": "account_tree",
         "本书文风": "stylus",
         "章节": "auto_stories",
         "角色": "group",
@@ -78,6 +80,7 @@ class LeftPanel(QWidget):
         self._project: NovelProject | None = None
         self._scope = "chapters"
         self._scope_states: dict[str, dict] = {}
+        self._selected_feature = None
         self._selected_path: str | None = None
         self._current_document: str | None = None
         self._icon_color = "#63748A"
@@ -125,7 +128,7 @@ class LeftPanel(QWidget):
             ("character", "新建角色"),
             ("world", "新建世界观条目"),
             ("power", "新建体系设定"),
-            ("timeline", "新建时间线"),
+            ("timeline", "新建事件"),
         ):
             action = canon_menu.addAction(label)
             action.triggered.connect(
@@ -364,6 +367,7 @@ class LeftPanel(QWidget):
         if same_project:
             self._remember_scope()
         else:
+            self._selected_feature = None
             self._scope_states.clear()
             self.search.clear()
         selected_path = self._selected_path if same_project else None
@@ -381,14 +385,13 @@ class LeftPanel(QWidget):
         store = ProjectDataStore(project)
         groups: list[tuple[str, str, list[Path]]] = [
             (
-                "总大纲",
+                "故事规划",
                 "01",
                 [
-                    project.outline_dir / "main_arc.md",
-                    project.outline_dir / "future_plan.md",
+                    project.outline_dir / "story_plan.json",
                 ],
             ),
-            ("时间线", "02", [project.canon_dir / "timeline.md"]),
+            ("时间线", "02", []),
             ("章节", "03", store.list_chapters()),
             ("角色", "04", store.list_characters()),
             ("世界观", "05", store.list_world()),
@@ -397,8 +400,18 @@ class LeftPanel(QWidget):
         ]
         category_map = {"体系设定": "体系设定"}
         for label, number, paths in groups:
+            if label == "时间线":
+                item = QTreeWidgetItem(["时间线", ""])
+                item.setData(0, self.CATEGORY_ROLE, "时间线")
+                item.setData(0, self.FEATURE_ROLE, "timeline")
+                item.setData(0, self.ICON_ROLE, "schedule")
+                item.setIcon(0, material_icon("schedule", self._icon_color, 18))
+                item.setToolTip(0, "查看全部故事事件与作者编排的时间轴")
+                self.tree.addTopLevelItem(item)
+                item.setFirstColumnSpanned(True)
+                continue
             existing = [path for path in paths if path.exists()]
-            flat = label in {"总大纲", "时间线"}
+            flat = label in {"故事规划", "时间线"}
             group_text = f"{label} · {len(existing)}"
             group = QTreeWidgetItem([group_text, ""])
             group.setData(0, self.CATEGORY_ROLE, category_map.get(label, label))
@@ -460,6 +473,7 @@ class LeftPanel(QWidget):
     def select_path(self, path: Path) -> None:
         self._reveal_scope_for_path(Path(path))
         target = str(Path(path))
+        self._selected_feature = None
         self._selected_path = target
         for child in self.document_items():
             if child.data(0, self.PATH_ROLE) == target:
@@ -473,6 +487,7 @@ class LeftPanel(QWidget):
         """Select and scroll to a file without emitting a new open request."""
         self._reveal_scope_for_path(Path(path))
         target = str(Path(path))
+        self._selected_feature = None
         self._selected_path = target
         for child in self.document_items():
             if child.data(0, self.PATH_ROLE) == target:
@@ -482,7 +497,20 @@ class LeftPanel(QWidget):
                 return True
         return False
 
+    def select_timeline(self):
+        self.set_scope("canon")
+        self.search.clear()
+        self._selected_feature = "timeline"
+        self._selected_path = None
+        self._restore_selection()
+
     def _restore_selection(self) -> None:
+        if self._selected_feature == "timeline":
+            for i in range(self.tree.topLevelItemCount()):
+                item = self.tree.topLevelItem(i)
+                if item.data(0, self.FEATURE_ROLE) == "timeline" and not item.isHidden():
+                    self.tree.setCurrentItem(item)
+                    return
         if not self._selected_path:
             return
         for child in self.document_items():
@@ -494,13 +522,19 @@ class LeftPanel(QWidget):
                 return
 
     def _update_group_icon(self, item):
-        if item.data(0, self.PATH_ROLE):
+        if item.data(0, self.PATH_ROLE) or item.data(0, self.FEATURE_ROLE):
             return
         icon = ("expand_more" if item.isExpanded() else "chevron_right") if item.childCount() else item.data(0, self.ICON_ROLE)
         item.setIcon(0, material_icon(icon or "folder", self._icon_color, 18))
         item.setToolTip(0, "点击展开或收起" if item.childCount() else "暂无条目，可从上方新建资料")
 
     def _on_item_clicked(self, item: QTreeWidgetItem, column: int) -> None:
+        if item.data(0, self.FEATURE_ROLE) == "timeline":
+            self._selected_feature = "timeline"
+            self._selected_path = None
+            self.timeline_requested.emit()
+            return
+        self._selected_feature = None
         path_str = item.data(0, self.PATH_ROLE)
         if not path_str:
             item.setExpanded(not item.isExpanded())
@@ -537,7 +571,7 @@ class LeftPanel(QWidget):
                 "时间线": "timeline",
             }
             new_action = menu.addAction(
-                "新建时间线" if category == "时间线" else f"新建{category}条目"
+                "新建事件" if category == "时间线" else f"新建{category}条目"
             )
             new_action.triggered.connect(
                 lambda _checked=False, entry_kind=labels[category]: (
@@ -680,7 +714,7 @@ class LeftPanel(QWidget):
         for index in range(root.childCount()):
             group = root.child(index)
             in_scope = (group.data(0, self.CATEGORY_ROLE) == "章节") == (self._scope == "chapters")
-            if group.data(0, self.PATH_ROLE):
+            if group.data(0, self.PATH_ROLE) or group.data(0, self.FEATURE_ROLE):
                 visible = in_scope and (not needle or needle in group.text(0).casefold())
                 group.setHidden(not visible)
                 total_visible += int(visible)

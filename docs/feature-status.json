@@ -64,7 +64,7 @@
       "id": "workspace.chapter_canon_navigation",
       "requirement": "required",
       "status": "supported",
-      "note": "Separate chapter/canon browsing with per-scope search, selection, expansion and scroll state; direct planning/timeline documents and expandable canon groups. Fixed book-style settings shortcut, scope-aware locate, compact item-level system importance labels; quick-open and restart restoration support flat documents."
+      "note": "Separate chapter/canon browsing with per-scope search, selection, expansion and scroll state; direct planning documents and a virtual timeline page and expandable canon groups. Fixed book-style settings shortcut, scope-aware locate, compact item-level system importance labels; quick-open and restart restoration support flat documents."
     },
     {
       "id": "ai.task_panel_and_deferred_review",
@@ -170,6 +170,24 @@
       "id": "ai.prose_evaluation_runner",
       "requirement": "optional",
       "status": "supported"
+    },
+    {
+      "id": "timeline.author_events_and_writing_material",
+      "requirement": "required",
+      "status": "supported",
+      "notes": "作者事件卡、计划/已写/放弃、大事件筛选、章节关联、排序与可恢复删除；续写和扩写选择背景事实/本次展开/暂不揭示，完整预算校验与过期结果保护。Markdown笔记保留独立，新建笔记完全空白供自由记录，固定中文标题且不显示章节占位提示，已有内容不覆盖且不自动进入 AI 上下文；自动识别和多线时间轴不在第一期范围。"
+    },
+    {
+      "id": "timeline.embedded_axis",
+      "requirement": "required",
+      "status": "supported",
+      "notes": "资料栏固定功能入口，中央纵向事件轴，作者编排顺序等距展示；详情/筛选/位置调整/删除恢复/关联章节跳转/明确目标的章节素材；页面状态恢复、隐藏正文操作保护，旧笔记保留。未自动推算相对时间。"
+    },
+    {
+      "id": "planning.story_direction_form",
+      "requirement": "required",
+      "status": "supported",
+      "notes": "四项可选故事规划表单与默认关闭的 AI 开关；保存、外部冲突与过期保护；规划仅作方向参考且完整预算校验，不能作为既成事实。新项目取消总大纲及后续剧情规划文件，未来事件由时间线承接，自由笔记不自动加载到 AI。无旧资料迁移入口。"
     }
   ]
 }

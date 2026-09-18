@@ -48,7 +48,7 @@ class StoryNavigationControllerTests(unittest.TestCase):
             self.assertEqual(controller.route_for_category("角色"), "canon")
             selected = controller.select_default_canon()
 
-            self.assertEqual(selected, project.outline_dir / "main_arc.md")
+            self.assertEqual(selected, project.outline_dir / "story_plan.json")
             self.assertEqual(panel.selected, [selected])
 
     def test_open_memory_chapter_routes_and_selects_file(self):
@@ -72,10 +72,11 @@ class StoryNavigationControllerTests(unittest.TestCase):
             self.assertEqual(panel.selected, [chapter])
             self.assertFalse(controller.open_memory_chapter("missing"))
 
-    def test_default_canon_selection_falls_back_to_future_plan(self):
+    def test_default_canon_selection_falls_back_to_character(self):
         with tempfile.TemporaryDirectory() as tmp:
             project = NovelProject.create(Path(tmp) / "project", "测试")
-            (project.outline_dir / "main_arc.md").unlink()
+            (project.outline_dir / "story_plan.json").unlink()
+            (project.canon_dir / "characters" / "角色.md").write_text("# 角色", encoding="utf-8")
             session = ProjectSession()
             session.set_project(project)
             panel = _LeftPanel()
@@ -88,7 +89,7 @@ class StoryNavigationControllerTests(unittest.TestCase):
 
             selected = controller.select_default_canon()
 
-            self.assertEqual(selected, project.outline_dir / "future_plan.md")
+            self.assertEqual(selected, project.list_characters()[0])
             self.assertEqual(panel.selected, [selected])
 
 

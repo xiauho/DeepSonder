@@ -30,11 +30,13 @@ from core.text_metrics import count_content_chars
 from ui.icons import set_button_icon
 from ui.elided_label import ElidedLabel
 from ui.theme import document_css
+from ui.story_plan_form import StoryPlanForm
 
 
 _PARAGRAPH_RE = re.compile(r"\n\s*\n")
 FIND_DEBOUNCE_MS = 240
 STATS_DEBOUNCE_MS = 180
+CHAPTER_PLACEHOLDER = "在这里写下故事。\n\n提示：章节建议保留「## 大纲」「## 剧情简写」和「## 正文」标记，AI 创作会据此理解你的写作意图。"
 MAX_FIND_HIGHLIGHTS = 200
 MAX_FIND_MATCHES_FOR_HIGHLIGHT = 1000
 LARGE_DOCUMENT_CHARS = 200_000
@@ -208,9 +210,7 @@ class Editor(QWidget):
 
         self.text_edit = QPlainTextEdit()
         self.text_edit.setObjectName("writingEditor")
-        self.text_edit.setPlaceholderText(
-            "在这里写下故事。\n\n提示：章节建议保留「## 大纲」「## 剧情简写」和「## 正文」标记，AI 创作会据此理解你的写作意图。"
-        )
+        self.text_edit.setPlaceholderText("")
         self.text_edit.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
         self.text_edit.setTabStopDistance(32.0)
         self.preview_browser = MarkdownPreview()
@@ -223,9 +223,13 @@ class Editor(QWidget):
         self.editor_stack.setObjectName("editorViewStack")
         self.editor_stack.addWidget(self.text_edit)
         self.editor_stack.addWidget(self.preview_browser)
+        self.story_plan_form = StoryPlanForm()
+        self.editor_stack.addWidget(self.story_plan_form)
+        self.story_plan_form.changed.connect(self._on_plan_changed)
         layout.addWidget(self.editor_stack, 1)
 
         footer = QFrame()
+        self.footer = footer
         footer.setObjectName("editorFooter")
         footer_layout = QHBoxLayout(footer)
         footer_layout.setContentsMargins(3, 0, 3, 0)
@@ -283,6 +287,10 @@ class Editor(QWidget):
             self.layout().removeWidget(actions)
             self.header_layout.addWidget(actions)
         actions.setVisible(not was_hidden)
+        # The editor can now sit inside a stacked content area. Resolve the
+        # moved toolbar immediately instead of leaving a one-frame stale title.
+        self.layout().activate()
+        self.header_layout.activate()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -290,6 +298,10 @@ class Editor(QWidget):
 
     def set_view_mode(self, mode: str) -> None:
         """Switch between editable source and a read-only in-memory preview."""
+        if self.is_story_plan():
+            self.editor_stack.setCurrentWidget(self.story_plan_form)
+            self.story_plan_form.focus_field()
+            return
         normalized = "preview" if str(mode) == "preview" else "source"
         self._view_mode = normalized
         if normalized == "preview":
@@ -320,10 +332,16 @@ class Editor(QWidget):
             self._render_preview()
 
     def undo(self) -> None:
+        if self.is_story_plan():
+            self._plan_undo(False)
+            return
         self.set_view_mode("source")
         self.text_edit.undo()
 
     def redo(self) -> None:
+        if self.is_story_plan():
+            self._plan_undo(True)
+            return
         self.set_view_mode("source")
         self.text_edit.redo()
 
@@ -346,12 +364,20 @@ class Editor(QWidget):
             self.clear_document(f"读取失败：{exc}")
             return False
 
+        if category == "故事规划":
+            from core.story_plan import parse_plan
+            try:
+                parse_plan(content)
+            except ValueError as exc:
+                self.clear_document(str(exc))
+                return False
         self._load_content(
             category=category,
             path=str(path),
             content=content,
             revision=self._file_revision(path),
-            title=self._extract_title(content, path),
+            title=("故事规划" if category == "故事规划" else "时间线笔记" if category == "时间线" and path.name == "timeline.md"
+                   else self._extract_title(content, path)),
         )
         return True
 
@@ -383,6 +409,15 @@ class Editor(QWidget):
         self._current_path = str(path)
         self._current_category = str(category)
         self._loaded_file_revision = revision
+        if self.is_story_plan():
+            self.story_plan_form.load(content)
+        self.source_button.setVisible(not self.is_story_plan())
+        self.preview_button.setVisible(not self.is_story_plan())
+        self.footer.setVisible(not self.is_story_plan())
+        self.find_bar.hide()
+        self.text_edit.setPlaceholderText(
+            CHAPTER_PLACEHOLDER if category == "章节" else ""
+        )
         self.text_edit.setPlainText(content)
         self.text_edit.document().setModified(False)
         self._loading = False
@@ -391,10 +426,15 @@ class Editor(QWidget):
         self.title_label.setToolTip(f"{title}\n{category} / {Path(path).name}")
         self.path_label.hide()
         self.path_label.setText(f"{category}  /  {Path(path).name}")
-        if self._view_mode == "preview":
+        if self.is_story_plan():
+            self.editor_stack.setCurrentWidget(self.story_plan_form)
+            self.story_plan_form.focus_field()
+        elif self._view_mode == "preview":
+            self.editor_stack.setCurrentWidget(self.preview_browser)
             self._render_preview(reset_scroll=True)
             self.preview_browser.setFocus()
         else:
+            self.editor_stack.setCurrentWidget(self.text_edit)
             self.text_edit.setFocus()
         self._update_stats()
         self.document_loaded.emit()
@@ -403,11 +443,16 @@ class Editor(QWidget):
         self.document_about_to_change.emit()
         self._save_failed = False
         self._loading = True
+        self.text_edit.setPlaceholderText("")
         self.text_edit.clear()
         self.preview_browser.clear()
         self._loading = False
         self._current_path = None
         self._current_category = ""
+        self.source_button.show()
+        self.preview_button.show()
+        self.footer.show()
+        self.editor_stack.setCurrentWidget(self.text_edit)
         self._loaded_file_revision = None
         self.title_label.setText(message)
         self.title_label.setToolTip(message)
@@ -423,14 +468,29 @@ class Editor(QWidget):
         if not force and self.has_external_change():
             raise ExternalFileChangedError(path)
         try:
-            atomic_write_text(path, self.text_edit.toPlainText())
+            atomic_write_text(path, self.document_text())
         except OSError as exc:
             self.show_save_error(str(exc))
             return False
         self.mark_saved(self._file_revision(path))
         return True
 
+    def is_story_plan(self) -> bool:
+        return self._current_category == "故事规划"
+
+    def _plan_undo(self, redo: bool) -> None:
+        for field in self.story_plan_form.fields.values():
+            if field.hasFocus():
+                field.redo() if redo else field.undo()
+                return
+
+    def _on_plan_changed(self) -> None:
+        if self.is_story_plan() and not self._loading:
+            self._set_dirty(True)
+
     def document_text(self) -> str:
+        if self.is_story_plan():
+            return self.story_plan_form.content()
         return self.text_edit.toPlainText()
 
     def loaded_revision(self) -> str | tuple[int, int, int] | None:
@@ -568,6 +628,8 @@ class Editor(QWidget):
         return True
 
     def show_find(self) -> None:
+        if self.is_story_plan():
+            return
         self.set_view_mode("source")
         self.find_bar.show()
         selected = self.text_edit.textCursor().selectedText()
@@ -643,6 +705,9 @@ class Editor(QWidget):
             self.dirty_changed.emit(dirty)
 
     def _update_stats(self) -> None:
+        if self.is_story_plan():
+            self.stats_changed.emit("故事规划 · 全书方向")
+            return
         revision = int(self.text_edit.document().revision())
         if self._stats_revision == revision:
             return

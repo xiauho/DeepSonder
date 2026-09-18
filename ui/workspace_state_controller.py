@@ -48,6 +48,7 @@ class WorkspaceStateController(QObject):
         self.timer.setInterval(800)
         self.timer.timeout.connect(self.flush)
         editor = window.editor
+        window.project_session.project_about_to_change.connect(self.capture)
         editor.document_about_to_change.connect(self.capture)
         editor.document_loaded.connect(self.restore_document)
         editor.text_edit.cursorPositionChanged.connect(self.schedule)
@@ -81,6 +82,19 @@ class WorkspaceStateController(QObject):
             self.timer.start()
 
     def capture(self):
+        project = self.window.project
+        if project is not None and not self._restoring:
+            root = str(project.root.resolve())
+            record = self.data["projects"].setdefault(root, {})
+            if not isinstance(record, dict):
+                record = {}; self.data["projects"][root] = record
+            route = self.window.window_state_controller.current_route
+            page_project = self.window.timeline_page.project
+            if route == "timeline" and page_project is not None and page_project.root.resolve() == project.root.resolve():
+                record["page"] = "timeline"
+                record["timeline"] = self.window.timeline_page.view_state()
+            elif route in {"writing", "canon"}:
+                record["page"] = "document"
         editor = self.window.editor
         if self._binding is None or self._restoring or editor.current_path() != self._binding[2]:
             return
@@ -138,6 +152,13 @@ class WorkspaceStateController(QObject):
             self.schedule()
         QTimer.singleShot(0, scroll)
 
+    def timeline_state(self, project):
+        record = self.data["projects"].get(str(project.root.resolve()), {})
+        if isinstance(record, dict) and record.get("page") == "timeline":
+            state = record.get("timeline", {})
+            return state if isinstance(state, dict) else {}
+        return None
+
     def last_document(self, project):
         record = self.data["projects"].get(str(project.root.resolve()), {})
         relative = record.get("last") if isinstance(record, dict) else None
@@ -148,6 +169,8 @@ class WorkspaceStateController(QObject):
             path.relative_to(project.root.resolve())
             if path == project.style_guide_path.resolve():
                 return None  # A settings shortcut must not open a modal on startup.
+            if path == (project.canon_dir / "timeline.md").resolve() and path.is_file():
+                return path  # The retained notes document is accessible from the timeline.
             # Only a path already present in the navigation inventory may be reopened.
             for item in self.window.left_panel.document_items():
                 candidate = item.data(0, Qt.ItemDataRole.UserRole)

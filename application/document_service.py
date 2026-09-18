@@ -89,6 +89,7 @@ class DocumentService:
         actual = self.revision_for_path(resolved)
         if not force and (not expected_revision or expected_revision != actual):
             raise DocumentRevisionConflict(resolved, expected_revision, actual)
+        self._validate_content(project, resolved, content)
         atomic_write_text(resolved, str(content), encoding="utf-8")
         saved_content, revision = self._read_consistent_text(resolved)
         return self._snapshot(project, resolved, category, saved_content, revision)
@@ -279,8 +280,7 @@ class DocumentService:
         parts = path.parts
         if path.as_posix() in {
             "writing/style_guide.md",
-            "outline/main_arc.md",
-            "outline/future_plan.md",
+            "outline/story_plan.json",
             "canon/timeline.md",
         }:
             return True
@@ -299,6 +299,15 @@ class DocumentService:
         first_line = str(content).splitlines()[0] if str(content).splitlines() else ""
         return first_line[2:].strip() if first_line.startswith("# ") else path.stem
 
+    @staticmethod
+    def _validate_content(project: NovelProject, path: Path, content: str) -> None:
+        if path == project.outline_dir / "story_plan.json":
+            from core.story_plan import parse_plan
+            try:
+                parse_plan(content)
+            except ValueError as exc:
+                raise DocumentServiceError(str(exc)) from exc
+
     @classmethod
     def _snapshot(
         cls,
@@ -308,11 +317,14 @@ class DocumentService:
         content: str,
         revision: str,
     ) -> DocumentSnapshot:
+        cls._validate_content(project, path, content)
+        planning = path == project.outline_dir / "story_plan.json"
         return DocumentSnapshot(
             path=str(path),
             relative_path=path.relative_to(project.root).as_posix(),
-            category=str(category or ""),
-            title=cls._title(content, path),
+            category="故事规划" if planning else str(category or ""),
+            title=("故事规划" if planning else "时间线笔记" if path == project.canon_dir / "timeline.md"
+                   else cls._title(content, path)),
             content=content,
             revision=revision,
         )

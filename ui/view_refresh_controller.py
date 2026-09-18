@@ -102,8 +102,7 @@ class ViewRefreshController(QObject):
         canon_changed = any(
             path.startswith(str(project.canon_dir.resolve()).casefold())
             or path in {
-                str((project.outline_dir / "main_arc.md").resolve()).casefold(),
-                str((project.outline_dir / "future_plan.md").resolve()).casefold(),
+                str((project.outline_dir / "story_plan.json").resolve()).casefold(),
             }
             for path in changed
         )

@@ -30,6 +30,7 @@ class ProjectChange:
 class ProjectSession(QObject):
     """Own the active project and publish changes that views can observe."""
 
+    project_about_to_change = Signal()
     project_changed = Signal(object)
     data_change_detail = Signal(object, object)
 
@@ -67,6 +68,7 @@ class ProjectSession(QObject):
         """Activate a project already validated by the application service."""
         if not isinstance(opened, OpenedProject):
             raise TypeError("opened 必须是 OpenedProject。")
+        self.project_about_to_change.emit()
         self._last_migration_result = opened.migration
         self._project = opened.project
         self._data_store = opened.data_store
@@ -76,6 +78,7 @@ class ProjectSession(QObject):
     def set_project(self, project: NovelProject | None) -> None:
         if project is not None and not isinstance(project, NovelProject):
             raise TypeError("project 必须是 NovelProject 或 None。")
+        self.project_about_to_change.emit()
         self._project = project
         self._data_store = ProjectDataStore(project) if project is not None else None
         self.project_changed.emit(project)

@@ -15,6 +15,23 @@ class DocumentServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.service = DocumentService()
 
+    def test_timeline_notes_have_a_stable_display_title_without_changing_content(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            path = project.canon_dir / "timeline.md"
+            opened = self.service.open_document(project, "时间线", path)
+            self.assertEqual(opened.title, "时间线笔记")
+            self.assertEqual(opened.content, "")
+            notes = "# 自己的笔记标题\n\n出发前的设想。"
+            saved = self.service.save_document(
+                project, "时间线", path, notes, expected_revision=opened.revision,
+            )
+            self.assertEqual(saved.title, "时间线笔记")
+            reopened = DocumentService().open_document(project, "时间线", path)
+            self.assertEqual(reopened.title, "时间线笔记")
+            self.assertEqual(reopened.content, notes)
+            self.assertEqual(path.read_text(encoding="utf-8"), notes)
+
     def test_open_and_save_return_versioned_snapshots(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project = NovelProject.create(Path(tmp) / "proj", "测试")

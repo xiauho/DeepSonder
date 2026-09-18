@@ -17,8 +17,7 @@ class ContextProfile:
     include_timeline: bool = True
     include_story_state: bool = True
     include_summaries: bool = True
-    include_main_arc: bool = True
-    include_future_plan: bool = True
+    include_story_plan: bool = True
     include_style: bool = True
 
 
@@ -34,7 +33,6 @@ CONTINUATION_CONTEXT_PROFILE = ContextProfile("continuation_current_chapter")
 
 CONSISTENCY_CONTEXT_PROFILE = ContextProfile(
     "consistency_check",
-    include_future_plan=False,
     include_style=False,
 )
 
@@ -43,8 +41,7 @@ REPAIR_CONTEXT_PROFILE = ContextProfile(
     character_scope="relevance",
     relevance_scope="none",
     include_summaries=False,
-    include_main_arc=False,
-    include_future_plan=False,
+    include_story_plan=False,
     include_style=False,
 )
 
@@ -52,7 +49,6 @@ SUMMARY_CONTEXT_PROFILE = ContextProfile(
     "chapter_summary",
     relevance_scope="chapter",
     include_summaries=False,
-    include_main_arc=False,
-    include_future_plan=False,
+    include_story_plan=False,
     include_style=False,
 )

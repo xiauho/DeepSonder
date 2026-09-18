@@ -487,11 +487,8 @@ class ProjectDataStore:
     def delete_foreshadowing_trash(self, trash_id: str) -> None:
         ForeshadowingStore(self.project).delete_trash_item(trash_id)
 
-    def load_main_arc(self) -> str:
-        return self.project.load_main_arc()
-
-    def load_future_plan(self) -> str:
-        return self.project.load_future_plan()
+    def load_story_plan(self) -> str:
+        return self.project.load_story_plan()
 
     def save_story_state(self, state: dict) -> None:
         self.project.save_story_state(state)
@@ -1306,6 +1303,8 @@ class ProjectDataStore:
             return default
 
     def chapter_display_name(self, path: Path) -> str:
+        if path == self.project.outline_dir / "story_plan.json":
+            return "故事规划"
         path = Path(path)
         first_line = self.read_text(path).splitlines()
         if first_line and first_line[0].startswith("# "):

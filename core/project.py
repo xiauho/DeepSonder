@@ -5,7 +5,7 @@ Layout:
     writing/
         style_library.json
     outline/
-        main_arc.md
+        story_plan.json
         chapters/<chapter_id>.md
     canon/
         characters/<name>.md
@@ -45,7 +45,7 @@ DEFAULT_STORY_STATE = {
 }
 
 DEFAULT_CHAPTER_SUMMARIES = {}
-DEFAULT_TIMELINE = "# 时间线\n\n| 时间 | 事件 |\n|---|---|\n"
+DEFAULT_TIMELINE = ""
 CORE_POWER_FILENAME = "_核心规则.md"
 DEFAULT_CORE_POWER_RULES = (
     "# 核心规则\n\n"
@@ -137,15 +137,8 @@ class NovelProject:
         # Skeleton files
         from .style_library import empty_library, LIBRARY_PATH
         cls._write_json(root / LIBRARY_PATH, empty_library())
-        atomic_write_text(
-            root / "outline" / "main_arc.md",
-            "# 总大纲\n\n- 主线：\n- 支线：\n- 伏笔：\n", encoding="utf-8"
-        )
-        atomic_write_text(
-            root / "outline" / "future_plan.md",
-            "# 后续剧情规划\n\n- 下一阶段主要事件：\n- 必须推进的伏笔：\n- 章节结尾目标：\n",
-            encoding="utf-8",
-        )
+        from .story_plan import STORY_PLAN_PATH, empty_plan, serialize_plan
+        atomic_write_text(root / STORY_PLAN_PATH, serialize_plan(empty_plan()), encoding="utf-8")
         atomic_write_text(
             root / "canon" / "timeline.md",
             DEFAULT_TIMELINE, encoding="utf-8"
@@ -272,8 +265,7 @@ class NovelProject:
 
     def list_outline(self) -> list[Path]:
         files = [
-            self.outline_dir / "main_arc.md",
-            self.outline_dir / "future_plan.md",
+            self.outline_dir / "story_plan.json",
         ]
         files += self.list_chapters()
         return [p for p in files if p.exists()]
@@ -288,17 +280,14 @@ class NovelProject:
         except (OSError, UnicodeError):
             return default
 
-    def load_main_arc(self) -> str:
-        return self.load_optional_text(self.outline_dir / "main_arc.md")
-
-    def load_future_plan(self) -> str:
-        return self.load_optional_text(self.outline_dir / "future_plan.md")
+    def load_story_plan(self) -> str:
+        from .story_plan import load_plan_context
+        return load_plan_context(self.root)
 
     def list_all_editable_files(self) -> list[tuple[str, Path]]:
         """Return (category, path) pairs for the left navigation tree."""
         items: list[tuple[str, Path]] = [
-            ("大纲", self.outline_dir / "main_arc.md"),
-            ("大纲", self.outline_dir / "future_plan.md"),
+            ("故事规划", self.outline_dir / "story_plan.json"),
             ("时间线", self.canon_dir / "timeline.md"),
         ]
         items += [("大纲", p) for p in self.list_chapters()]
@@ -581,20 +570,6 @@ class NovelProject:
             )
 
         timeline = ""
-        timeline_path = self.canon_dir / "timeline.md"
-        if include_timeline and timeline_path.exists():
-            timeline = self.read_file(timeline_path)
-        if include_timeline:
-            selection_stats.append(
-                CanonSelectionStat(
-                    category="timeline",
-                    candidates=1 if timeline_path.exists() else 0,
-                    included=1 if timeline else 0,
-                    matched=1 if timeline else 0,
-                    reasons=(("task_profile", 1),) if timeline else (),
-                )
-            )
-
         related = RelatedCanon(
             world=world,
             power="\n\n".join(power_parts),
@@ -622,8 +597,6 @@ class NovelProject:
             self.chapters_dir / f"{chapter_id}.md",
             *self.list_characters(),
         ]
-        if include_timeline:
-            paths.append(self.canon_dir / "timeline.md")
         if include_world:
             paths.extend(self.list_world())
         if include_power:

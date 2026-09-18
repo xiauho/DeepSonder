@@ -21,6 +21,7 @@ class QuickEntry:
     shortcut: str = ""
     category: str = ""
     project_root: str = ""
+    feature: str = ""
 
 
 def match_entries(entries, query):

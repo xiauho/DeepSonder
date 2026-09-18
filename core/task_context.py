@@ -25,9 +25,8 @@ def context_paths(
     paths = [
         project.root / "project.json",
         project.chapters_dir / f"{chapter_id}.md",
-        project.outline_dir / "main_arc.md",
-        project.outline_dir / "future_plan.md",
-        project.canon_dir / "timeline.md",
+        project.outline_dir / "story_plan.json",
+        project.canon_dir / "timeline_events.json",
         project.system_registry_path,
         project.memory_dir / "story_state.json",
         project.memory_dir / "chapter_summaries.json",

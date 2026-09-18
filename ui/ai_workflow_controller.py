@@ -126,6 +126,8 @@ class AIWorkflowController(QObject):
         selection = self._choose_expansion_context(project, chapter_id)
         if selection is None:
             return
+        if not self._choose_event_material(project, chapter_id):
+            return
         selected_foreshadowing, selected_power = selection
         selected_foreshadowing = tuple(deepcopy(selected_foreshadowing))
         selected_power = tuple(str(path) for path in selected_power)
@@ -172,6 +174,8 @@ class AIWorkflowController(QObject):
         except (OSError, UnicodeError, ValueError) as exc:
             QMessageBox.warning(self.parent, "读取章节失败", str(exc))
             return
+        if not self._choose_event_material(project, chapter_id):
+            return
         history_chapters = int(self.config.get("ai_context_history_chapters", 5))
         history_mode = str(self.config.get("ai_history_mode", "custom"))
         history_remote_enabled = bool(self.config.get("ai_history_remote_enabled", True))
@@ -195,6 +199,19 @@ class AIWorkflowController(QObject):
                 "target_chapter_chars": target_chars,
             },
         )
+
+    def _choose_event_material(self, project, chapter_id) -> bool:
+        from core.timeline_events import TimelineStore
+        from ui.timeline_dialog import EventMaterialDialog
+        try:
+            store = TimelineStore(project)
+            if not store.events() and not store.selection(chapter_id):
+                return True
+            dialog = EventMaterialDialog(project, chapter_id, self.parent)
+            return dialog.exec() == QDialog.DialogCode.Accepted
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self.parent, "读取事件素材失败", str(exc))
+            return False
 
     def prose_task(self, kind: str) -> None:
         from core.prose_review import prose_bounds, validate_scope, TASK_LABELS

@@ -8,7 +8,7 @@ from ui.quick_access import QuickAccessDialog, QuickEntry
 
 class QuickAccessController:
     PROJECT_COMMANDS = frozenset(("export", "trash", "new_chapter", "delete_chapter",
-        "new_character", "character_sync", "new_world", "new_power", "new_timeline", "focus_directory"))
+        "new_character", "character_sync", "new_world", "new_power", "new_timeline", "manage_timeline", "focus_directory"))
     DOCUMENT_COMMANDS = frozenset(("save", "undo", "redo", "find", "focus_editor", "locate_document"))
 
     def __init__(self, window):
@@ -31,6 +31,8 @@ class QuickAccessController:
                 title = child.data(0, window.left_panel.TITLE_ROLE) or child.text(0)
                 entries.append(QuickEntry(str(path), title, f"{category} · {relative}",
                     category=category, project_root=str(root)))
+            entries.append(QuickEntry("timeline", "时间线", "查看全部故事事件与作者编排的时间轴",
+                category="时间线", project_root=str(root), feature="timeline"))
             record = window.workspace_state.data["projects"].get(str(root), {})
             documents = record.get("documents", {}) if isinstance(record, dict) else {}
             recent = list(reversed(documents)) if isinstance(documents, dict) else []
@@ -61,6 +63,8 @@ class QuickAccessController:
         if entry.mode == "documents":
             if window.project is None or str(window.project.root.resolve()) != entry.project_root:
                 return "项目已切换，请重新搜索当前项目。"
+            if entry.feature == "timeline":
+                return ""
             try:
                 path = Path(entry.key).resolve()
                 path.relative_to(window.project.root.resolve())
@@ -89,6 +93,8 @@ class QuickAccessController:
         if reason:
             window.status_message.setText(reason)
             return False
+        if entry.feature == "timeline":
+            return window.manage_timeline()
         if entry.mode == "commands":
             window.actions[entry.key].trigger()
             return True
@@ -105,7 +111,9 @@ class QuickAccessController:
         window.left_panel.reveal_path(entry.key)
         if focused and not window.window_state_controller.focus_mode:
             window.window_state_controller.toggle_focus_mode()
-        if window.editor.view_mode() == "preview":
+        if window.editor.is_story_plan():
+            window.editor.story_plan_form.focus_field()
+        elif window.editor.view_mode() == "preview":
             window.editor.preview_browser.setFocus()
         else:
             window.editor.text_edit.setFocus()

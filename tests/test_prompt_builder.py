@@ -37,8 +37,8 @@ class PromptBuilderTests(TestCase):
         )
         self.assertIn("continuation_current_chapter", system)
         self.assertIn("<NOVEL_TEXT>", user)
-        self.assertIn("【主线大纲】", user)
-        self.assertIn("【后续剧情规划】", user)
+        self.assertIn("【故事规划（方向参考，不是已发生事实）】", user)
+        self.assertNotIn("【后续剧情规划】", user)
         self.assertIn("NOVALIST_TASK_DONE", user)
 
     def test_expansion_prompt_uses_outline_without_current_body(self) -> None:

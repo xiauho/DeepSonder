@@ -42,4 +42,4 @@ class ContextProfileTests(TestCase):
 
         self.assertNotIn("content", {item.key for item in repair.report.sections})
         self.assertNotIn("summaries", {item.key for item in repair.report.sections})
-        self.assertNotIn("main_arc", {item.key for item in repair.report.sections})
+        self.assertNotIn("story_plan", {item.key for item in repair.report.sections})

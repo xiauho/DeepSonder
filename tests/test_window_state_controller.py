@@ -15,6 +15,9 @@ class _FakeWidget:
         self._sizes = [270, 820, 330]
         self.layout_state = None
 
+    def is_story_plan(self):
+        return False
+
     def setVisible(self, visible):
         self.visible = visible
 

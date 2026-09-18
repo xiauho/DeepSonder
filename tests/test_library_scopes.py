@@ -69,7 +69,7 @@ class LibraryScopesTests(TestCase):
         self.panel.search.setText('不存在')
         opened = []
         self.panel.file_selected.connect(lambda *args: opened.append(args))
-        target = self.project.outline_dir / 'main_arc.md'
+        target = self.project.outline_dir / 'story_plan.json'
         self.assertTrue(self.panel.reveal_path(target))
         self.assertEqual(self.panel._scope, 'canon')
         self.assertEqual(self.panel.search.text(), '')
@@ -98,7 +98,7 @@ class LibraryScopesTests(TestCase):
     def test_flat_documents_and_fixed_style_shortcut(self):
         self.panel.set_scope('canon')
         docs = list(self.panel.document_items())
-        for path in (self.project.outline_dir / 'main_arc.md', self.project.canon_dir / 'timeline.md'):
+        for path in (self.project.outline_dir / 'story_plan.json',):
             item = next(item for item in docs if item.data(0, self.panel.PATH_ROLE) == str(path))
             self.assertIsNone(item.parent())
             self.panel.select_path(path)
@@ -119,7 +119,7 @@ class LibraryScopesTests(TestCase):
         self.assertFalse(self.panel.style_button.isEnabled())
 
     def test_flat_document_search_and_scope_aware_locate(self):
-        path = self.project.canon_dir / 'timeline.md'
+        path = self.project.outline_dir / 'story_plan.json'
         self.panel.set_current_document(path)
         self.assertFalse(self.panel.locate_button.isEnabled())
         self.panel.set_scope('canon')

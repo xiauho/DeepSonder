@@ -29,8 +29,7 @@ class StoryNavigationController(QObject):
             return None
         store = self.project_session.require_data_store()
         paths = [
-            project.outline_dir / "main_arc.md",
-            project.outline_dir / "future_plan.md",
+            project.outline_dir / "story_plan.json",
             *store.list_characters(),
             *store.list_world(),
             *store.list_power(),

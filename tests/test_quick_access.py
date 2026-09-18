@@ -81,10 +81,19 @@ class QuickAccessTests(unittest.TestCase):
         with patch.object(self.window.ai_workflow_controller, "manage_style_library", return_value=True) as manage:
             self.window.left_panel.style_button.click()
             manage.assert_called_once()
-        for path in (self.project.outline_dir / "main_arc.md", self.project.canon_dir / "timeline.md"):
+        for path in (self.project.outline_dir / "story_plan.json",):
             self.assertTrue(self.controller.activate(self.entry(path)))
             self.assertEqual(self.window.editor.current_path(), str(path))
             self.assertTrue(self.window.left_panel.locate_button.isEnabled())
+
+    def test_timeline_feature_is_searchable_without_a_file(self):
+        (self.project.canon_dir / "timeline.md").unlink()
+        self.window.left_panel.set_project(self.project)
+        entry = self.entry("timeline")
+        self.assertEqual(entry.feature, "timeline")
+        self.assertTrue(self.controller.activate(entry))
+        self.assertIs(self.window.content_stack.currentWidget(), self.window.timeline_page)
+        self.assertIsNone(self.window.left_panel.tree.currentItem().data(0, self.window.left_panel.PATH_ROLE))
 
     def test_style_tree_and_quick_open_share_manager(self):
         current = self.window.editor.current_path()
