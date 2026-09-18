@@ -453,17 +453,6 @@ class DashboardPage(QWidget):
             return "正文尚未开始，打开章节继续创作。"
         return f"“{normalized[:limit].rstrip()}…”" if len(normalized) > limit else f"“{normalized}”"
 
-    @staticmethod
-    def _has_meaningful_markdown(text: str) -> bool:
-        for line in str(text or "").splitlines():
-            value = line.strip()
-            if not value or value.startswith("#"):
-                continue
-            value = value.lstrip("-* ").strip()
-            if value and not value.endswith("："):
-                return True
-        return False
-
 
 class ReportsPage(QWidget):
     run_requested = Signal()

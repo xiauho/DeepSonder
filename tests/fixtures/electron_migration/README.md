@@ -1,29 +1,23 @@
-# Product-split legacy import project
+# Legacy import fixture
 
-`golden_project` is synthetic test data for comparing the PySide6 and Electron
-series and for defining the minimal old-project import boundary. It contains no
-user material and must remain deterministic. `fixture-manifest.json` locks the
-complete tree by SHA-256 so accidental fixture edits fail loudly.
+`golden_project` is frozen synthetic old-project data. The historical directory
+name `electron_migration` is retained because several service tests share it;
+it does not establish PySide6/Electron compatibility or release parity.
+`fixture-manifest.json` locks its complete tree by SHA-256. Do not edit the
+fixture's content merely to make tests pass.
 
-The fixture intentionally exercises:
+The fixture includes two ordered chapters with standard and extra Markdown
+sections, characters, world and power documents, timeline and style notes,
+relationships, memory, and a system registry. These extra files exercise the
+import exclusion boundary and support service tests on temporary copies.
+The fixture is not required to match the current project schema or navigation.
 
-- a current project manifest;
-- two naturally ordered chapters with standard and extra Markdown sections;
-- character, world, power-system, timeline, and style-guide documents;
-- directed character relationships whose two directions have different labels;
-- an unresolved relationship target (`白鸥`) for Graph View warning coverage;
-- chapter summaries and structured open/resolved foreshadowing notes;
-- a power-system registry with both core and non-core entries.
+The old-project importer may carry forward only the project name, author, and
+ordered chapter Markdown described by `legacy_import_contract`. Existing
+memory, recognized characters, canon, style, caches, and other derived state
+must not be imported. Import tests verify the source tree remains unchanged.
 
-Tests must copy the project to a temporary directory before exercising any
-operation that can write, migrate, delete, or create backup/trash content.
-
-The split importer may promote only the project name, author, and ordered
-chapter Markdown listed in `legacy_import_contract`. Memory, recognized
-characters, canon, style, caches, and other derived state are intentionally not
-carried forward; each product series must rebuild them from the imported
-manuscript.
-
-Do not update fixture expectations merely to make a new implementation pass.
-Any intentional persistent-format change must update the schema baseline,
-migration tests, and fixture version in the same change.
+Copy the project to a temporary directory before any operation that writes,
+migrates, deletes, or creates backup/trash content. Current-project creation
+and schema behavior belong in tests using freshly created projects, not in
+assertions that this historical fixture must remain a current native project.

@@ -41,25 +41,5 @@
     "outline/main_arc.md": "24d1d277cdd43103ef143cc1e47668d6d5ffd8a2c304fd8b4e5a3880843e15c2",
     "project.json": "7c51231a7428612b711662d3f3c9d705a3f6781b09b6076cd9187867487ff7e6",
     "writing/style_guide.md": "7183f9a4fc636b6132857826c88ac3d19c449f1775a2bcb98102c8d7f2b243d2"
-  },
-  "expected": {
-    "project_schema_version": 1,
-    "project_name": "迁移基线：雾港来信",
-    "chapter_ids": [
-      "chapter_01",
-      "chapter_02"
-    ],
-    "character_names": [
-      "林砚",
-      "苏乔"
-    ],
-    "current_chapter": 2,
-    "open_foreshadowing": 1,
-    "resolved_foreshadowing": 1,
-    "directed_relationships": [
-      ["林砚", "苏乔", "互相信任的调查搭档"],
-      ["林砚", "白鸥", "身份不明的线人"],
-      ["苏乔", "林砚", "需要保护但可以托付后背的同伴"]
-    ]
   }
 }
