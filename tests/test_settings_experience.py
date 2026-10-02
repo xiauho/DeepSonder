@@ -107,6 +107,21 @@ class SettingsExperienceTests(unittest.TestCase):
         self.assertEqual(page.memory_timeout.value(), 1800)
         self.assertFalse(page.has_unsaved_changes())
 
+    def test_memory_concurrency_is_explicit_opt_in_and_survives_saved_config(self):
+        page = self.page
+        self.assertEqual(page.memory_concurrency.currentData(), 1)
+        page.memory_concurrency.setCurrentIndex(page.memory_concurrency.findData(2))
+        self.assertTrue(page.has_unsaved_changes())
+        self.assertEqual(page.config()["ai_memory_concurrency"], 2)
+        page.tabs.setCurrentIndex(0)
+        page.tabs.setCurrentIndex(1)
+        self.assertEqual(page.memory_concurrency.currentData(), 2)
+        page.discard_button.click()
+        self.assertEqual(page.memory_concurrency.currentData(), 1)
+        page.set_config({**DEFAULT_CONFIG, "ai_memory_concurrency": 2})
+        self.assertEqual(page.memory_concurrency.currentData(), 2)
+        self.assertFalse(page.has_unsaved_changes())
+
     def test_memory_timeout_remains_visible_at_narrow_width_and_large_type(self):
         from ui.theme import apply_theme
         page = self.page
@@ -117,14 +132,14 @@ class SettingsExperienceTests(unittest.TestCase):
                         apply_theme(self.app, {"theme": theme, "ui_font_size": font_size})
                         page.resize(760, 630)
                         page.tabs.setCurrentIndex(1)
-                        page.section_scrolls[1].ensureWidgetVisible(page.memory_timeout)
+                        page.section_scrolls[1].ensureWidgetVisible(page.memory_concurrency)
                         self.app.processEvents()
-                        field = page.memory_timeout
+                        field = page.memory_concurrency
                         self.assertFalse(field.isHidden())
                         self.assertGreaterEqual(field.width(), field.minimumSizeHint().width())
                         label = page.ai_form.labelForField(field)
                         self.assertIsNotNone(label)
-                        self.assertIn("记忆更新", label.text())
+                        self.assertIn("记忆任务", label.text())
                         content = page.section_scrolls[1].widget()
                         self.assertLessEqual(field.mapTo(content, QPoint(field.width(), 0)).x(), content.width())
                         self.assertEqual(page.section_scrolls[1].horizontalScrollBar().maximum(), 0)

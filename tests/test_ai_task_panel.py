@@ -215,3 +215,28 @@ class AITaskPanelTests(TestCase):
         before = w.output_panel.toPlainText()
         controller._on_memory_progress(object(), event, summary)
         self.assertEqual(w.output_panel.toPlainText(), before)
+
+    def test_memory_reports_are_queued_and_bound_to_current_uncancelled_task(self):
+        import threading
+        from types import SimpleNamespace
+        controller = self.window.ai_workflow_controller
+        run, event = object(), threading.Event()
+        controller._memory_run_id = run
+        report = SimpleNamespace(memory_run_id="diagnostic-run", request_index=2)
+        shown = []
+        with patch.object(controller.inspector, "show_context_report",
+                side_effect=lambda value: shown.append((threading.get_ident(), value))):
+            sender = threading.Thread(target=lambda: controller.memory_context_received.emit(run, event, report))
+            sender.start()
+            sender.join()
+            self.assertEqual(shown, [])
+            self.app.processEvents()
+            self.assertEqual(shown, [(threading.get_ident(), report)])
+            controller._on_context_reported(report)  # generic engine route must not duplicate it
+            controller._on_memory_context_reported(object(), event, report)
+            event.set()
+            controller._on_memory_context_reported(run, event, report)
+            event.clear()
+            controller._memory_run_id = object()  # next task
+            controller._on_memory_context_reported(run, event, report)
+            self.assertEqual(len(shown), 1)

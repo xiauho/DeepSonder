@@ -20,6 +20,7 @@ import tempfile
 import threading
 import time
 import uuid
+import copy
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -163,6 +164,20 @@ class DSHClient:
 
     def set_working_directory(self, directory: str | Path | None) -> None:
         self.working_directory = Path(directory) if directory else None
+
+    def fork_for_memory(self) -> DSHClient:
+        """Snapshot options into a fresh client, never sharing mutable runtime state."""
+        client = DSHClient(
+            dsh_command=self.dsh_command, launcher_args=copy.deepcopy(self.launcher_args),
+            profile=self.profile, timeout=self.timeout, extra_args=copy.deepcopy(self.extra_args),
+            file_prompt_budget=self.file_prompt_budget, task_file_max_bytes=self.task_file_max_bytes,
+            input_token_budget=self.input_token_budget, runtime_reserve_tokens=self.runtime_reserve_tokens,
+            model_context_window_tokens=self.model_context_window_tokens,
+            context_strategy=self.context_strategy, token_estimator=copy.deepcopy(self.token_estimator),
+            report_callback=self.report_callback,
+        )
+        client.use_isolated_workspace()
+        return client
 
     def use_isolated_workspace(self) -> None:
         """Run dsh in a private empty directory instead of the user's project.

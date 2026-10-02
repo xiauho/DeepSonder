@@ -1004,6 +1004,10 @@ class SettingsPage(QWidget):
         self.memory_timeout.setSuffix(" 秒")
         self.memory_timeout.setAccessibleName("整次记忆更新等待上限")
         self.memory_timeout.setToolTip("包含事实提取、归并和提案生成；超时后可复用已校验缓存重新发起。")
+        self.memory_concurrency = QComboBox()
+        self.memory_concurrency.addItem("1 · 稳定（默认）", 1)
+        self.memory_concurrency.addItem("2 · 并发试验", 2)
+        self.memory_concurrency.setAccessibleName("记忆任务同时请求数")
         ai_form.addRow("命令", self.command)
         advanced_form.addRow("启动参数", self.launcher_args)
         advanced_form.addRow("运行配置", self.profile)
@@ -1019,6 +1023,11 @@ class SettingsPage(QWidget):
         memory_wait_hint.setObjectName("mutedLabel")
         memory_wait_hint.setWordWrap(True)
         ai_form.addRow(memory_wait_hint)
+        ai_form.addRow("记忆任务同时请求数", self.memory_concurrency)
+        concurrency_hint = QLabel("只并行独立分块和同轮归并；遇到限流会回到串行。两路模式需确认当前引擎与服务支持同时请求。")
+        concurrency_hint.setObjectName("mutedLabel")
+        concurrency_hint.setWordWrap(True)
+        ai_form.addRow(concurrency_hint)
         ai_layout.addLayout(ai_form)
         ai_layout.addWidget(self.advanced_toggle)
         ai_layout.addWidget(self.advanced_content)
@@ -1189,6 +1198,8 @@ class SettingsPage(QWidget):
         self.extra_args.setText(shlex.join(config.get("dsh_extra_args") or []))
         self.timeout.setValue(int(config.get("dsh_timeout", 600)))
         self.memory_timeout.setValue(int(config.get("ai_memory_timeout", 1800)))
+        self.memory_concurrency.setCurrentIndex(self.memory_concurrency.findData(
+            int(config.get("ai_memory_concurrency", 1))))
         model_window = int(config.get("ai_model_context_window_tokens", 0) or 0)
         context_index = self.model_context_window.findData(model_window)
         if context_index < 0:
@@ -1292,6 +1303,7 @@ class SettingsPage(QWidget):
                 "ai_context_strategy": self.context_strategy.currentData(),
                 "dsh_timeout": self.timeout.value(),
                 "ai_memory_timeout": self.memory_timeout.value(),
+                "ai_memory_concurrency": self.memory_concurrency.currentData(),
                 "theme": self.theme.currentData(),
                 "ui_font_size": self.ui_font_size.value(),
             }

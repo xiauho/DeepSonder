@@ -51,6 +51,7 @@ DEFAULT_CONFIG = {
     "dsh_profile": "headless",
     "dsh_timeout": 600,
     "ai_memory_timeout": DEFAULT_MEMORY_TIMEOUT,
+    "ai_memory_concurrency": 1,
     "dsh_extra_args": [],
     "ai_model_context_window_tokens": DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS,
     "ai_context_strategy": DEFAULT_CONTEXT_STRATEGY,
@@ -240,6 +241,8 @@ def _normalize_config(config: dict[str, Any]) -> None:
     config.pop("ai_memory_pipeline", None)
     config["ai_memory_timeout"] = _bounded_int(config.get("ai_memory_timeout"),
         default=DEFAULT_MEMORY_TIMEOUT, minimum=30, maximum=7200)
+    config["ai_memory_concurrency"] = _bounded_int(config.get("ai_memory_concurrency"),
+        default=1, minimum=1, maximum=2)
     try:
         config["dsh_timeout"] = max(30, min(1800, int(config.get("dsh_timeout", 600))))
     except (TypeError, ValueError):

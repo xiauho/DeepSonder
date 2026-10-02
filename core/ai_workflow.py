@@ -24,6 +24,7 @@ from .accepted_memory import memory_base_state_for
 from .context_budget import build_ai_context
 from .context_profiles import SUMMARY_CONTEXT_PROFILE
 from .dsh_client import DSHClient
+from .context_report import ReportCallback
 from .memory_progress import ProgressCallback, memory_phase
 from .memory_task import DEFAULT_MEMORY_TIMEOUT, MemoryTaskSession
 from .task_controller import AITaskCancelled
@@ -56,10 +57,14 @@ class AIWorkflowService:
         memory_cache_root: Path | None = None,
         progress_callback: ProgressCallback | None = None,
         memory_timeout: int = DEFAULT_MEMORY_TIMEOUT,
+        memory_concurrency: int = 1,
+        memory_report_callback: ReportCallback | None = None,
     ):
         self.dsh = dsh
         self.progress_callback = progress_callback
+        self.memory_report_callback = memory_report_callback
         self.memory_timeout = max(30, int(memory_timeout))
+        self.memory_concurrency = 2 if int(memory_concurrency) == 2 else 1
         self.input_token_budget = int(
             input_token_budget
             if input_token_budget is not None
@@ -211,7 +216,7 @@ class AIWorkflowService:
     ) -> ChapterMemoryProposal:
         """Build an evidence-bound summary and locally applied memory patch."""
         session = MemoryTaskSession(self.dsh, self.memory_timeout, cancel_event,
-                                    self.progress_callback)
+                                    self.progress_callback, self.memory_concurrency, self.memory_report_callback)
         state = "failed"
         try:
             session.check_task_deadline()

@@ -58,6 +58,7 @@ class AIWorkflowController(QObject):
     """
 
     memory_progress_received = Signal(object, object, object)
+    memory_context_received = Signal(object, object, object)
     output_requested = Signal(str)
     status_requested = Signal(str)
     review_requested = Signal(object)
@@ -111,6 +112,9 @@ class AIWorkflowController(QObject):
         ai_controller.finished.connect(self._on_memory_finished)
 
         ai_controller.succeeded.connect(self._on_task_succeeded)
+        self.memory_context_received.connect(
+            self._on_memory_context_reported, Qt.ConnectionType.QueuedConnection
+        )
         report_signal = getattr(ai_engine_controller, "context_reported", None)
         if report_signal is not None and hasattr(report_signal, "connect"):
             report_signal.connect(self._on_context_reported)
@@ -420,6 +424,9 @@ class AIWorkflowController(QObject):
             workflow.progress_callback = lambda event: self.memory_progress_received.emit(
                 run_id, cancel_event, event
             )
+            workflow.memory_report_callback = lambda report: self.memory_context_received.emit(
+                run_id, cancel_event, report
+            )
             return workflow.update_memory(
                 project, chapter_id, cancel_event=cancel_event, force_refresh=force_refresh,
                 refresh_facts=refresh_facts, retry_feedback=retry_feedback
@@ -447,7 +454,8 @@ class AIWorkflowController(QObject):
             self._emit_output(f"记忆更新汇总 · {outcome} · {event.elapsed_ms / 1000:.1f} 秒"
                 f" · 业务请求 {event.request_count} · 文件探测 {event.probe_count}"
                 f" · 回执重试 {event.retry_count} · 缓存复用 {event.cache_hits}"
-                f" · 归并 {event.round_number} 轮")
+                f" · 归并 {event.round_number} 轮 · 同时请求上限 {event.parallelism}"
+                f" · 串行回退 {event.fallback_count}")
             labels = {"chunking": "准备章节", "facts": "提取事实", "merge": "合并事实",
                 "context": "准备资料", "reduction": "归并事实", "proposal": "生成提案",
                 "validation": "校验提案"}
@@ -456,6 +464,14 @@ class AIWorkflowController(QObject):
                 self._emit_output("阶段耗时 · " + " · ".join(times))
             return
         if cancel_event.is_set():
+            return
+        if event.stage == "parallel":
+            if event.state == "fallback":
+                message = ("服务限制同时请求，已停止并等待并发请求退出；继续串行处理未完成部分。"
+                    if event.cache_reason == "capacity" else "当前客户端无法隔离并发请求，已回到串行处理。")
+                self._emit_output(message)
+            else:
+                self._emit_output("记忆更新 · 独立任务最多同时请求 2 路")
             return
         if event.stage == "budget":
             self._emit_output(f"记忆上下文预算 · 必要资料及协议 {event.input_tokens}"
@@ -625,6 +641,7 @@ class AIWorkflowController(QObject):
                 )
             ),
             memory_timeout=int(self.config.get("ai_memory_timeout", 1800)),
+            memory_concurrency=int(self.config.get("ai_memory_concurrency", 1)),
         )
 
     def _save_current_file(self) -> bool:
@@ -734,7 +751,17 @@ class AIWorkflowController(QObject):
             begin_report(kind, chapter_id)
         return True
 
+    def _on_memory_context_reported(self, run_id, cancel_event, report) -> None:
+        if run_id is not self._memory_run_id or cancel_event.is_set():
+            return
+        show_report = getattr(self.inspector, "show_context_report", None)
+        if callable(show_report):
+            show_report(report)
+
     def _on_context_reported(self, report) -> None:
+        # Memory reports use the captured task route above, including serial runs.
+        if getattr(report, "memory_run_id", ""):
+            return
         show_report = getattr(self.inspector, "show_context_report", None)
         if callable(show_report):
             show_report(report)

@@ -12,7 +12,8 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .memory_wire import MEMORY_WIRE_VERSION, WIRE_LEGEND, MemoryWireError, encode_memory_source
-from .memory_progress import MemoryProgress, ProgressCallback, memory_phase, publish_progress
+from .memory_progress import MemoryProgress, ParallelMemoryPhase, ProgressCallback, memory_phase, publish_progress
+from .memory_task import MemoryTaskSession
 from .app_paths import app_cache_dir
 from .chapter_facts import ChapterFactLedger, FactRecord
 from .context_budget import compact_story_state
@@ -636,39 +637,45 @@ def generate_chapter_memory_proposal(
                 batch_budget = max(1, batch_budget // 2)
             else:
                 break
-        for batch_index, (shard_prompt, allowed_ids) in enumerate(prepared, 1):
-            _check_memory_task(dsh, cancel_event)
-            batch = batches[batch_index - 1]
-            checkpoint = proposal_cache.batch_path(ledger, batch, shard_prompt, config_hash)
-            cached_shard = None if refresh_reduction else proposal_cache.load_batch(checkpoint, allowed_ids)
-            if cached_shard is not None:
+        if isinstance(dsh, MemoryTaskSession) and dsh.parallel_enabled and len(prepared) > 1:
+            shards, calls = _reduce_parallel_batches(dsh, ledger, batches, prepared,
+                proposal_cache, config_hash, refresh_reduction, cancel_event,
+                progress_callback, round_number)
+            reduction_calls += calls
+        else:
+            for batch_index, (shard_prompt, allowed_ids) in enumerate(prepared, 1):
                 _check_memory_task(dsh, cancel_event)
-                shards.append(cached_shard)
-                publish_progress(progress_callback, MemoryProgress("reduction", state="cached",
-                    current=batch_index, total=len(batches), round_number=round_number,
-                    cache_hits=1, cache_reason="batch_hit"))
-                continue
-            options = {"cancel_event": cancel_event} if cancel_event is not None else {}
-            with memory_phase(
-                progress_callback, "reduction", current=batch_index,
-                total=len(batches), round_number=round_number,
-                cache_reason="refresh" if refresh_reduction else "unmatched",
-            ):
-                raw = dsh.generate_json(
-                    shard_prompt.system_prompt,
-                    shard_prompt.user_prompt,
-                    context_report=replace(shard_prompt.report,
-                        source_unit=f"round:{round_number}:batch:{batch_index}"),
-                    **options,
-                )
-                _check_cancel(cancel_event)
-                shard = parse_digest_shard(_decode_wire(raw, batch), allowed_ids)
-                if not allowed_ids.issubset(_collect_fact_ids(shard.to_dict())):
-                    raise MemoryProposalError("事实归并遗漏来源证据，已停止；请重新提取或重试。")
-                _check_memory_task(dsh, cancel_event)
-                proposal_cache.save_batch(checkpoint, shard)
-                shards.append(shard)
-            reduction_calls += 1
+                batch = batches[batch_index - 1]
+                checkpoint = proposal_cache.batch_path(ledger, batch, shard_prompt, config_hash)
+                cached_shard = None if refresh_reduction else proposal_cache.load_batch(checkpoint, allowed_ids)
+                if cached_shard is not None:
+                    _check_memory_task(dsh, cancel_event)
+                    shards.append(cached_shard)
+                    publish_progress(progress_callback, MemoryProgress("reduction", state="cached",
+                        current=batch_index, total=len(batches), round_number=round_number,
+                        cache_hits=1, cache_reason="batch_hit"))
+                    continue
+                options = {"cancel_event": cancel_event} if cancel_event is not None else {}
+                with memory_phase(
+                    progress_callback, "reduction", current=batch_index,
+                    total=len(batches), round_number=round_number,
+                    cache_reason="refresh" if refresh_reduction else "unmatched",
+                ):
+                    raw = dsh.generate_json(
+                        shard_prompt.system_prompt,
+                        shard_prompt.user_prompt,
+                        context_report=replace(shard_prompt.report,
+                            source_unit=f"round:{round_number}:batch:{batch_index}"),
+                        **options,
+                    )
+                    _check_cancel(cancel_event)
+                    shard = parse_digest_shard(_decode_wire(raw, batch), allowed_ids)
+                    if not allowed_ids.issubset(_collect_fact_ids(shard.to_dict())):
+                        raise MemoryProposalError("事实归并遗漏来源证据，已停止；请重新提取或重试。")
+                    _check_memory_task(dsh, cancel_event)
+                    proposal_cache.save_batch(checkpoint, shard)
+                    shards.append(shard)
+                reduction_calls += 1
         source = {
             "mode": "digest_shards",
             "base_state_hash": base_state_hash,
@@ -722,6 +729,50 @@ def generate_chapter_memory_proposal(
         proposal_cache.save(proposal, config_hash)
     _check_memory_task(dsh, cancel_event)
     return proposal
+
+
+def _reduce_parallel_batches(dsh, ledger, batches, prepared, cache, config_hash,
+                             refresh, cancel_event, callback, round_number):
+    results, jobs = {}, []
+    requests_before = dsh.requests
+    phase = ParallelMemoryPhase(callback, "reduction", len(batches), round_number)
+    for index, (prompt, allowed_ids) in enumerate(prepared):
+        dsh.check_task_deadline()
+        batch = batches[index]
+        path = cache.batch_path(ledger, batch, prompt, config_hash)
+        cached = None if refresh else cache.load_batch(path, allowed_ids)
+        dsh.check_task_deadline()
+        if cached is not None:
+            results[index] = cached
+            phase.emit("cached", cache_hits=1, cache_reason="batch_hit")
+        else:
+            jobs.append((index, batch, prompt, allowed_ids, path))
+
+    def work(worker, job):
+        index, batch, prompt, allowed_ids, _path = job
+        raw = worker.generate_json(prompt.system_prompt, prompt.user_prompt,
+            context_report=replace(prompt.report,
+                source_unit=f"round:{round_number}:batch:{index + 1}"), cancel_event=cancel_event)
+        shard = parse_digest_shard(_decode_wire(raw, batch), allowed_ids)
+        if not allowed_ids.issubset(_collect_fact_ids(shard.to_dict())):
+            raise MemoryProposalError("事实归并遗漏来源证据，已停止；请重新提取或重试。")
+        return shard
+
+    def accept(job, shard):
+        index, _batch, _prompt, _ids, path = job
+        dsh.check_task_deadline()
+        cache.save_batch(path, shard)
+        results[index] = shard
+        phase.emit("done", cache_reason="refresh" if refresh else "unmatched")
+
+    if jobs:
+        phase.emit("running")
+        try:
+            dsh.run_jobs(jobs, work, accept)
+        except Exception:
+            phase.emit("interrupted")
+            raise
+    return [results[index] for index in range(len(batches))], dsh.requests - requests_before
 
 
 def build_memory_proposal_prompt(

@@ -13,7 +13,8 @@ from typing import Any
 from .app_paths import app_cache_dir
 from .context_report import PromptBundle, PromptContextReport, SectionUsage
 from .json_utils import JSONExtractionError, extract_json
-from .memory_progress import MemoryProgress, ProgressCallback, memory_phase, publish_progress
+from .memory_progress import MemoryProgress, ParallelMemoryPhase, ProgressCallback, memory_phase, publish_progress
+from .memory_task import MemoryTaskSession
 from .project import NovelProject
 from .prompt_transport import estimate_task_input_tokens
 from .storage import atomic_write_text
@@ -353,43 +354,47 @@ def extract_chapter_fact_ledger(
     results: list[ChunkFacts] = []
     cache_hits = 0
     extracted = 0
-    for index, chunk in enumerate(chunks, 1):
-        check_deadline = getattr(dsh, "check_task_deadline", None)
-        if check_deadline is not None:
-            check_deadline()
-        if cancel_event is not None and cancel_event.is_set():
-            raise AITaskCancelled()
-        result = None if force_refresh else ledger_cache.load(chunk)
-        if result is not None:
-            cache_hits += 1
-            results.append(result)
-            publish_progress(progress_callback, MemoryProgress(
-                "facts", state="cached", current=index, total=len(chunks), cache_hits=cache_hits,
-                cache_reason="hit"
-            ))
-            continue
-        prompt = build_chunk_facts_prompt(
-            chapter.title,
-            chunk,
-            input_token_budget=input_token_budget,
-            estimator=estimator,
-        )
-        options = {"cancel_event": cancel_event} if cancel_event is not None else {}
-        with memory_phase(progress_callback, "facts", current=index,
-                          total=len(chunks), cache_hits=cache_hits,
-                          cache_reason="refresh" if force_refresh else "unmatched"):
-            raw = dsh.generate_json(
-                prompt.system_prompt,
-                prompt.user_prompt,
-                context_report=replace(prompt.report, source_unit=chunk.chunk_id),
-                **options,
-            )
+    if isinstance(dsh, MemoryTaskSession) and dsh.parallel_enabled and len(chunks) > 1:
+        results, cache_hits, extracted = _extract_parallel_facts(dsh, chunks, chapter.title,
+            ledger_cache, force_refresh, input_token_budget, estimator, cancel_event, progress_callback)
+    else:
+        for index, chunk in enumerate(chunks, 1):
+            check_deadline = getattr(dsh, "check_task_deadline", None)
+            if check_deadline is not None:
+                check_deadline()
             if cancel_event is not None and cancel_event.is_set():
                 raise AITaskCancelled()
-            result = parse_chunk_facts(raw, chunk)
-            ledger_cache.save(chunk, result)
-        extracted += 1
-        results.append(result)
+            result = None if force_refresh else ledger_cache.load(chunk)
+            if result is not None:
+                cache_hits += 1
+                results.append(result)
+                publish_progress(progress_callback, MemoryProgress(
+                    "facts", state="cached", current=index, total=len(chunks), cache_hits=cache_hits,
+                    cache_reason="hit"
+                ))
+                continue
+            prompt = build_chunk_facts_prompt(
+                chapter.title,
+                chunk,
+                input_token_budget=input_token_budget,
+                estimator=estimator,
+            )
+            options = {"cancel_event": cancel_event} if cancel_event is not None else {}
+            with memory_phase(progress_callback, "facts", current=index,
+                              total=len(chunks), cache_hits=cache_hits,
+                              cache_reason="refresh" if force_refresh else "unmatched"):
+                raw = dsh.generate_json(
+                    prompt.system_prompt,
+                    prompt.user_prompt,
+                    context_report=replace(prompt.report, source_unit=chunk.chunk_id),
+                    **options,
+                )
+                if cancel_event is not None and cancel_event.is_set():
+                    raise AITaskCancelled()
+                result = parse_chunk_facts(raw, chunk)
+                ledger_cache.save(chunk, result)
+            extracted += 1
+            results.append(result)
     with memory_phase(progress_callback, "merge"):
         if callable(getattr(dsh, "check_task_deadline", None)):
             dsh.check_task_deadline()
@@ -403,6 +408,47 @@ def extract_chapter_fact_ledger(
         cache_hits=cache_hits,
         extracted_chunks=extracted,
     )
+
+
+def _extract_parallel_facts(dsh, chunks, title, cache, refresh, budget, estimator, cancel_event, callback):
+    results, jobs = {}, []
+    hits = extracted = 0
+    phase = ParallelMemoryPhase(callback, "facts", len(chunks))
+    for index, chunk in enumerate(chunks):
+        dsh.check_task_deadline()
+        cached = None if refresh else cache.load(chunk)
+        dsh.check_task_deadline()
+        if cached is not None:
+            results[index] = cached
+            hits += 1
+            phase.emit("cached", cache_hits=1, cache_reason="hit")
+        else:
+            prompt = build_chunk_facts_prompt(title, chunk, input_token_budget=budget, estimator=estimator)
+            jobs.append((index, chunk, prompt))
+
+    def work(worker, job):
+        _index, chunk, prompt = job
+        raw = worker.generate_json(prompt.system_prompt, prompt.user_prompt,
+            context_report=replace(prompt.report, source_unit=chunk.chunk_id), cancel_event=cancel_event)
+        return parse_chunk_facts(raw, chunk)
+
+    def accept(job, result):
+        nonlocal extracted
+        index, chunk, _prompt = job
+        dsh.check_task_deadline()
+        cache.save(chunk, result)
+        results[index] = result
+        extracted += 1
+        phase.emit("done", cache_reason="refresh" if refresh else "unmatched")
+
+    if jobs:
+        phase.emit("running")
+        try:
+            dsh.run_jobs(jobs, work, accept)
+        except Exception:
+            phase.emit("interrupted")
+            raise
+    return [results[index] for index in range(len(chunks))], hits, extracted
 
 
 def parse_chunk_facts(raw: str | dict[str, Any], chunk: ChapterChunk) -> ChunkFacts:
