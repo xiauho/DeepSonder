@@ -19,7 +19,7 @@ from core.project import NovelProject
 from core.task_controller import AITaskCancelled
 from core.text_chunking import chunk_chapter
 from core.token_budget import DEFAULT_TOKEN_ESTIMATOR as EST, TokenBudget
-from tests.test_chapter_memory import _MemoryV2DSH, base_state, make_ledger
+from tests.test_chapter_memory import _MemoryV2DSH, base_state, make_ledger, wire_id, wire_refs
 from tests.test_dsh_client import current_task_ack
 
 
@@ -123,8 +123,9 @@ class MemoryBudgetPolicyTests(TestCase):
         calls = []
         def incomplete(_system, user, **_options):
             calls.append(user)
-            ids = list(dict.fromkeys(re.findall(r"fact_[0-9]{4}", user)))
+            ids = wire_refs(user)
             return {"type": "chapter_digest_shard", "schema_version": 1,
+                "wire_request_id": wire_id(user),
                 "summary": "人物变化", "claims": [{"text": "状态变化", "fact_ids": ids[:1]}]}
         dsh = Mock(generate_json=incomplete)
         with self.assertRaisesRegex(MemoryProposalError, "遗漏来源证据"):
@@ -139,8 +140,9 @@ class MemoryBudgetPolicyTests(TestCase):
         def growing(_system, user, **_options):
             calls.append(user)
             self.assertIn("任务类型：chapter_digest_shard", user)
-            ids = list(dict.fromkeys(re.findall(r"fact_[0-9]{4}", user)))
+            ids = wire_refs(user)
             return {"type": "chapter_digest_shard", "schema_version": 1,
+                "wire_request_id": wire_id(user),
                 "summary": "字" * 1500, "claims": [{"text": "字" * 400, "fact_ids": ids}]}
         before = snapshot(self.project)
         with self.assertRaisesRegex(MemoryProposalBudgetError, "未有效收敛"):
@@ -148,7 +150,8 @@ class MemoryBudgetPolicyTests(TestCase):
                 Mock(generate_json=growing), base_state=base_state(), input_token_budget=4000,
                 reduce_batch_tokens=1000, cache=self.cache, progress_callback=events.append)
         self.assertEqual(max(e.round_number for e in events), 1)
-        self.assertFalse(list(self.cache.project_dir.rglob("*.json")))
+        self.assertFalse(list(self.cache.project_dir.rglob("reduction-*.json")))
+        self.assertFalse([p for p in self.cache.project_dir.rglob("*.json") if not p.name.startswith("batch-")])
         self.assertEqual(snapshot(self.project), before)
 
     def test_incomplete_reduction_cache_is_not_reused(self):

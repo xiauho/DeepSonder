@@ -11,6 +11,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Iterable
 
+from .memory_wire import MEMORY_WIRE_VERSION, WIRE_LEGEND, MemoryWireError, encode_memory_source
 from .memory_progress import MemoryProgress, ProgressCallback, memory_phase, publish_progress
 from .app_paths import app_cache_dir
 from .chapter_facts import ChapterFactLedger, FactRecord
@@ -29,8 +30,9 @@ from .token_budget import (
 
 
 MEMORY_SUGGESTION_SCHEMA_VERSION = 2
-MEMORY_PROPOSAL_PROMPT_VERSION = 7
-MEMORY_CACHE_SCHEMA_VERSION = 1
+MEMORY_PROPOSAL_PROMPT_VERSION = 8
+MEMORY_CACHE_SCHEMA_VERSION = 2
+MEMORY_BATCH_CACHE_SCHEMA_VERSION = 1
 DIGEST_SHARD_SCHEMA_VERSION = 1
 DEFAULT_REDUCE_BATCH_TOKENS = 8_000
 MAX_REDUCE_ROUNDS = 10
@@ -196,6 +198,7 @@ class ChapterMemoryProposal:
     evidence_facts: tuple[FactRecord, ...] = ()
     base_state_scope: str = ""
     source_state_hash: str = ""
+    ledger_hash: str = ""
 
     @property
     def summary(self) -> str:
@@ -215,6 +218,7 @@ class ChapterMemoryProposal:
             "chapter_hash": self.chapter_hash,
             "base_state_hash": self.base_state_hash,
             "context_hash": self.context_hash,
+            "ledger_hash": self.ledger_hash,
             "digest": self.digest.to_dict(),
             "changes": [
                 MemoryPatchSuggestion(
@@ -310,8 +314,9 @@ class ChapterMemoryCache:
         ledger: ChapterFactLedger,
         base_state: dict[str, Any],
         context_hash: str,
+        config_hash: str = "",
     ) -> ChapterMemoryProposal | None:
-        path = self._path(ledger, canonical_hash(base_state), context_hash)
+        path = self._path(ledger, canonical_hash(base_state), context_hash, config_hash)
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
             proposal = parse_cached_memory_proposal(
@@ -324,12 +329,14 @@ class ChapterMemoryCache:
         except (OSError, UnicodeError, json.JSONDecodeError, MemoryProposalError):
             return None
 
-    def save(self, proposal: ChapterMemoryProposal) -> None:
+    def save(self, proposal: ChapterMemoryProposal, config_hash: str = "") -> None:
         path = self._path_values(
             proposal.chapter_id,
             proposal.chapter_hash,
             proposal.base_state_hash,
             proposal.context_hash,
+            proposal.ledger_hash,
+            config_hash,
         )
         atomic_write_text(
             path,
@@ -337,9 +344,9 @@ class ChapterMemoryCache:
             encoding="utf-8",
         )
 
-    def load_reduction(self, ledger: ChapterFactLedger) -> dict[str, Any] | None:
+    def load_reduction(self, ledger: ChapterFactLedger, config_hash: str = "") -> dict[str, Any] | None:
         try:
-            value = json.loads(self._reduction_path(ledger).read_text(encoding="utf-8"))
+            value = json.loads(self._reduction_path(ledger, config_hash).read_text(encoding="utf-8"))
             if not isinstance(value, dict) or value.get("mode") != "digest_shards":
                 return None
             raw_shards = value.get("shards")
@@ -360,6 +367,7 @@ class ChapterMemoryCache:
         self,
         ledger: ChapterFactLedger,
         source: dict[str, Any],
+        config_hash: str = "",
     ) -> None:
         if source.get("mode") != "digest_shards":
             return
@@ -368,7 +376,7 @@ class ChapterMemoryCache:
             "shards": source.get("shards", []),
         }
         atomic_write_text(
-            self._reduction_path(ledger),
+            self._reduction_path(ledger, config_hash),
             json.dumps(value, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
@@ -378,12 +386,15 @@ class ChapterMemoryCache:
         ledger: ChapterFactLedger,
         state_hash: str,
         context_hash: str,
+        config_hash: str = "",
     ) -> Path:
         return self._path_values(
             ledger.chapter_id,
             ledger.chapter_hash,
             state_hash,
             context_hash,
+            ledger_fingerprint(ledger),
+            config_hash,
         )
 
     def _path_values(
@@ -392,12 +403,16 @@ class ChapterMemoryCache:
         chapter_hash: str,
         state_hash: str,
         context_hash: str,
+        ledger_hash: str = "",
+        config_hash: str = "",
     ) -> Path:
         key = canonical_hash(
             {
                 "prompt_version": MEMORY_PROPOSAL_PROMPT_VERSION,
                 "chapter_id": chapter_id,
                 "chapter_hash": chapter_hash,
+                "ledger_hash": ledger_hash,
+                "config_hash": config_hash,
                 "state_hash": state_hash,
                 "context_hash": context_hash,
             }
@@ -405,23 +420,77 @@ class ChapterMemoryCache:
         chapter_key = hashlib.sha256(chapter_id.casefold().encode("utf-8")).hexdigest()[:20]
         return self.project_dir / chapter_key / f"{key}.json"
 
-    def _reduction_path(self, ledger: ChapterFactLedger) -> Path:
-        ledger_fingerprint = canonical_hash(
-            {
-                "prompt_version": MEMORY_PROPOSAL_PROMPT_VERSION,
-                "chapter_hash": ledger.chapter_hash,
-                "chunks": [
-                    [item.chunk_id, item.source_hash, item.chunk_summary]
-                    for item in ledger.chunks
-                ],
-                "facts": [item.to_dict() for item in ledger.facts],
-                "unknowns": [item.to_dict() for item in ledger.unknowns],
-            }
-        )
-        chapter_key = hashlib.sha256(
-            ledger.chapter_id.casefold().encode("utf-8")
-        ).hexdigest()[:20]
-        return self.project_dir / chapter_key / f"reduction-{ledger_fingerprint}.json"
+    def _reduction_path(self, ledger: ChapterFactLedger, config_hash: str = "") -> Path:
+        key = canonical_hash([MEMORY_PROPOSAL_PROMPT_VERSION, MEMORY_WIRE_VERSION,
+                              ledger_fingerprint(ledger), config_hash])
+        chapter_key = hashlib.sha256(ledger.chapter_id.casefold().encode("utf-8")).hexdigest()[:20]
+        return self.project_dir / chapter_key / f"reduction-{key}.json"
+
+    def batch_path(self, ledger: ChapterFactLedger, items: list[dict[str, Any]],
+                   prompt: PromptBundle, config_hash: str) -> Path:
+        # Include canonical ids, exact order, rendered protocol and model options.
+        key = canonical_hash([MEMORY_PROPOSAL_PROMPT_VERSION, MEMORY_WIRE_VERSION,
+            ledger.chapter_id, ledger.chapter_hash, items, prompt.system_prompt,
+            prompt.user_prompt, config_hash])
+        chapter_key = hashlib.sha256(ledger.chapter_id.casefold().encode("utf-8")).hexdigest()[:20]
+        return self.project_dir / chapter_key / f"batch-{key}.json"
+
+    def load_batch(self, path: Path, allowed_ids: frozenset[str]) -> DigestShard | None:
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+            if value.get("batch_key") != path.stem or value.get("schema_version") != MEMORY_BATCH_CACHE_SCHEMA_VERSION:
+                return None
+            if canonical_hash(value.get("shard")) != value.get("result_hash"):
+                return None
+            shard = parse_digest_shard(value["shard"], allowed_ids)
+            if not allowed_ids.issubset(_collect_fact_ids(shard.to_dict())):
+                return None
+            return shard
+        except (OSError, UnicodeError, json.JSONDecodeError, MemoryProposalError,
+                TypeError, AttributeError, KeyError):
+            return None
+
+    def save_batch(self, path: Path, shard: DigestShard) -> None:
+        value = {"schema_version": MEMORY_BATCH_CACHE_SCHEMA_VERSION, "batch_key": path.stem, "shard": shard.to_dict(),
+                 "result_hash": canonical_hash(shard.to_dict())}
+        atomic_write_text(path, json.dumps(value, ensure_ascii=False, indent=2) + "\n",
+                          encoding="utf-8")
+
+
+def ledger_fingerprint(ledger: ChapterFactLedger) -> str:
+    return canonical_hash({"chapter_id": ledger.chapter_id, "chapter_hash": ledger.chapter_hash,
+        "chunks": [[item.chunk_id, item.source_hash, item.chunk_summary] for item in ledger.chunks],
+        "facts": [item.to_dict() for item in ledger.facts],
+        "unknowns": [item.to_dict() for item in ledger.unknowns]})
+
+
+def reduction_config_fingerprint(dsh) -> str:
+    # Do not persist command arguments: they may contain credentials. Hash only.
+    values = {}
+    for name in ("dsh_command", "launcher_args", "profile", "extra_args", "context_strategy"):
+        value = getattr(dsh, name, None)
+        values[name] = value if isinstance(value, (str, list, tuple, dict, int, float, bool)) else None
+    return canonical_hash(values)
+
+
+def _decode_wire(raw: str | dict[str, Any], source: object) -> dict[str, Any]:
+    try:
+        wire = encode_memory_source(source, prompt_version=MEMORY_PROPOSAL_PROMPT_VERSION)
+        return wire.decode(_as_object(raw, "章节记忆响应"))
+    except MemoryWireError as exc:
+        raise MemoryProposalError(str(exc)) from exc
+
+
+def _model_source(source: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in source.items()
+            if key not in {"base_state_hash", "chapter_hash", "chapter_id"}}
+
+
+def _check_memory_task(dsh, cancel_event: threading.Event | None) -> None:
+    _check_cancel(cancel_event)
+    check_deadline = getattr(dsh, "check_task_deadline", None)
+    if callable(check_deadline):
+        check_deadline()
 
 
 def canonical_hash(value: object) -> str:
@@ -473,16 +542,18 @@ def generate_chapter_memory_proposal(
     progress_callback: ProgressCallback | None = None,
 ) -> ChapterMemoryProposal:
     """Reduce a fact ledger and produce one locally validated memory proposal."""
-    _check_cancel(cancel_event)
+    _check_memory_task(dsh, cancel_event)
     full_canon_context = str(canon_context or "")
     context_hash = canonical_hash(full_canon_context)
     canon_context = full_canon_context
     proposal_cache = cache or ChapterMemoryCache(project)
-    cached = None if (force_refresh or refresh_reduction or retry_feedback) else proposal_cache.load(ledger, base_state, context_hash)
+    config_hash = reduction_config_fingerprint(dsh)
+    cached = None if (force_refresh or refresh_reduction or retry_feedback) else proposal_cache.load(ledger, base_state, context_hash, config_hash)
     if cached is not None:
-        _check_cancel(cancel_event)
+        _check_memory_task(dsh, cancel_event)
         publish_progress(progress_callback, MemoryProgress("proposal", state="cached", cache_hits=1,
             cache_reason="hit"))
+        _check_memory_task(dsh, cancel_event)
         return _replace_proposal(
             cached,
             base_state_scope=base_state_scope,
@@ -493,7 +564,7 @@ def generate_chapter_memory_proposal(
     prompt_state = relevant_state
     prompt_canon = canon_context
     base_state_hash = canonical_hash(base_state)
-    cached_reduction = None if refresh_reduction else proposal_cache.load_reduction(ledger)
+    cached_reduction = None if refresh_reduction else proposal_cache.load_reduction(ledger, config_hash)
     if cached_reduction is not None:
         publish_progress(progress_callback, MemoryProgress("reduction", state="cached", cache_hits=1))
     source: dict[str, Any] = (
@@ -541,7 +612,8 @@ def generate_chapter_memory_proposal(
             raise MemoryProposalBudgetError("章节事实经过多轮归并后仍超过 token 预算。")
         _check_cancel(cancel_event)
         items = _source_items(source)
-        input_size = estimator.estimate(json.dumps(source, ensure_ascii=False, separators=(",", ":")))
+        input_size = estimator.estimate(json.dumps(encode_memory_source(_model_source(source),
+            prompt_version=MEMORY_PROPOSAL_PROMPT_VERSION).value, ensure_ascii=False, separators=(",", ":")))
         if not items:
             raise MemoryProposalBudgetError(
                 "保留必要设定与证据后，事实归并仍无法装入预算，请增加输入空间。"
@@ -565,11 +637,22 @@ def generate_chapter_memory_proposal(
             else:
                 break
         for batch_index, (shard_prompt, allowed_ids) in enumerate(prepared, 1):
-            _check_cancel(cancel_event)
+            _check_memory_task(dsh, cancel_event)
+            batch = batches[batch_index - 1]
+            checkpoint = proposal_cache.batch_path(ledger, batch, shard_prompt, config_hash)
+            cached_shard = None if refresh_reduction else proposal_cache.load_batch(checkpoint, allowed_ids)
+            if cached_shard is not None:
+                _check_memory_task(dsh, cancel_event)
+                shards.append(cached_shard)
+                publish_progress(progress_callback, MemoryProgress("reduction", state="cached",
+                    current=batch_index, total=len(batches), round_number=round_number,
+                    cache_hits=1, cache_reason="batch_hit"))
+                continue
             options = {"cancel_event": cancel_event} if cancel_event is not None else {}
             with memory_phase(
                 progress_callback, "reduction", current=batch_index,
                 total=len(batches), round_number=round_number,
+                cache_reason="refresh" if refresh_reduction else "unmatched",
             ):
                 raw = dsh.generate_json(
                     shard_prompt.system_prompt,
@@ -579,9 +662,11 @@ def generate_chapter_memory_proposal(
                     **options,
                 )
                 _check_cancel(cancel_event)
-                shard = parse_digest_shard(raw, allowed_ids)
+                shard = parse_digest_shard(_decode_wire(raw, batch), allowed_ids)
                 if not allowed_ids.issubset(_collect_fact_ids(shard.to_dict())):
                     raise MemoryProposalError("事实归并遗漏来源证据，已停止；请重新提取或重试。")
+                _check_memory_task(dsh, cancel_event)
+                proposal_cache.save_batch(checkpoint, shard)
                 shards.append(shard)
             reduction_calls += 1
         source = {
@@ -600,7 +685,8 @@ def generate_chapter_memory_proposal(
             estimator,
             context_hash,
         )
-        output_size = estimator.estimate(json.dumps(source, ensure_ascii=False, separators=(",", ":")))
+        output_size = estimator.estimate(json.dumps(encode_memory_source(_model_source(source),
+            prompt_version=MEMORY_PROPOSAL_PROMPT_VERSION).value, ensure_ascii=False, separators=(",", ":")))
         publish_progress(progress_callback, MemoryProgress("reduction_round", state="done",
             round_number=round_number, input_tokens=input_size, output_tokens=output_size,
             evidence_count=len(_collect_fact_ids(source))))
@@ -609,9 +695,9 @@ def generate_chapter_memory_proposal(
             if output_size >= input_size or stalled_rounds >= 2:
                 raise MemoryProposalBudgetError("事实归并未有效收敛，已停止重复调用；请增加输入空间或重新提取事实。")
 
-    _check_cancel(cancel_event)
-    if source.get("mode") == "digest_shards" and reduction_calls:
-        proposal_cache.save_reduction(ledger, {k: v for k, v in source.items() if k != "validation_feedback"})
+    _check_memory_task(dsh, cancel_event)
+    if source.get("mode") == "digest_shards":
+        proposal_cache.save_reduction(ledger, {k: v for k, v in source.items() if k != "validation_feedback"}, config_hash)
     options = {"cancel_event": cancel_event} if cancel_event is not None else {}
     with memory_phase(progress_callback, "proposal",
             cache_reason="refresh" if (force_refresh or refresh_reduction or retry_feedback) else "unmatched"):
@@ -624,7 +710,7 @@ def generate_chapter_memory_proposal(
     _check_cancel(cancel_event)
     with memory_phase(progress_callback, "validation"):
         proposal = parse_memory_proposal(
-            raw,
+            _decode_wire(raw, _model_source(source)),
             ledger,
             base_state,
             expected_context_hash=context_hash,
@@ -632,7 +718,9 @@ def generate_chapter_memory_proposal(
             source_state_hash=source_state_hash,
         )
         proposal = _replace_proposal(proposal, reduction_calls=reduction_calls)
-        proposal_cache.save(proposal)
+        _check_memory_task(dsh, cancel_event)
+        proposal_cache.save(proposal, config_hash)
+    _check_memory_task(dsh, cancel_event)
     return proposal
 
 
@@ -663,18 +751,16 @@ def build_memory_proposal_prompt(
         "如来源含 validation_feedback，应针对上次失败纠正目标与引用；不能补造事实，"
         "无法支持的 change 应省略，摘要也不得重复该未经支持的更新。"
     )
-    model_source = {
-        key: value
-        for key, value in source.items()
-        if key not in {"base_state_hash", "chapter_hash", "chapter_id"}
-    }
-    source_json = json.dumps(model_source, ensure_ascii=False, separators=(",", ":"))
+    wire = encode_memory_source(_model_source(source), prompt_version=MEMORY_PROPOSAL_PROMPT_VERSION)
+    source_json = json.dumps(wire.value, ensure_ascii=False, separators=(",", ":"))
     state_json = json.dumps(relevant_state, ensure_ascii=False, separators=(",", ":"))
     canon_text = canon_context or "（无相关设定）"
     user_prompt = f"""
 任务类型：chapter_memory_suggestion
 协议版本：{MEMORY_SUGGESTION_SCHEMA_VERSION}
 请求 ID：{request_id}
+传输请求 ID：{wire.wire_request_id}
+{WIRE_LEGEND}
 
 只生成一份章节摘要，唯一权威字段是 digest.summary，不超过 300 个中文字符。
 不要在顶层重复输出 summary。digest 中除 summary 外的每项都必须引用 fact_ids。
@@ -716,9 +802,10 @@ change 参数约束：
   "type": "chapter_memory_suggestion",
   "schema_version": {MEMORY_SUGGESTION_SCHEMA_VERSION},
   "request_id": "{request_id}",
+  "wire_request_id": "{wire.wire_request_id}",
   "digest": {{
     "summary": "章节摘要",
-    "key_events": [{{"text": "事件", "fact_ids": ["fact_xxx"]}}],
+    "key_events": [{{"text": "事件", "fact_ids": ["f1"]}}],
     "character_changes": [],
     "location_changes": [],
     "item_changes": [],
@@ -730,7 +817,7 @@ change 参数约束：
     "subject": "角色名",
     "field": "location",
     "value": "新地点",
-    "evidence_fact_ids": ["fact_xxx"],
+    "evidence_fact_ids": ["f1"],
     "certainty": "explicit"
   }}],
   "conflicts": [{{
@@ -738,7 +825,7 @@ change 参数约束：
     "severity": "warning",
     "target": "characters.角色名.location",
     "description": "冲突说明",
-    "evidence_fact_ids": ["fact_xxx"]
+    "evidence_fact_ids": ["f1"]
   }}]
 }}
 """.strip()
@@ -789,12 +876,15 @@ def build_digest_shard_prompt(
     system_prompt = (
         "你是 DeepSonder 的事实归并器。只压缩输入事实，不增加新事实。只输出合法 JSON。"
     )
-    payload = json.dumps(items, ensure_ascii=False, separators=(",", ":"))
+    wire = encode_memory_source(items, prompt_version=MEMORY_PROPOSAL_PROMPT_VERSION)
+    payload = json.dumps(wire.value, ensure_ascii=False, separators=(",", ":"))
     user_prompt = f"""
 任务类型：chapter_digest_shard
 章节 ID：{ledger.chapter_id}
 章节正文哈希：{ledger.chapter_hash}
 批次：{batch_index}/{batch_count}
+传输请求 ID：{wire.wire_request_id}
+{WIRE_LEGEND}
 
 将下列事实或归并片段压缩为短摘要和关键 claims。每条 claim 必须引用输入中存在的
 fact_ids；优先保留人物状态、地点、物品、关系、时间线和世界规则变化。
@@ -807,9 +897,10 @@ fact_ids；优先保留人物状态、地点、物品、关系、时间线和世
 返回格式：
 {{
   "type": "chapter_digest_shard",
+  "wire_request_id": "{wire.wire_request_id}",
   "schema_version": {DIGEST_SHARD_SCHEMA_VERSION},
   "summary": "批次摘要",
-  "claims": [{{"text": "关键事实", "fact_ids": ["fact_xxx"]}}]
+  "claims": [{{"text": "关键事实", "fact_ids": ["f1"]}}]
 }}
 """.strip()
     estimated = estimate_task_input_tokens(system_prompt, user_prompt, estimator)
@@ -900,6 +991,7 @@ def parse_memory_proposal(
         evidence_facts=ledger.facts,
         base_state_scope=str(base_state_scope or ""),
         source_state_hash=str(source_state_hash or ""),
+        ledger_hash=ledger_fingerprint(ledger),
     )
 
 
@@ -971,6 +1063,7 @@ def parse_cached_memory_proposal(
         "chapter_hash": ledger.chapter_hash,
         "base_state_hash": base_state_hash,
         "context_hash": expected_context_hash,
+        "ledger_hash": ledger_fingerprint(ledger),
     }
     for key, expected_value in expected.items():
         if str(value.get(key) or "") != expected_value:
@@ -1417,7 +1510,8 @@ def _pack_items(
     current: list[dict[str, Any]] = []
     for item in items:
         candidate = [*current, item]
-        rendered = json.dumps(candidate, ensure_ascii=False, separators=(",", ":"))
+        rendered = json.dumps(encode_memory_source(candidate,
+            prompt_version=MEMORY_PROPOSAL_PROMPT_VERSION).value, ensure_ascii=False, separators=(",", ":"))
         if current and estimator.estimate(rendered) > target:
             batches.append(current)
             current = [item]
@@ -1833,6 +1927,7 @@ def _replace_proposal(
             if base_state_scope is None
             else str(base_state_scope or "")
         ),
+        ledger_hash=proposal.ledger_hash,
         source_state_hash=(
             proposal.source_state_hash
             if source_state_hash is None

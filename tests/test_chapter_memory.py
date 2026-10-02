@@ -505,6 +505,17 @@ class ChapterMemoryCommitTests(TestCase):
                 )
 
 
+def wire_id(user):
+    return re.search(r"^传输请求 ID：(.*)$", user, re.MULTILINE).group(1)
+
+
+def wire_refs(user):
+    # Inspect only input JSON; examples in the contract do not supply evidence.
+    label = "【输入】" if "任务类型：chapter_digest_shard" in user else "【章节事实或归并片段】"
+    payload = user.split(label, 1)[1].split("\n\n", 1)[0]
+    return list(dict.fromkeys(re.findall(r'"(f[0-9]+)"', payload)))
+
+
 class _MemoryV2DSH:
     input_token_budget = 24_000
     token_estimator = DEFAULT_TOKEN_ESTIMATOR
@@ -538,12 +549,13 @@ class _MemoryV2DSH:
                 "unknowns": [],
             }
         if "任务类型：chapter_memory_suggestion" in user_prompt:
-            fact_id = re.search(r'"fact_id":"(fact_[a-f0-9]+)"', user_prompt).group(1)
+            fact_id = wire_refs(user_prompt)[0]
             request_id = re.search(r"^请求 ID：(.*)$", user_prompt, re.MULTILINE).group(1)
             return {
                 "type": "chapter_memory_suggestion",
                 "schema_version": 2,
                 "request_id": request_id,
+                "wire_request_id": wire_id(user_prompt),
                 "digest": {
                     "summary": "林舟抵达北港。",
                     "key_events": [{"text": "抵达北港", "fact_ids": [fact_id]}],
@@ -646,10 +658,11 @@ class ChapterMemoryWorkflowTests(TestCase):
 
             def generate_json(self, _system, user, **_kwargs):
                 self.calls.append(user)
-                ids = list(dict.fromkeys(re.findall(r"fact_[0-9]{4}", user)))
+                ids = wire_refs(user)
                 if "任务类型：chapter_digest_shard" in user:
                     return {
                         "type": "chapter_digest_shard",
+                        "wire_request_id": wire_id(user),
                         "schema_version": 1,
                         "summary": "本批次发生若干人物状态变化。",
                         "claims": (
@@ -663,6 +676,7 @@ class ChapterMemoryWorkflowTests(TestCase):
                     "type": "chapter_memory_suggestion",
                     "schema_version": 2,
                     "request_id": request_id,
+                    "wire_request_id": wire_id(user),
                     "digest": {
                         "summary": "多名角色状态发生变化。",
                         "key_events": (
