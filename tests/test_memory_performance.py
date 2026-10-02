@@ -12,7 +12,7 @@ from core.chapter_facts import memory_chunks, build_chunk_facts_prompt
 from core.memory_progress import memory_phase
 from core.project import NovelProject
 from core.task_controller import AITaskCancelled
-from core.text_chunking import chunk_chapter
+from core.text_chunking import bind_memory_chunk_context, chunk_chapter
 from core.token_budget import DEFAULT_TOKEN_ESTIMATOR
 from tests.test_chapter_facts import _LedgerDSH
 from tests.test_chapter_memory import _MemoryV2DSH, base_state
@@ -42,7 +42,8 @@ class MemoryPerformanceTests(TestCase):
             ("字" * 12000, 5000, 24000),
         ):
             with self.subTest(chunk_budget=chunk_budget, input_budget=input_budget, length=len(text)):
-                expected = chunk_chapter("chapter_01", text, target_tokens=chunk_budget)
+                expected = bind_memory_chunk_context(
+                    chunk_chapter("chapter_01", text, target_tokens=chunk_budget), text)
                 self.assertEqual(self.chunks(text, chunk_budget, input_budget), expected)
 
     def test_exact_prompt_budget_can_reject_adaptive_candidate(self):
@@ -53,7 +54,8 @@ class MemoryPerformanceTests(TestCase):
                 raise RuntimeError("budget")
             return build(title, chunk, **options)
         with patch("core.chapter_facts.build_chunk_facts_prompt", side_effect=reject_large):
-            self.assertEqual(self.chunks(text), chunk_chapter("chapter_01", text))
+            self.assertEqual(self.chunks(text), bind_memory_chunk_context(
+                chunk_chapter("chapter_01", text), text))
 
     def test_progress_cache_reuse_and_no_project_write(self):
         with tempfile.TemporaryDirectory() as tmp:

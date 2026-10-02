@@ -1,6 +1,8 @@
 """One memory run's deadline and redacted metrics, independent of Qt."""
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import replace
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from threading import Event, Lock
@@ -11,6 +13,16 @@ from .memory_progress import MemoryProgress, publish_progress
 from .task_controller import AITaskCancelled
 
 DEFAULT_MEMORY_TIMEOUT = 1800
+
+
+def memory_config_fingerprint(client) -> str:
+    """Hash captured invocation settings without persisting sensitive arguments."""
+    values = {}
+    for name in ("dsh_command", "launcher_args", "profile", "extra_args", "context_strategy"):
+        value = getattr(client, name, None)
+        values[name] = value if isinstance(value, (str, list, tuple, dict, int, float, bool)) else None
+    return hashlib.sha256(json.dumps(values, ensure_ascii=False, sort_keys=True,
+                                    separators=(",", ":"), default=str).encode("utf-8")).hexdigest()
 
 
 class MemoryTaskSession:

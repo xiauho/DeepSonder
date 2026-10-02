@@ -13,7 +13,7 @@ from typing import Any, Iterable
 
 from .memory_wire import MEMORY_WIRE_VERSION, WIRE_LEGEND, MemoryWireError, encode_memory_source
 from .memory_progress import MemoryProgress, ParallelMemoryPhase, ProgressCallback, memory_phase, publish_progress
-from .memory_task import MemoryTaskSession
+from .memory_task import MemoryTaskSession, memory_config_fingerprint
 from .app_paths import app_cache_dir
 from .chapter_facts import ChapterFactLedger, FactRecord
 from .context_budget import compact_story_state
@@ -31,7 +31,7 @@ from .token_budget import (
 
 
 MEMORY_SUGGESTION_SCHEMA_VERSION = 2
-MEMORY_PROPOSAL_PROMPT_VERSION = 8
+MEMORY_PROPOSAL_PROMPT_VERSION = 9
 MEMORY_CACHE_SCHEMA_VERSION = 2
 MEMORY_BATCH_CACHE_SCHEMA_VERSION = 1
 DIGEST_SHARD_SCHEMA_VERSION = 1
@@ -466,12 +466,7 @@ def ledger_fingerprint(ledger: ChapterFactLedger) -> str:
 
 
 def reduction_config_fingerprint(dsh) -> str:
-    # Do not persist command arguments: they may contain credentials. Hash only.
-    values = {}
-    for name in ("dsh_command", "launcher_args", "profile", "extra_args", "context_strategy"):
-        value = getattr(dsh, name, None)
-        values[name] = value if isinstance(value, (str, list, tuple, dict, int, float, bool)) else None
-    return canonical_hash(values)
+    return memory_config_fingerprint(dsh)
 
 
 def _decode_wire(raw: str | dict[str, Any], source: object) -> dict[str, Any]:

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import re
-from dataclasses import dataclass
+from collections import Counter
+from dataclasses import dataclass, replace
 
 from .token_budget import (
     DEFAULT_CHUNK_OVERLAP_TOKENS,
@@ -25,6 +26,13 @@ class ChapterChunk:
     annotated_text: str
     estimated_tokens: int
     content_hash: str
+    # Memory-only metadata. Positions never participate in a reusable identity.
+    chunk_strategy: str = "positional-v1"
+    evidence_hashes: tuple[str, ...] = ()
+    context_hashes: tuple[str, ...] = ()
+    context_before: str = ""
+    context_after: str = ""
+    reuse_scope: str = ""
 
     @property
     def anchor(self) -> str:
@@ -109,6 +117,118 @@ def chunk_chapter(
             )
         )
     return tuple(chunks)
+
+
+def stable_memory_chunks(
+    chapter_id: str,
+    text: object,
+    *,
+    target_tokens: int = DEFAULT_CHUNK_TOKEN_BUDGET,
+    overlap_tokens: int = DEFAULT_CHUNK_OVERLAP_TOKENS,
+    estimator: ConservativeTokenEstimator = DEFAULT_TOKEN_ESTIMATOR,
+) -> tuple[ChapterChunk, ...]:
+    """Content-defined paragraph boundaries that can resynchronize after edits.
+
+    A minimum size avoids tiny requests; a hard maximum protects the budget.
+    A paragraph's content hash chooses the intervening cut, independently of
+    its absolute index. Forced cuts can shift locally, then rejoin natural cuts.
+    Oversized single paragraphs retain the established lossless splitter.
+    """
+    chapter_id = str(chapter_id or "").strip()
+    if not chapter_id:
+        raise ValueError("章节分块缺少 chapter_id。")
+    paragraphs = _paragraphs(text)
+    if len(paragraphs) <= 1:
+        return bind_memory_chunk_context(chunk_chapter(chapter_id, text,
+            target_tokens=target_tokens, overlap_tokens=overlap_tokens, estimator=estimator),
+            text, estimator=estimator)
+    target = max(256, int(target_tokens))
+    overlap = max(0, min(int(overlap_tokens), target // 3))
+    core_target = max(128, target - overlap)
+    allowance = estimator.estimate(f"[{chapter_id}:p0000]\n")
+    units = [
+        _Unit(number, piece)
+        for number, paragraph in enumerate(paragraphs, 1)
+        for piece in _split_to_budget(paragraph, max(64, core_target - allowance), estimator)
+    ]
+    groups: list[list[_Unit]] = []
+    current: list[_Unit] = []
+    for unit in units:
+        if current and _estimate_units([*current, unit], chapter_id, estimator) > core_target:
+            groups.append(current)
+            current = []
+        current.append(unit)
+        size = _estimate_units(current, chapter_id, estimator)
+        score = int(hashlib.sha256(unit.text.encode("utf-8")).hexdigest()[:16], 16)
+        probability = min(1.0, estimator.estimate(unit.text) / max(1, core_target / 2))
+        if size >= core_target // 2 and score < int(probability * (1 << 64)):
+            groups.append(current)
+            current = []
+    if current:
+        groups.append(current)
+    chunks = []
+    previous: list[_Unit] = []
+    for index, core in enumerate(groups, 1):
+        tail = _overlap_tail(previous, overlap, chapter_id, estimator)
+        while tail and _estimate_units([*tail, *core], chapter_id, estimator) > target:
+            tail.pop(0)
+        group = [*tail, *core]
+        rendered = "\n\n".join(unit.text for unit in group)
+        annotated = _render_annotated(group, chapter_id)
+        estimated = estimator.estimate(annotated)
+        if estimated > target:
+            raise RuntimeError("章节分块超过配置的 token 上限。")
+        start, end = group[0].paragraph, group[-1].paragraph
+        chunks.append(ChapterChunk(
+            chunk_id=f"{chapter_id}:c{index:04d}:p{start:04d}-p{end:04d}",
+            chapter_id=chapter_id, index=index, start_paragraph=start, end_paragraph=end,
+            text=rendered, annotated_text=annotated, estimated_tokens=estimated,
+            content_hash=hashlib.sha256(rendered.encode("utf-8")).hexdigest(),
+        ))
+        previous = core
+    return bind_memory_chunk_context(tuple(chunks), text, estimator=estimator)
+
+
+def bind_memory_chunk_context(
+    chunks: tuple[ChapterChunk, ...], text: object, *,
+    estimator: ConservativeTokenEstimator = DEFAULT_TOKEN_ESTIMATOR,
+) -> tuple[ChapterChunk, ...]:
+    """Bind exact paragraph evidence and immediate neighboring context.
+
+    Repeated paragraphs and split-paragraph evidence remain snapshot/position
+    bound. Context is bounded for transport, but its hash covers the WHOLE
+    adjacent paragraph, so an edit outside the sent excerpt also invalidates.
+    """
+    paragraphs = _paragraphs(text)
+    hashes = [hashlib.sha256(p.encode("utf-8")).hexdigest() for p in paragraphs]
+    counts = Counter(hashes)
+    full_hash = chapter_content_hash(text)
+    excerpts: dict[int, list[str]] = {}
+
+    def context(number: int, before: bool) -> str:
+        if not 0 <= number < len(paragraphs):
+            return ""
+        if number not in excerpts:
+            excerpts[number] = _split_to_budget(paragraphs[number], 256, estimator)
+        return excerpts[number][-1 if before else 0]
+
+    result = []
+    for chunk in chunks:
+        start, end = chunk.start_paragraph - 1, chunk.end_paragraph
+        evidence = tuple(hashes[start:end])
+        neighbors = (hashes[start - 1] if start else "BOF",
+                     hashes[end] if end < len(hashes) else "EOF")
+        ambiguous = any(counts[h] > 1 for h in (*evidence, *neighbors))
+        # A partial paragraph cannot identify which occurrence of its evidence
+        # was used. Do not move it across snapshots, even if a piece looks equal.
+        covered = "\n\n".join(paragraphs[start:end])
+        partial = chunk.text != covered
+        scope = f"{full_hash}|{chunk.chunk_id}" if ambiguous or partial else ""
+        result.append(replace(chunk, chunk_strategy="memory-cdc-v1",
+            evidence_hashes=evidence, context_hashes=neighbors,
+            context_before=context(start - 1, True), context_after=context(end, False),
+            reuse_scope=scope))
+    return tuple(result)
 
 
 def _paragraphs(text: object) -> list[str]:

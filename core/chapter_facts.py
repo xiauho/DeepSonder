@@ -14,12 +14,15 @@ from .app_paths import app_cache_dir
 from .context_report import PromptBundle, PromptContextReport, SectionUsage
 from .json_utils import JSONExtractionError, extract_json
 from .memory_progress import MemoryProgress, ParallelMemoryPhase, ProgressCallback, memory_phase, publish_progress
-from .memory_task import MemoryTaskSession
+from .memory_task import MemoryTaskSession, memory_config_fingerprint
 from .project import NovelProject
 from .prompt_transport import estimate_task_input_tokens
 from .storage import atomic_write_text
 from .task_controller import AITaskCancelled
-from .text_chunking import ChapterChunk, chapter_content_hash, chunk_chapter
+from .text_chunking import (
+    ChapterChunk, bind_memory_chunk_context, chapter_content_hash, chunk_chapter,
+    stable_memory_chunks,
+)
 from .token_budget import (
     DEFAULT_CHUNK_OVERLAP_TOKENS,
     DEFAULT_CHUNK_TOKEN_BUDGET,
@@ -30,7 +33,8 @@ from .token_budget import (
 
 
 FACT_LEDGER_SCHEMA_VERSION = 1
-FACT_PROMPT_VERSION = 3
+FACT_PROMPT_VERSION = 4
+FACT_CACHE_SCHEMA_VERSION = 2
 FACT_CATEGORIES = frozenset(
     {
         "event",
@@ -137,36 +141,112 @@ class FactLedgerCache:
         project_key = hashlib.sha256(
             str(project.root.resolve()).casefold().encode("utf-8")
         ).hexdigest()[:24]
-        self.root = Path(root) if root is not None else app_cache_dir() / "ai-facts-v1"
-        self.project_dir = self.root / project_key
+        self.root = Path(root) if root is not None else app_cache_dir() / "ai-facts-v2"
+        self.project_dir = self.root / f"v{FACT_CACHE_SCHEMA_VERSION}" / project_key
 
-    def load(self, chunk: ChapterChunk) -> ChunkFacts | None:
-        path = self._path(chunk)
+    def load(self, chunk: ChapterChunk, *, request_context: str = "") -> ChunkFacts | None:
+        path = self._path(chunk, request_context)
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
-            return parse_chunk_facts(value, chunk)
-        except (OSError, UnicodeError, json.JSONDecodeError, FactProtocolError):
+            if not isinstance(value, dict) or value.get("schema_version") != FACT_CACHE_SCHEMA_VERSION:
+                return None
+            identity = self._identity(chunk, request_context)
+            if value.get("identity") != identity or value.get("cache_key") != path.stem:
+                return None
+            payload = value["result"]
+            if _cache_hash(payload) != value.get("result_hash"):
+                return None
+            # Free text is never rewritten. If it mentions source positions,
+            # only the identical original position is allowed to load it.
+            if value.get("position_bound") and value.get("original_chunk_id") != chunk.chunk_id:
+                return None
+            if value.get("position_bound") != _position_sensitive(payload, chunk.chapter_id):
+                return None
+            current = dict(payload)
+            current.update(type="chapter_chunk_facts", schema_version=FACT_LEDGER_SCHEMA_VERSION,
+                chapter_id=chunk.chapter_id, chunk_id=chunk.chunk_id, source_hash=chunk.content_hash)
+            for key in ("facts", "unknowns"):
+                current[key] = [self._restore_evidence(item, chunk) for item in payload[key]]
+            # Recompute local fact IDs and validate every mapped anchor in the
+            # current range. Stored IDs/absolute anchors are never authoritative.
+            return parse_chunk_facts(current, chunk)
+        except (OSError, UnicodeError, json.JSONDecodeError, FactProtocolError,
+                KeyError, TypeError, ValueError):
             return None
 
-    def save(self, chunk: ChapterChunk, result: ChunkFacts) -> None:
+    def save(self, chunk: ChapterChunk, result: ChunkFacts, *, request_context: str = "") -> None:
         validated = parse_chunk_facts(result.to_dict(), chunk)
+        payload = {"chunk_summary": validated.chunk_summary,
+            "completion_message": validated.completion_message,
+            "facts": [self._relative_evidence(item.to_dict(), chunk) for item in validated.facts],
+            "unknowns": [self._relative_evidence(item.to_dict(), chunk) for item in validated.unknowns]}
+        path = self._path(chunk, request_context)
+        value = {"schema_version": FACT_CACHE_SCHEMA_VERSION, "cache_key": path.stem,
+            "identity": self._identity(chunk, request_context), "result": payload,
+            "result_hash": _cache_hash(payload), "original_chunk_id": chunk.chunk_id,
+            "position_bound": _position_sensitive(payload, chunk.chapter_id)}
         atomic_write_text(
-            self._path(chunk),
-            json.dumps(validated.to_dict(), ensure_ascii=False, indent=2) + "\n",
+            path, json.dumps(value, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
 
-    def _path(self, chunk: ChapterChunk) -> Path:
-        cache_key = hashlib.sha256(
-            (
-                f"v{FACT_PROMPT_VERSION}|{chunk.chapter_id}|"
-                f"{chunk.chunk_id}|{chunk.content_hash}"
-            ).encode("utf-8")
-        ).hexdigest()
+    def _identity(self, chunk: ChapterChunk, request_context: str) -> dict[str, Any]:
+        return {"prompt_version": FACT_PROMPT_VERSION, "strategy": chunk.chunk_strategy,
+            "chapter_id": chunk.chapter_id, "source_hash": chunk.content_hash,
+            "evidence_hashes": list(chunk.evidence_hashes), "context_hashes": list(chunk.context_hashes),
+            "context_transport_hash": _cache_hash([chunk.context_before, chunk.context_after]),
+            "scope": chunk.reuse_scope if chunk.evidence_hashes else chunk.chunk_id,
+            "request_context": request_context}
+
+    def _path(self, chunk: ChapterChunk, request_context: str = "") -> Path:
+        cache_key = _cache_hash(self._identity(chunk, request_context))
         chapter_key = hashlib.sha256(
             chunk.chapter_id.casefold().encode("utf-8")
         ).hexdigest()[:20]
         return self.project_dir / chapter_key / (cache_key + ".json")
+
+    @staticmethod
+    def _relative_evidence(item: dict, chunk: ChapterChunk) -> dict:
+        item = dict(item)
+        anchor = _validate_anchor(item.pop("anchor"), chunk)
+        item.pop("fact_id", None)
+        match = re.fullmatch(r".+:p(\d{4})(?:-p(\d{4}))?", anchor)
+        start, end = int(match[1]), int(match[2] or match[1])
+        item["relative_anchor"] = [start - chunk.start_paragraph, end - chunk.start_paragraph]
+        item["anchor_is_range"] = match[2] is not None
+        return item
+
+    @staticmethod
+    def _restore_evidence(item: dict, chunk: ChapterChunk) -> dict:
+        item = dict(item)
+        offsets = item.pop("relative_anchor")
+        is_range = item.pop("anchor_is_range")
+        if (not isinstance(offsets, list) or len(offsets) != 2
+                or any(type(n) is not int for n in offsets) or type(is_range) is not bool):
+            raise FactProtocolError("缓存的相对证据位置无效。")
+        start, end = offsets
+        count = chunk.end_paragraph - chunk.start_paragraph + 1
+        if start < 0 or start > end or end >= count or (not is_range and start != end):
+            raise FactProtocolError("缓存的相对证据位置超出当前分块。")
+        # Entire ordered paragraph hashes are part of the checked identity.
+        if chunk.evidence_hashes and len(chunk.evidence_hashes) != count:
+            raise FactProtocolError("缓存的段落证据无法无歧义重映射。")
+        item["anchor"] = f"{chunk.chapter_id}:p{chunk.start_paragraph + start:04d}"
+        if is_range:
+            item["anchor"] += f"-p{chunk.start_paragraph + end:04d}"
+        return item
+
+
+def _cache_hash(value: object) -> str:
+    return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True,
+                                    separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _position_sensitive(payload: dict, chapter_id: str) -> bool:
+    text = json.dumps(payload, ensure_ascii=False)
+    return bool(re.search(
+        rf"{re.escape(chapter_id)}:[pc]\d{{4}}|(?<![A-Za-z0-9_])[pc]\d{{4}}(?![A-Za-z0-9_])",
+        text, re.IGNORECASE))
 
 
 def build_chunk_facts_prompt(
@@ -197,6 +277,9 @@ location 类事实的 value 应优先写正文能够直接支持的简洁规范�
 同一锚点的同一事实不要换词重复，不要把同一变化拆成多条空泛描述。
 不得为追求简短遗漏独立事实、不同时间的状态变化、矛盾证据，或角色到达地点的依据。
 事实较多时仍须完整保留，不按条数截断；氛围和修辞不单独列为事实。
+邻接上下文仅用于消解本分块中的指代，不从上下文单独提取事实或锚点。
+上下文可能是邻段的片段，不能确定指代时保留为 uncertain 或 unknowns，不补全。
+摘要及事实文本不要包含分块编号或来源锚点；证据位置仅放在 anchor 字段。
 
 章节：{str(chapter_title or chunk.chapter_id).strip()}
 章节 ID：{chunk.chapter_id}
@@ -204,8 +287,14 @@ location 类事实的 value 应优先写正文能够直接支持的简洁规范�
 来源哈希：{chunk.content_hash}
 允许锚点范围：p{chunk.start_paragraph:04d} 至 p{chunk.end_paragraph:04d}
 
+【前邻段上下文，仅供指代消解】
+{chunk.context_before or "（无）"}
+
 【章节正文分块】
 {chunk.annotated_text}
+
+【后邻段上下文，仅供指代消解】
+{chunk.context_after or "（无）"}
 
 返回格式：
 {{
@@ -239,14 +328,16 @@ category 仅允许：{", ".join(sorted(FACT_CATEGORIES))}。
 """.strip()
     estimated = estimate_task_input_tokens(system_prompt, user_prompt, estimator)
     budget = max(0, int(input_token_budget))
+    neighbor_chars = len(chunk.context_before) + len(chunk.context_after)
+    context_chars = len(chunk.annotated_text) + neighbor_chars
     report = PromptContextReport(
         schema_version=1,
         task_kind="chapter_chunk_facts",
         chapter_id=chunk.chapter_id,
         prompt_budget=len(system_prompt) + len(user_prompt),
-        context_budget=len(chunk.annotated_text),
+        context_budget=context_chars,
         overhead_chars=(
-            len(system_prompt) + len(user_prompt) - len(chunk.annotated_text)
+            len(system_prompt) + len(user_prompt) - context_chars
         ),
         system_prompt_chars=len(system_prompt),
         user_prompt_chars=len(user_prompt),
@@ -260,6 +351,8 @@ category 仅允许：{", ".join(sorted(FACT_CATEGORIES))}。
                 priority=0,
                 keep="head",
             ),
+            SectionUsage(key="neighbor_context", source_chars=neighbor_chars,
+                sent_chars=neighbor_chars, status="full", priority=0, keep="head"),
         ),
         input_token_budget=budget,
         estimated_input_tokens=estimated,
@@ -287,7 +380,7 @@ def memory_chunks(
 
     Use at most half the business input budget for chapter content.
     The exact prompt is also checked with transport wrapper headroom.
-    Longer chapters retain the established paragraph-aware chunk boundaries.
+    Longer chapters use content-defined, bounded paragraph boundaries.
     """
     target = chunk_token_budget
     ceiling = min(8_000, input_token_budget // 2)
@@ -298,6 +391,7 @@ def memory_chunks(
     ):
         candidates = chunk_chapter(chapter_id, content, target_tokens=ceiling,
                                    overlap_tokens=overlap_tokens, estimator=estimator)
+        candidates = bind_memory_chunk_context(candidates, content, estimator=estimator)
         if len(candidates) == 1:
             try:
                 build_chunk_facts_prompt(chapter_title, candidates[0],
@@ -309,7 +403,7 @@ def memory_chunks(
     # Preflight every chunk before spending an AI request. Reduce content only
     # by splitting it further, never by truncating the chapter.
     while True:
-        chunks = chunk_chapter(chapter_id, content, target_tokens=target,
+        chunks = stable_memory_chunks(chapter_id, content, target_tokens=target,
                                overlap_tokens=overlap_tokens, estimator=estimator)
         try:
             for chunk in chunks:
@@ -351,20 +445,19 @@ def extract_chapter_fact_ledger(
             estimator=estimator,
         )
     ledger_cache = cache or FactLedgerCache(project)
+    request_context = _cache_hash([str(chapter.title or chapter_id).strip(), memory_config_fingerprint(dsh)])
     results: list[ChunkFacts] = []
     cache_hits = 0
     extracted = 0
     if isinstance(dsh, MemoryTaskSession) and dsh.parallel_enabled and len(chunks) > 1:
         results, cache_hits, extracted = _extract_parallel_facts(dsh, chunks, chapter.title,
-            ledger_cache, force_refresh, input_token_budget, estimator, cancel_event, progress_callback)
+            ledger_cache, force_refresh, input_token_budget, estimator, cancel_event,
+            progress_callback, request_context)
     else:
         for index, chunk in enumerate(chunks, 1):
-            check_deadline = getattr(dsh, "check_task_deadline", None)
-            if check_deadline is not None:
-                check_deadline()
-            if cancel_event is not None and cancel_event.is_set():
-                raise AITaskCancelled()
-            result = None if force_refresh else ledger_cache.load(chunk)
+            _check_fact_task(dsh, cancel_event)
+            result = None if force_refresh else ledger_cache.load(chunk, request_context=request_context)
+            _check_fact_task(dsh, cancel_event)
             if result is not None:
                 cache_hits += 1
                 results.append(result)
@@ -389,15 +482,14 @@ def extract_chapter_fact_ledger(
                     context_report=replace(prompt.report, source_unit=chunk.chunk_id),
                     **options,
                 )
-                if cancel_event is not None and cancel_event.is_set():
-                    raise AITaskCancelled()
+                _check_fact_task(dsh, cancel_event)
                 result = parse_chunk_facts(raw, chunk)
-                ledger_cache.save(chunk, result)
+                _check_fact_task(dsh, cancel_event)
+                ledger_cache.save(chunk, result, request_context=request_context)
             extracted += 1
             results.append(result)
     with memory_phase(progress_callback, "merge"):
-        if callable(getattr(dsh, "check_task_deadline", None)):
-            dsh.check_task_deadline()
+        _check_fact_task(dsh, cancel_event)
         facts, unknowns = merge_chunk_facts(results)
     return ChapterFactLedger(
         chapter_id=chapter_id,
@@ -410,14 +502,15 @@ def extract_chapter_fact_ledger(
     )
 
 
-def _extract_parallel_facts(dsh, chunks, title, cache, refresh, budget, estimator, cancel_event, callback):
+def _extract_parallel_facts(dsh, chunks, title, cache, refresh, budget, estimator, cancel_event,
+                            callback, request_context):
     results, jobs = {}, []
     hits = extracted = 0
     phase = ParallelMemoryPhase(callback, "facts", len(chunks))
     for index, chunk in enumerate(chunks):
-        dsh.check_task_deadline()
-        cached = None if refresh else cache.load(chunk)
-        dsh.check_task_deadline()
+        _check_fact_task(dsh, cancel_event)
+        cached = None if refresh else cache.load(chunk, request_context=request_context)
+        _check_fact_task(dsh, cancel_event)
         if cached is not None:
             results[index] = cached
             hits += 1
@@ -435,8 +528,8 @@ def _extract_parallel_facts(dsh, chunks, title, cache, refresh, budget, estimato
     def accept(job, result):
         nonlocal extracted
         index, chunk, _prompt = job
-        dsh.check_task_deadline()
-        cache.save(chunk, result)
+        _check_fact_task(dsh, cancel_event)
+        cache.save(chunk, result, request_context=request_context)
         results[index] = result
         extracted += 1
         phase.emit("done", cache_reason="refresh" if refresh else "unmatched")
@@ -449,6 +542,14 @@ def _extract_parallel_facts(dsh, chunks, title, cache, refresh, budget, estimato
             phase.emit("interrupted")
             raise
     return [results[index] for index in range(len(chunks))], hits, extracted
+
+
+def _check_fact_task(dsh, cancel_event):
+    if cancel_event is not None and cancel_event.is_set():
+        raise AITaskCancelled()
+    check = getattr(dsh, "check_task_deadline", None)
+    if callable(check):
+        check()
 
 
 def parse_chunk_facts(raw: str | dict[str, Any], chunk: ChapterChunk) -> ChunkFacts:

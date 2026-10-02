@@ -39,6 +39,7 @@ SECTION_LABELS = {
     "plot_brief": "剧情简写",
     "style": "写作风格",
     "content": "章节正文",
+    "neighbor_context": "邻段参考片段",
     "generated_content": "生成正文复核",
     "selected_foreshadowing": "重点伏笔",
     "core_power": "常驻核心规则",
