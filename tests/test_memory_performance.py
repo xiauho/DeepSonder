@@ -47,7 +47,12 @@ class MemoryPerformanceTests(TestCase):
 
     def test_exact_prompt_budget_can_reject_adaptive_candidate(self):
         text = "字" * 6000
-        with patch("core.chapter_facts.build_chunk_facts_prompt", side_effect=RuntimeError("budget")):
+        build = build_chunk_facts_prompt
+        def reject_large(title, chunk, **options):
+            if chunk.estimated_tokens > 5000:
+                raise RuntimeError("budget")
+            return build(title, chunk, **options)
+        with patch("core.chapter_facts.build_chunk_facts_prompt", side_effect=reject_large):
             self.assertEqual(self.chunks(text), chunk_chapter("chapter_01", text))
 
     def test_progress_cache_reuse_and_no_project_write(self):
@@ -65,7 +70,9 @@ class MemoryPerformanceTests(TestCase):
             workflow.update_memory(project, "chapter_01")
             self.assertEqual(len(dsh.calls), 2)
             stages = [e.stage for e in events if e.state == "done"]
-            self.assertEqual(stages, ["chunking", "facts", "merge", "context", "proposal", "validation"])
+            self.assertEqual(stages, ["chunking", "facts", "merge", "context", "budget", "proposal", "validation", "summary"])
+            self.assertEqual(events[-1].request_count, 2)
+            self.assertTrue(events[-1].run_id)
             self.assertTrue(all(e.elapsed_ms >= 0 for e in events))
             self.assertNotIn("林舟", json.dumps([asdict(e) for e in events], ensure_ascii=False))
             events.clear()
@@ -96,7 +103,9 @@ class MemoryPerformanceTests(TestCase):
                 workflow.update_memory(project, "chapter_01", cancel_event=event)
             self.assertEqual(len(fake.calls), 1)
             self.assertFalse(list((root / "cache").rglob("*.json")))
-            self.assertEqual(events[-1].state, "interrupted")
+            self.assertEqual(events[-1].stage, "summary")
+            self.assertEqual(events[-1].state, "cancelled")
+            self.assertEqual(events[-2].state, "interrupted")
 
     def test_phase_times_failure_and_ignores_display_failure(self):
         events = []

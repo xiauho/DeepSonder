@@ -123,6 +123,9 @@ def render_context_reports(reports: list[PromptContextReport]) -> str:
             "pending": "等待传输",
         }.get(report.transport, report.transport)
         task_label = TASK_LABELS.get(report.task_kind, report.task_kind)
+        if report.memory_run_id:
+            blocks.append(f"<p class='muted'>运行 {html.escape(report.memory_run_id)}"
+                f" · 请求 {report.request_index} · {html.escape(report.source_unit or '最终提案')}</p>")
         outcome_label = OUTCOME_LABELS.get(report.outcome, report.outcome)
         blocks.append(
             f"<h2>{index}. {html.escape(task_label)}</h2>"

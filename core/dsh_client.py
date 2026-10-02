@@ -11,7 +11,6 @@ file-read probe succeeds. The command line carries only a short loader task.
 
 from __future__ import annotations
 
-import hashlib
 import os
 import re
 import signal
@@ -26,6 +25,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .prompt_transport import (
+    DSH_FILE_ACK_PREFIX, DSH_FILE_READ_FAILED, DSH_FILE_TASK_SCHEMA,
+    combine_prompts, inject_middle_challenge, task_file_envelope,
+    estimate_task_input_tokens,
+)
 from .context_budget import DEFAULT_PROMPT_BUDGET
 from .context_report import PromptContextReport, ReportCallback
 from .task_controller import AITaskCancelled
@@ -44,9 +48,6 @@ WINDOWS_CMDLINE_LIMIT = 7800
 WINDOWS_CREATEPROCESS_LIMIT = 30000
 DSH_PROBE_MARKER = "NOVALIST_PROBE_OK"
 DSH_FILE_PROBE_PREFIX = "NOVALIST_FILE_PROBE_"
-DSH_FILE_READ_FAILED = "NOVALIST_FILE_TASK_READ_FAILED"
-DSH_FILE_TASK_SCHEMA = "NOVALIST_TASK_FILE_V1"
-DSH_FILE_ACK_PREFIX = "NOVALIST_FILE_ACK:"
 DSH_FILE_ACK_SEARCH_LINES = 6
 DEFAULT_TASK_FILE_MAX_BYTES = 512_000
 EMPTY_TASK_HINTS = (
@@ -204,17 +205,16 @@ class DSHClient:
         timeout_override: int | None = None,
         cancel_event: threading.Event | None = None,
         context_report: PromptContextReport | None = None,
+        task_deadline: float | None = None,
+        invocation_callback: ReportCallback | None = None,
     ) -> str:
         """Run dsh with argv as control plane and one task file as data plane."""
         invocation_started = time.perf_counter()
         timings: dict[str, float] = {}
         output_chars = 0
         combined = self._combine_prompts(system_prompt, user_prompt)
-        estimated_input_tokens = max(
-            self.token_estimator.estimate_pair(system_prompt, user_prompt),
-            # Measure the exact wrapper sent to DSH as well.  The fixed role
-            # allowance covers Harness framing that is not visible here.
-            self.token_estimator.estimate(combined) + 32,
+        estimated_input_tokens = estimate_task_input_tokens(
+            system_prompt, user_prompt, self.token_estimator
         )
         effective_timeout = max(
             1,
@@ -226,6 +226,7 @@ class DSHClient:
         file_ack_retry_count = 0
         file_ack_error = ""
         outcome = "failed"
+        probe_count = 0
         self._last_command_chars = 0
         try:
             if cancel_event is not None and cancel_event.is_set():
@@ -233,13 +234,15 @@ class DSHClient:
             if not self.token_budget.accepts(estimated_input_tokens):
                 raise RuntimeError(
                     "DeepSonder 业务提示词超过输入 token 安全上限"
-                    f"（估算 {estimated_input_tokens} > {self.input_token_budget}）。"
+                    f"（含传输包装估算 {estimated_input_tokens} > {self.token_budget.effective_input_limit}）。"
                     "请缩减上下文、降低分块大小或先执行摘要后重试。"
                 )
             with _measure_elapsed(timings, "probe_ms"):
+                probe_count = int(self._file_transport_supported is not True)
                 supported = self._ensure_file_transport_support(
-                    timeout=min(effective_timeout, 30),
+                    timeout=self._remaining_timeout(min(effective_timeout, 30), task_deadline, cancel_event),
                     cancel_event=cancel_event,
+                    task_deadline=task_deadline,
                 )
             if not supported:
                 transport = "file_unavailable"
@@ -247,6 +250,7 @@ class DSHClient:
                     "DeepSeek Harness 无法验证读取 DeepSonder 的临时任务文件。"
                     "为避免提示词截断，本次任务已停止；请检查 headless 的文件读取能力。"
                 )
+            self._remaining_timeout(effective_timeout, task_deadline, cancel_event)
             task_file = self._write_task_file(combined)
             transmitted_prompt = self._file_loader_prompt(task_file.path.name)
             self._last_command_chars = 0
@@ -254,9 +258,10 @@ class DSHClient:
                 result = self._execute_prompt(
                     transmitted_prompt,
                     session_id=session_id,
-                    timeout=effective_timeout,
+                    timeout=self._remaining_timeout(effective_timeout, task_deadline, cancel_event),
                     cancel_event=cancel_event,
                     submitted_prompt_length=len(combined),
+                    task_deadline=task_deadline,
                 )
             if task_file is not None:
                 try:
@@ -265,15 +270,17 @@ class DSHClient:
                     # Headless exposes only model-authored final text, not a
                     # native transport receipt. Reuse the exact task file and
                     # nonce challenge for one bounded formatting retry.
-                    file_ack_retry_count = 1
                     file_ack_error = first_error.reason
+                    retry_timeout = self._remaining_timeout(effective_timeout, task_deadline, cancel_event)
+                    file_ack_retry_count = 1
                     with _measure_elapsed(timings, "retry_ms"):
                         result = self._execute_prompt(
                             self._file_loader_prompt(task_file.path.name, retry=True),
                             session_id=session_id,
-                            timeout=effective_timeout,
+                            timeout=retry_timeout,
                             cancel_event=cancel_event,
                             submitted_prompt_length=len(combined),
+                            task_deadline=task_deadline,
                         )
                     try:
                         result = self._validate_file_response(result, task_file)
@@ -284,6 +291,7 @@ class DSHClient:
                             "自动重试一次后仍无法确认业务提示词已跨段读取。"
                         ) from None
                 file_ack_verified = True
+            self._remaining_timeout(effective_timeout, task_deadline, cancel_event)
             outcome = "success"
             output_chars = len(result)
             return result
@@ -300,6 +308,7 @@ class DSHClient:
                 completed_report = context_report.complete_invocation(
                     invocation_ms=(time.perf_counter() - invocation_started) * 1000,
                     output_chars=output_chars,
+                    probe_count=probe_count,
                     **timings,
                     transport=transport,
                     submitted_prompt_chars=len(combined),
@@ -310,7 +319,7 @@ class DSHClient:
                     file_ack_verified=file_ack_verified,
                     file_ack_retry_count=file_ack_retry_count,
                     file_ack_error=file_ack_error,
-                    input_token_budget=self.input_token_budget,
+                    input_token_budget=self.token_budget.effective_input_limit,
                     runtime_reserve_tokens=self.runtime_reserve_tokens,
                     model_context_window_tokens=self.model_context_window_tokens,
                     context_strategy=self.context_strategy,
@@ -318,6 +327,22 @@ class DSHClient:
                     token_estimator=self.token_estimator.name,
                 )
                 self._publish_context_report(completed_report)
+                if invocation_callback is not None:
+                    try:
+                        invocation_callback(completed_report)
+                    except Exception:
+                        pass
+
+    @staticmethod
+    def _remaining_timeout(limit: float, deadline: float | None, cancel_event=None) -> float:
+        if cancel_event is not None and cancel_event.is_set():
+            raise AITaskCancelled()
+        if deadline is None:
+            return limit
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RuntimeError("整次记忆更新等待超时，已停止新请求；可重新发起并复用已校验缓存。")
+        return min(limit, remaining)
 
     def prompt_build_budget(self) -> int:
         """Return a conservative character budget below the token hard limit."""
@@ -333,6 +358,7 @@ class DSHClient:
         timeout: int,
         cancel_event: threading.Event | None,
         submitted_prompt_length: int,
+        task_deadline: float | None = None,
     ) -> str:
         command = self._resolve_command()
         cmd = [command, *self.launcher_args, "--profile", self.profile]
@@ -342,6 +368,7 @@ class DSHClient:
         cmd.append(self._serialize_prompt_argument(prompt))
         cmd = self._prepare_command_for_prompt(cmd, command)
         self._last_command_chars = len(subprocess.list2cmdline(cmd))
+        timeout = self._remaining_timeout(timeout, task_deadline, cancel_event)
 
         if cancel_event is not None:
             return self._generate_cancellable(
@@ -520,6 +547,7 @@ class DSHClient:
         *,
         timeout: int,
         cancel_event: threading.Event | None,
+        task_deadline: float | None = None,
     ) -> bool:
         """Probe once whether this headless composition can read a task file."""
         if self._file_transport_supported is True:
@@ -537,9 +565,10 @@ class DSHClient:
             raw_output = self._execute_prompt(
                 self._file_loader_prompt(task_file.path.name),
                 session_id=None,
-                timeout=max(1, int(timeout)),
+                timeout=timeout,
                 cancel_event=cancel_event,
                 submitted_prompt_length=len(probe_payload),
+                task_deadline=task_deadline,
             )
             try:
                 output = self._validate_file_response(raw_output, task_file)
@@ -565,32 +594,8 @@ class DSHClient:
         nonce_head = uuid.uuid4().hex.upper()
         nonce_middle = uuid.uuid4().hex.upper()
         nonce_tail = uuid.uuid4().hex.upper()
-        payload = str(prompt)
-        challenged_payload = self._inject_middle_challenge(payload, nonce_middle)
-        payload_bytes = challenged_payload.encode("utf-8")
-        payload_sha256 = hashlib.sha256(payload_bytes).hexdigest()
-        envelope = (
-            f"{DSH_FILE_TASK_SCHEMA}\n"
-            f"task_id: {task_id}\n"
-            "encoding: UTF-8\n"
-            f"payload_chars: {len(challenged_payload)}\n"
-            f"payload_bytes: {len(payload_bytes)}\n"
-            f"payload_sha256: {payload_sha256}\n"
-            f"task_nonce_head: {nonce_head}\n\n"
-            "[传输协议]\n"
-            "- 必须完整读取本文件后再执行任务。\n"
-            "- 任务正文中部和文件末尾还有随机校验值。最终回复第一行必须严格使用格式：\n"
-            f"  {DSH_FILE_ACK_PREFIX}<task_nonce_head>:<task_nonce_middle>:<task_nonce_tail>\n"
-            "- 业务任务中的‘只输出 JSON’、‘只输出正文’或类似要求，只约束回执后的"
-            "业务结果；传输回执始终是第一行，业务结果始终从第二行开始。\n"
-            "- NOVALIST_TRANSPORT_CHECKPOINT 仅用于传输校验，不属于任务正文。\n"
-            "- 从第二行开始输出任务要求的结果，不要重复或解释传输协议。\n"
-            f"- 如果无法完整读取文件，只回复 {DSH_FILE_READ_FAILED}。\n\n"
-            f"{challenged_payload}\n"
-            "NOVALIST_TASK_FILE_FOOTER\n"
-            "再次确认：无论业务输出格式如何，第一行先输出三段 nonce 回执，"
-            "第二行起再输出业务结果。\n"
-            f"task_nonce_tail: {nonce_tail}"
+        envelope, payload_sha256 = task_file_envelope(
+            prompt, task_id, nonce_head, nonce_middle, nonce_tail
         )
         encoded = envelope.encode("utf-8")
         if len(encoded) > self.task_file_max_bytes:
@@ -625,22 +630,7 @@ class DSHClient:
 
     @staticmethod
     def _inject_middle_challenge(payload: str, nonce_middle: str) -> str:
-        """Place an out-of-band read challenge near the payload midpoint."""
-        value = str(payload)
-        midpoint = len(value) // 2
-        before = value.rfind("\n", 0, midpoint)
-        after = value.find("\n", midpoint)
-        candidates = [index for index in (before, after) if index >= 0]
-        split_at = (
-            min(candidates, key=lambda index: abs(index - midpoint))
-            if candidates
-            else midpoint
-        )
-        checkpoint = (
-            "\nNOVALIST_TRANSPORT_CHECKPOINT: "
-            f"task_nonce_middle={nonce_middle}\n"
-        )
-        return value[:split_at] + checkpoint + value[split_at:]
+        return inject_middle_challenge(payload, nonce_middle)
 
     def _remove_task_file(self, task_file: _TaskFile | None) -> None:
         if task_file is None:
@@ -901,6 +891,8 @@ class DSHClient:
         timeout_override: int | None = None,
         cancel_event: threading.Event | None = None,
         context_report: PromptContextReport | None = None,
+        task_deadline: float | None = None,
+        invocation_callback: ReportCallback | None = None,
     ) -> Any:
         """Ask dsh for JSON and parse it safely."""
         text = self.generate(
@@ -910,6 +902,8 @@ class DSHClient:
             timeout_override=timeout_override,
             cancel_event=cancel_event,
             context_report=context_report,
+            task_deadline=task_deadline,
+            invocation_callback=invocation_callback,
         )
         return self._extract_json(text)
 
@@ -924,30 +918,7 @@ class DSHClient:
             pass
 
     def _combine_prompts(self, system_prompt: str, user_prompt: str) -> str:
-        system_prompt = (system_prompt or "").strip()
-        user_prompt = (user_prompt or "").strip()
-        if not system_prompt:
-            return (
-                "NOVALIST_TASK_START\n"
-                "请立即执行下面这一个任务，并在本次回复中给出最终结果。"
-                "不要停留在准备状态，也不要询问用户下一步。\n\n"
-                "[输出包装说明]\n"
-                "任务中的‘只输出 JSON’、‘只输出正文’或类似限制，只约束传输回执后的"
-                "业务结果；必须先按任务文件传输协议输出第一行 ACK。\n\n"
-                f"[用户任务]\n{user_prompt}\n"
-                "NOVALIST_TASK_END"
-            )
-        return (
-            "NOVALIST_TASK_START\n"
-            "请立即执行下面这一个任务，并在本次回复中给出最终结果。"
-            "不要停留在准备状态，也不要询问用户下一步。\n\n"
-            "[输出包装说明]\n"
-            "任务中的‘只输出 JSON’、‘只输出正文’或类似限制，只约束传输回执后的"
-            "业务结果；必须先按任务文件传输协议输出第一行 ACK。\n\n"
-            f"[系统约束]\n{system_prompt}\n\n"
-            f"[用户任务]\n{user_prompt}\n"
-            "NOVALIST_TASK_END"
-        )
+        return combine_prompts(system_prompt, user_prompt)
 
     @staticmethod
     def _extract_json(text: str) -> Any:

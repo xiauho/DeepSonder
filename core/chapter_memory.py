@@ -18,6 +18,7 @@ from .context_budget import compact_story_state
 from .context_report import PromptBundle, PromptContextReport, SectionUsage
 from .json_utils import JSONExtractionError, extract_json
 from .project import NovelProject, chapter_number_from_id
+from .prompt_transport import estimate_task_input_tokens
 from .storage import atomic_write_text
 from .task_controller import AITaskCancelled
 from .token_budget import (
@@ -28,7 +29,7 @@ from .token_budget import (
 
 
 MEMORY_SUGGESTION_SCHEMA_VERSION = 2
-MEMORY_PROPOSAL_PROMPT_VERSION = 6
+MEMORY_PROPOSAL_PROMPT_VERSION = 7
 MEMORY_CACHE_SCHEMA_VERSION = 1
 DIGEST_SHARD_SCHEMA_VERSION = 1
 DEFAULT_REDUCE_BATCH_TOKENS = 8_000
@@ -346,6 +347,8 @@ class ChapterMemoryCache:
                 return None
             allowed = frozenset(item.fact_id for item in ledger.facts)
             shards = [parse_digest_shard(item, allowed) for item in raw_shards]
+            if not allowed.issubset(_collect_fact_ids([item.to_dict() for item in shards])):
+                return None
             return {
                 "mode": "digest_shards",
                 "shards": [item.to_dict() for item in shards],
@@ -473,12 +476,13 @@ def generate_chapter_memory_proposal(
     _check_cancel(cancel_event)
     full_canon_context = str(canon_context or "")
     context_hash = canonical_hash(full_canon_context)
-    canon_context = full_canon_context[:12_000]
+    canon_context = full_canon_context
     proposal_cache = cache or ChapterMemoryCache(project)
     cached = None if (force_refresh or refresh_reduction or retry_feedback) else proposal_cache.load(ledger, base_state, context_hash)
     if cached is not None:
         _check_cancel(cancel_event)
-        publish_progress(progress_callback, MemoryProgress("proposal", state="cached", cache_hits=1))
+        publish_progress(progress_callback, MemoryProgress("proposal", state="cached", cache_hits=1,
+            cache_reason="hit"))
         return _replace_proposal(
             cached,
             base_state_scope=base_state_scope,
@@ -503,6 +507,22 @@ def generate_chapter_memory_proposal(
     )
     if retry_feedback:
         source["validation_feedback"] = retry_feedback[:6000]
+    # Selected canon and related pre-state are required constraints. Plan their
+    # space before calling a reducer; reducing facts cannot shrink this cost.
+    fixed_source = {"mode": "fact_ledger", "base_state_hash": base_state_hash,
+                    "chunks": [], "facts": [], "unknowns": []}
+    if retry_feedback:
+        fixed_source["validation_feedback"] = retry_feedback[:6000]
+    fixed_prompt = _try_build_memory_prompt(ledger, fixed_source, prompt_state,
+        prompt_canon, input_token_budget, estimator, context_hash)
+    if fixed_prompt is None:
+        raise MemoryProposalBudgetError(
+            "必要设定、章前状态及传输包装超过可用预算，已停止归并；"
+            "请增加模型上下文空间或核对相关资料。"
+        )
+    publish_progress(progress_callback, MemoryProgress("budget", state="done",
+        input_tokens=fixed_prompt.report.estimated_input_tokens,
+        token_budget=input_token_budget))
     reduction_calls = 0
     prompt = _try_build_memory_prompt(
         ledger,
@@ -514,47 +534,38 @@ def generate_chapter_memory_proposal(
         context_hash,
     )
     round_number = 0
+    stalled_rounds = 0
     while prompt is None:
         round_number += 1
         if round_number > MAX_REDUCE_ROUNDS:
             raise MemoryProposalBudgetError("章节事实经过多轮归并后仍超过 token 预算。")
         _check_cancel(cancel_event)
         items = _source_items(source)
-        batches = _pack_items(
-            items,
-            min(reduce_batch_tokens, max(1_000, input_token_budget // 2)),
-            estimator,
-        )
-        if len(items) <= 1 or not batches:
-            if prompt_canon:
-                prompt_canon = prompt_canon[: len(prompt_canon) // 2]
-            elif _character_count(prompt_state) > 5:
-                prompt_state = _trim_state_characters(prompt_state)
-            else:
-                raise MemoryProposalBudgetError(
-                    "章节记忆提案的固定上下文超过 token 预算。"
-                )
-            prompt = _try_build_memory_prompt(
-                ledger,
-                source,
-                prompt_state,
-                prompt_canon,
-                input_token_budget,
-                estimator,
-                context_hash,
+        input_size = estimator.estimate(json.dumps(source, ensure_ascii=False, separators=(",", ":")))
+        if not items:
+            raise MemoryProposalBudgetError(
+                "保留必要设定与证据后，事实归并仍无法装入预算，请增加输入空间。"
             )
-            continue
         shards: list[DigestShard] = []
-        for batch_index, batch in enumerate(batches, 1):
+        # Check all batch prompts before executing the first one.
+        empty_shard, _ = build_digest_shard_prompt(ledger, [], batch_index=1,
+            batch_count=len(items), input_token_budget=input_token_budget, estimator=estimator)
+        batch_budget = min(reduce_batch_tokens,
+            max(1, input_token_budget - empty_shard.report.estimated_input_tokens - 32))
+        while True:
+            batches = _pack_items(items, batch_budget, estimator)
+            try:
+                prepared = [build_digest_shard_prompt(ledger, batch, batch_index=i,
+                    batch_count=len(batches), input_token_budget=input_token_budget,
+                    estimator=estimator) for i, batch in enumerate(batches, 1)]
+            except MemoryProposalBudgetError:
+                if batch_budget <= 1 or all(len(batch) == 1 for batch in batches):
+                    raise MemoryProposalBudgetError("单条事实连同归并协议超过可用预算，请增加输入空间。") from None
+                batch_budget = max(1, batch_budget // 2)
+            else:
+                break
+        for batch_index, (shard_prompt, allowed_ids) in enumerate(prepared, 1):
             _check_cancel(cancel_event)
-            shard_prompt, allowed_ids = build_digest_shard_prompt(
-                ledger,
-                batch,
-                batch_index=batch_index,
-                batch_count=len(batches),
-                input_token_budget=input_token_budget,
-                estimator=estimator,
-            )
             options = {"cancel_event": cancel_event} if cancel_event is not None else {}
             with memory_phase(
                 progress_callback, "reduction", current=batch_index,
@@ -563,11 +574,15 @@ def generate_chapter_memory_proposal(
                 raw = dsh.generate_json(
                     shard_prompt.system_prompt,
                     shard_prompt.user_prompt,
-                    context_report=shard_prompt.report,
+                    context_report=replace(shard_prompt.report,
+                        source_unit=f"round:{round_number}:batch:{batch_index}"),
                     **options,
                 )
                 _check_cancel(cancel_event)
-                shards.append(parse_digest_shard(raw, allowed_ids))
+                shard = parse_digest_shard(raw, allowed_ids)
+                if not allowed_ids.issubset(_collect_fact_ids(shard.to_dict())):
+                    raise MemoryProposalError("事实归并遗漏来源证据，已停止；请重新提取或重试。")
+                shards.append(shard)
             reduction_calls += 1
         source = {
             "mode": "digest_shards",
@@ -585,12 +600,21 @@ def generate_chapter_memory_proposal(
             estimator,
             context_hash,
         )
+        output_size = estimator.estimate(json.dumps(source, ensure_ascii=False, separators=(",", ":")))
+        publish_progress(progress_callback, MemoryProgress("reduction_round", state="done",
+            round_number=round_number, input_tokens=input_size, output_tokens=output_size,
+            evidence_count=len(_collect_fact_ids(source))))
+        if prompt is None:
+            stalled_rounds = stalled_rounds + 1 if output_size > input_size * 0.95 else 0
+            if output_size >= input_size or stalled_rounds >= 2:
+                raise MemoryProposalBudgetError("事实归并未有效收敛，已停止重复调用；请增加输入空间或重新提取事实。")
 
     _check_cancel(cancel_event)
     if source.get("mode") == "digest_shards" and reduction_calls:
         proposal_cache.save_reduction(ledger, {k: v for k, v in source.items() if k != "validation_feedback"})
     options = {"cancel_event": cancel_event} if cancel_event is not None else {}
-    with memory_phase(progress_callback, "proposal"):
+    with memory_phase(progress_callback, "proposal",
+            cache_reason="refresh" if (force_refresh or refresh_reduction or retry_feedback) else "unmatched"):
         raw = dsh.generate_json(
             prompt.system_prompt,
             prompt.user_prompt,
@@ -718,8 +742,8 @@ change 参数约束：
   }}]
 }}
 """.strip()
-    estimated = estimator.estimate_pair(system_prompt, user_prompt)
-    budget = max(2_000, int(input_token_budget))
+    estimated = estimate_task_input_tokens(system_prompt, user_prompt, estimator)
+    budget = max(0, int(input_token_budget))
     report = PromptContextReport(
         schema_version=1,
         task_kind="chapter_memory_proposal",
@@ -774,6 +798,8 @@ def build_digest_shard_prompt(
 
 将下列事实或归并片段压缩为短摘要和关键 claims。每条 claim 必须引用输入中存在的
 fact_ids；优先保留人物状态、地点、物品、关系、时间线和世界规则变化。
+每个输入 fact_id 必须至少保留一次引用，可将相关证据归入同一 claim。
+不得遗漏独立变化、矛盾、先后顺序、角色到达依据和未解决问题；不要为缩短输出删除证据。
 
 【输入】
 {payload}
@@ -786,8 +812,8 @@ fact_ids；优先保留人物状态、地点、物品、关系、时间线和世
   "claims": [{{"text": "关键事实", "fact_ids": ["fact_xxx"]}}]
 }}
 """.strip()
-    estimated = estimator.estimate_pair(system_prompt, user_prompt)
-    budget = max(2_000, int(input_token_budget))
+    estimated = estimate_task_input_tokens(system_prompt, user_prompt, estimator)
+    budget = max(0, int(input_token_budget))
     if estimated > budget:
         raise MemoryProposalBudgetError("单个事实归并批次超过 token 预算。")
     report = PromptContextReport(
@@ -1386,7 +1412,7 @@ def _pack_items(
     target_tokens: int,
     estimator: ConservativeTokenEstimator,
 ) -> list[list[dict[str, Any]]]:
-    target = max(1_000, int(target_tokens))
+    target = max(1, int(target_tokens))
     batches: list[list[dict[str, Any]]] = []
     current: list[dict[str, Any]] = []
     for item in items:
@@ -1421,21 +1447,6 @@ def _relevant_story_state(
     compacted["characters"] = selected
     compacted.pop("foreshadowing", None)
     return compacted
-
-
-def _character_count(state: dict[str, Any]) -> int:
-    characters = state.get("characters") if isinstance(state, dict) else None
-    return len(characters) if isinstance(characters, dict) else 0
-
-
-def _trim_state_characters(state: dict[str, Any]) -> dict[str, Any]:
-    trimmed = copy.deepcopy(state)
-    characters = trimmed.get("characters")
-    if not isinstance(characters, dict):
-        return trimmed
-    keep = max(5, len(characters) // 2)
-    trimmed["characters"] = dict(list(characters.items())[:keep])
-    return trimmed
 
 
 def _parse_digest_entries(

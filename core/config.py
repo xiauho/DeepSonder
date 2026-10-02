@@ -11,6 +11,7 @@ from copy import deepcopy
 from .app_paths import app_config_dir
 from .theme_tokens import DARK_COLORS, LIGHT_COLORS, PREVIOUS_DARK_COLORS, PREVIOUS_LIGHT_COLORS
 from .storage import atomic_write_text
+from .memory_task import DEFAULT_MEMORY_TIMEOUT
 from .token_budget import (
     DEFAULT_CHUNK_OVERLAP_TOKENS,
     DEFAULT_CHUNK_TOKEN_BUDGET,
@@ -49,6 +50,7 @@ DEFAULT_CONFIG = {
     "dsh_launcher_args": [],
     "dsh_profile": "headless",
     "dsh_timeout": 600,
+    "ai_memory_timeout": DEFAULT_MEMORY_TIMEOUT,
     "dsh_extra_args": [],
     "ai_model_context_window_tokens": DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS,
     "ai_context_strategy": DEFAULT_CONTEXT_STRATEGY,
@@ -236,6 +238,8 @@ def _normalize_config(config: dict[str, Any]) -> None:
     # prompts always use a task file; argv carries only the short loader.
     config.pop("dsh_prompt_transport", None)
     config.pop("ai_memory_pipeline", None)
+    config["ai_memory_timeout"] = _bounded_int(config.get("ai_memory_timeout"),
+        default=DEFAULT_MEMORY_TIMEOUT, minimum=30, maximum=7200)
     try:
         config["dsh_timeout"] = max(30, min(1800, int(config.get("dsh_timeout", 600))))
     except (TypeError, ValueError):

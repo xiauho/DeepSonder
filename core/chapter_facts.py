@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +15,7 @@ from .context_report import PromptBundle, PromptContextReport, SectionUsage
 from .json_utils import JSONExtractionError, extract_json
 from .memory_progress import MemoryProgress, ProgressCallback, memory_phase, publish_progress
 from .project import NovelProject
+from .prompt_transport import estimate_task_input_tokens
 from .storage import atomic_write_text
 from .task_controller import AITaskCancelled
 from .text_chunking import ChapterChunk, chapter_content_hash, chunk_chapter
@@ -235,8 +236,8 @@ location 类事实的 value 应优先写正文能够直接支持的简洁规范�
 category 仅允许：{", ".join(sorted(FACT_CATEGORIES))}。
 如果没有事实或未知项，返回空数组；不要为了填充格式制造内容。
 """.strip()
-    estimated = estimator.estimate_pair(system_prompt, user_prompt)
-    budget = max(1_000, int(input_token_budget))
+    estimated = estimate_task_input_tokens(system_prompt, user_prompt, estimator)
+    budget = max(0, int(input_token_budget))
     report = PromptContextReport(
         schema_version=1,
         task_kind="chapter_chunk_facts",
@@ -299,13 +300,26 @@ def memory_chunks(
         if len(candidates) == 1:
             try:
                 build_chunk_facts_prompt(chapter_title, candidates[0],
-                    input_token_budget=input_token_budget - 512, estimator=estimator)
+                    input_token_budget=input_token_budget, estimator=estimator)
             except RuntimeError:
                 pass
             else:
                 return candidates
-    return chunk_chapter(chapter_id, content, target_tokens=target,
-                         overlap_tokens=overlap_tokens, estimator=estimator)
+    # Preflight every chunk before spending an AI request. Reduce content only
+    # by splitting it further, never by truncating the chapter.
+    while True:
+        chunks = chunk_chapter(chapter_id, content, target_tokens=target,
+                               overlap_tokens=overlap_tokens, estimator=estimator)
+        try:
+            for chunk in chunks:
+                build_chunk_facts_prompt(chapter_title, chunk,
+                    input_token_budget=input_token_budget, estimator=estimator)
+        except RuntimeError:
+            if target <= 256:
+                raise RuntimeError("事实提取的协议与传输包装超过可用预算，请增加输入空间。") from None
+            target = max(256, target // 2)
+        else:
+            return chunks
 
 
 def extract_chapter_fact_ledger(
@@ -340,6 +354,9 @@ def extract_chapter_fact_ledger(
     cache_hits = 0
     extracted = 0
     for index, chunk in enumerate(chunks, 1):
+        check_deadline = getattr(dsh, "check_task_deadline", None)
+        if check_deadline is not None:
+            check_deadline()
         if cancel_event is not None and cancel_event.is_set():
             raise AITaskCancelled()
         result = None if force_refresh else ledger_cache.load(chunk)
@@ -347,7 +364,8 @@ def extract_chapter_fact_ledger(
             cache_hits += 1
             results.append(result)
             publish_progress(progress_callback, MemoryProgress(
-                "facts", state="cached", current=index, total=len(chunks), cache_hits=cache_hits
+                "facts", state="cached", current=index, total=len(chunks), cache_hits=cache_hits,
+                cache_reason="hit"
             ))
             continue
         prompt = build_chunk_facts_prompt(
@@ -358,11 +376,12 @@ def extract_chapter_fact_ledger(
         )
         options = {"cancel_event": cancel_event} if cancel_event is not None else {}
         with memory_phase(progress_callback, "facts", current=index,
-                          total=len(chunks), cache_hits=cache_hits):
+                          total=len(chunks), cache_hits=cache_hits,
+                          cache_reason="refresh" if force_refresh else "unmatched"):
             raw = dsh.generate_json(
                 prompt.system_prompt,
                 prompt.user_prompt,
-                context_report=prompt.report,
+                context_report=replace(prompt.report, source_unit=chunk.chunk_id),
                 **options,
             )
             if cancel_event is not None and cancel_event.is_set():
@@ -372,6 +391,8 @@ def extract_chapter_fact_ledger(
         extracted += 1
         results.append(result)
     with memory_phase(progress_callback, "merge"):
+        if callable(getattr(dsh, "check_task_deadline", None)):
+            dsh.check_task_deadline()
         facts, unknowns = merge_chunk_facts(results)
     return ChapterFactLedger(
         chapter_id=chapter_id,

@@ -25,6 +25,7 @@ from .context_budget import build_ai_context
 from .context_profiles import SUMMARY_CONTEXT_PROFILE
 from .dsh_client import DSHClient
 from .memory_progress import ProgressCallback, memory_phase
+from .memory_task import DEFAULT_MEMORY_TIMEOUT, MemoryTaskSession
 from .task_controller import AITaskCancelled
 from .project import NovelProject
 from .token_budget import (
@@ -32,6 +33,7 @@ from .token_budget import (
     DEFAULT_CHUNK_TOKEN_BUDGET,
     DEFAULT_INPUT_TOKEN_BUDGET,
     DEFAULT_TOKEN_ESTIMATOR,
+    TokenBudget,
 )
 from .text_chunking import chapter_content_hash
 
@@ -53,14 +55,19 @@ class AIWorkflowService:
         fact_cache_root: Path | None = None,
         memory_cache_root: Path | None = None,
         progress_callback: ProgressCallback | None = None,
+        memory_timeout: int = DEFAULT_MEMORY_TIMEOUT,
     ):
         self.dsh = dsh
         self.progress_callback = progress_callback
+        self.memory_timeout = max(30, int(memory_timeout))
         self.input_token_budget = int(
             input_token_budget
             if input_token_budget is not None
             else getattr(dsh, "input_token_budget", DEFAULT_INPUT_TOKEN_BUDGET)
         )
+        if isinstance(getattr(dsh, "token_budget", None), TokenBudget):
+            self.input_token_budget = min(self.input_token_budget,
+                dsh.token_budget.effective_input_limit)
         self.chunk_token_budget = max(1_000, int(chunk_token_budget))
         self.chunk_overlap_tokens = max(0, int(chunk_overlap_tokens))
         self.fact_cache_root = Path(fact_cache_root) if fact_cache_root else None
@@ -203,15 +210,48 @@ class AIWorkflowService:
         retry_feedback: str = "",
     ) -> ChapterMemoryProposal:
         """Build an evidence-bound summary and locally applied memory patch."""
-        ledger = self.build_chapter_fact_ledger(
+        session = MemoryTaskSession(self.dsh, self.memory_timeout, cancel_event,
+                                    self.progress_callback)
+        state = "failed"
+        try:
+            session.check_task_deadline()
+            result = self._update_memory(project, chapter_id, session,
+                cancel_event=cancel_event, force_refresh=force_refresh,
+                refresh_facts=refresh_facts, retry_feedback=retry_feedback)
+            session.check_task_deadline()
+            state = "done"
+            return result
+        except AITaskCancelled:
+            state = "cancelled"
+            raise
+        except RuntimeError as exc:
+            if "超时" in str(exc):
+                state = "timeout"
+            raise
+        finally:
+            session.finish(state)
+
+    def _update_memory(self, project, chapter_id, session, *, cancel_event,
+                       force_refresh, refresh_facts, retry_feedback):
+        budget = self.input_token_budget
+        estimator = getattr(self.dsh, "token_estimator", DEFAULT_TOKEN_ESTIMATOR)
+        ledger = extract_chapter_fact_ledger(
             project,
             chapter_id,
+            session,
+            input_token_budget=budget,
+            chunk_token_budget=self.chunk_token_budget,
+            overlap_tokens=self.chunk_overlap_tokens,
+            estimator=estimator,
+            cache=FactLedgerCache(project, self.fact_cache_root),
+            progress_callback=session.progress,
             cancel_event=cancel_event,
             force_refresh=refresh_facts,
         )
+        session.check_task_deadline()
         if cancel_event is not None and cancel_event.is_set():
             raise AITaskCancelled()
-        with memory_phase(self.progress_callback, "context"):
+        with memory_phase(session.progress, "context"):
             context = build_ai_context(
                 project,
                 chapter_id,
@@ -228,14 +268,14 @@ class AIWorkflowService:
                 chapter_id,
                 source_state,
             )
-        estimator = getattr(self.dsh, "token_estimator", DEFAULT_TOKEN_ESTIMATOR)
+        session.check_task_deadline()
         return generate_chapter_memory_proposal(
             project,
             ledger,
-            self.dsh,
+            session,
             base_state=base_state,
             canon_context=context.related.to_block(),
-            input_token_budget=self.input_token_budget,
+            input_token_budget=budget,
             estimator=estimator,
             cache=ChapterMemoryCache(project, self.memory_cache_root),
             cancel_event=cancel_event,
@@ -244,5 +284,5 @@ class AIWorkflowService:
             force_refresh=force_refresh or refresh_facts,
             refresh_reduction=refresh_facts,
             retry_feedback=retry_feedback,
-            progress_callback=self.progress_callback,
+            progress_callback=session.progress,
         )

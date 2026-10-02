@@ -439,7 +439,31 @@ class AIWorkflowController(QObject):
             self._memory_run_id = None
 
     def _on_memory_progress(self, run_id, cancel_event, event) -> None:
-        if run_id is not self._memory_run_id or cancel_event.is_set():
+        if run_id is not self._memory_run_id:
+            return
+        if event.stage == "summary":
+            outcome = {"done": "已生成，待审阅", "cancelled": "已取消",
+                "timeout": "等待超时", "failed": "失败"}.get(event.state, event.state)
+            self._emit_output(f"记忆更新汇总 · {outcome} · {event.elapsed_ms / 1000:.1f} 秒"
+                f" · 业务请求 {event.request_count} · 文件探测 {event.probe_count}"
+                f" · 回执重试 {event.retry_count} · 缓存复用 {event.cache_hits}"
+                f" · 归并 {event.round_number} 轮")
+            labels = {"chunking": "准备章节", "facts": "提取事实", "merge": "合并事实",
+                "context": "准备资料", "reduction": "归并事实", "proposal": "生成提案",
+                "validation": "校验提案"}
+            times = [f"{labels[key]} {ms / 1000:.1f} 秒" for key, ms in event.stage_times if key in labels]
+            if times:
+                self._emit_output("阶段耗时 · " + " · ".join(times))
+            return
+        if cancel_event.is_set():
+            return
+        if event.stage == "budget":
+            self._emit_output(f"记忆上下文预算 · 必要资料及协议 {event.input_tokens}"
+                f" / {event.token_budget} token · 事实可用空间约 {max(0, event.token_budget - event.input_tokens)} token")
+            return
+        if event.stage == "reduction_round":
+            self._emit_output(f"归并第 {event.round_number} 轮 · 来源估算 "
+                f"{event.input_tokens} → {event.output_tokens} token · 保留证据 {event.evidence_count}")
             return
         labels = {
             "chunking": "准备章节", "facts": "提取事实", "merge": "合并事实",
@@ -460,6 +484,9 @@ class AIWorkflowController(QObject):
             message = f"{label} · {suffix} · {event.elapsed_ms / 1000:.1f} 秒"
             if event.cache_hits:
                 message += f" · 缓存命中 {event.cache_hits}"
+            if event.cache_reason in {"refresh", "unmatched"}:
+                message += " · " + {"refresh": "本次要求重新生成",
+                    "unmatched": "无匹配缓存（首次、来源变化或缓存不可用）"}[event.cache_reason]
             self._emit_output(message)
             self._emit_status(label + " · " + suffix)
 
@@ -597,6 +624,7 @@ class AIWorkflowController(QObject):
                     DEFAULT_CHUNK_OVERLAP_TOKENS,
                 )
             ),
+            memory_timeout=int(self.config.get("ai_memory_timeout", 1800)),
         )
 
     def _save_current_file(self) -> bool:

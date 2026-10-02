@@ -36,11 +36,16 @@ class TokenBudget:
 
     def accepts(self, estimated_input: int) -> bool:
         estimated = max(0, int(estimated_input))
-        if estimated > max(1, int(self.input_limit)):
+        if self.model_context_window > 0 and self.reserved_tokens > self.model_context_window:
             return False
+        return estimated <= self.effective_input_limit
+
+    @property
+    def effective_input_limit(self) -> int:
+        limit = max(0, int(self.input_limit))
         if self.model_context_window > 0:
-            return estimated + self.reserved_tokens <= self.model_context_window
-        return True
+            limit = min(limit, max(0, self.model_context_window - self.reserved_tokens))
+        return limit
 
     @property
     def reserved_tokens(self) -> int:

@@ -653,7 +653,7 @@ class ChapterMemoryWorkflowTests(TestCase):
                         "schema_version": 1,
                         "summary": "本批次发生若干人物状态变化。",
                         "claims": (
-                            [{"text": "人物状态发生变化", "fact_ids": ids[:1]}]
+                            [{"text": "人物状态发生变化", "fact_ids": ids}]
                             if ids
                             else []
                         ),

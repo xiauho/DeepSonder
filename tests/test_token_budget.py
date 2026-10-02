@@ -41,3 +41,8 @@ class TokenBudgetTests(TestCase):
         )
         self.assertTrue(budget.accepts(90))
         self.assertFalse(budget.accepts(91))
+
+    def test_impossible_reserve_rejects_even_empty_input(self):
+        budget = TokenBudget(input_limit=100, runtime_reserve=200, model_context_window=120)
+        self.assertEqual(budget.effective_input_limit, 0)
+        self.assertFalse(budget.accepts(0))

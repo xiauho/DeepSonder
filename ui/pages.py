@@ -998,6 +998,12 @@ class SettingsPage(QWidget):
         self.timeout = QSpinBox()
         self.timeout.setRange(30, 1800)
         self.timeout.setSuffix(" 秒")
+        self.memory_timeout = QSpinBox()
+        self.memory_timeout.setRange(30, 7200)
+        self.memory_timeout.setSingleStep(60)
+        self.memory_timeout.setSuffix(" 秒")
+        self.memory_timeout.setAccessibleName("整次记忆更新等待上限")
+        self.memory_timeout.setToolTip("包含事实提取、归并和提案生成；超时后可复用已校验缓存重新发起。")
         ai_form.addRow("命令", self.command)
         advanced_form.addRow("启动参数", self.launcher_args)
         advanced_form.addRow("运行配置", self.profile)
@@ -1007,7 +1013,12 @@ class SettingsPage(QWidget):
         ai_form.addRow("上下文使用策略", self.context_strategy)
         ai_form.addRow("自动预算", self.context_budget_preview)
         advanced_form.addRow("附加参数", self.extra_args)
-        ai_form.addRow("最长等待", self.timeout)
+        ai_form.addRow("单次请求最长等待", self.timeout)
+        ai_form.addRow("整次记忆更新等待上限", self.memory_timeout)
+        memory_wait_hint = QLabel("包含提取、归并和提案生成；默认 30 分钟。超时后可重新发起，复用已校验缓存。")
+        memory_wait_hint.setObjectName("mutedLabel")
+        memory_wait_hint.setWordWrap(True)
+        ai_form.addRow(memory_wait_hint)
         ai_layout.addLayout(ai_form)
         ai_layout.addWidget(self.advanced_toggle)
         ai_layout.addWidget(self.advanced_content)
@@ -1177,6 +1188,7 @@ class SettingsPage(QWidget):
         self.launcher_args.setText(shlex.join(config.get("dsh_launcher_args") or []))
         self.extra_args.setText(shlex.join(config.get("dsh_extra_args") or []))
         self.timeout.setValue(int(config.get("dsh_timeout", 600)))
+        self.memory_timeout.setValue(int(config.get("ai_memory_timeout", 1800)))
         model_window = int(config.get("ai_model_context_window_tokens", 0) or 0)
         context_index = self.model_context_window.findData(model_window)
         if context_index < 0:
@@ -1279,6 +1291,7 @@ class SettingsPage(QWidget):
                 "ai_model_context_window_tokens": self._selected_model_context_window(),
                 "ai_context_strategy": self.context_strategy.currentData(),
                 "dsh_timeout": self.timeout.value(),
+                "ai_memory_timeout": self.memory_timeout.value(),
                 "theme": self.theme.currentData(),
                 "ui_font_size": self.ui_font_size.value(),
             }

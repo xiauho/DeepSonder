@@ -92,6 +92,45 @@ class SettingsExperienceTests(unittest.TestCase):
         self.assertFalse(page.has_unsaved_changes())
         self.assertEqual(page.feedback.text(), "设置已保存")
 
+    def test_memory_timeout_is_independent_and_survives_draft_and_discard(self):
+        page = self.page
+        page.tabs.setCurrentIndex(1)
+        self.assertEqual(page.memory_timeout.value(), 1800)
+        page.memory_timeout.setValue(900)
+        page.tabs.setCurrentIndex(0)
+        page.tabs.setCurrentIndex(1)
+        self.assertEqual(page.memory_timeout.value(), 900)
+        self.assertEqual(page.timeout.value(), 600)
+        self.assertEqual(page.config()["ai_memory_timeout"], 900)
+        self.assertTrue(page.has_unsaved_changes())
+        page.discard_button.click()
+        self.assertEqual(page.memory_timeout.value(), 1800)
+        self.assertFalse(page.has_unsaved_changes())
+
+    def test_memory_timeout_remains_visible_at_narrow_width_and_large_type(self):
+        from ui.theme import apply_theme
+        page = self.page
+        try:
+            for theme in ("light", "dark"):
+                for font_size in (14, 20):
+                    with self.subTest(theme=theme, font_size=font_size):
+                        apply_theme(self.app, {"theme": theme, "ui_font_size": font_size})
+                        page.resize(760, 630)
+                        page.tabs.setCurrentIndex(1)
+                        page.section_scrolls[1].ensureWidgetVisible(page.memory_timeout)
+                        self.app.processEvents()
+                        field = page.memory_timeout
+                        self.assertFalse(field.isHidden())
+                        self.assertGreaterEqual(field.width(), field.minimumSizeHint().width())
+                        label = page.ai_form.labelForField(field)
+                        self.assertIsNotNone(label)
+                        self.assertIn("记忆更新", label.text())
+                        content = page.section_scrolls[1].widget()
+                        self.assertLessEqual(field.mapTo(content, QPoint(field.width(), 0)).x(), content.width())
+                        self.assertEqual(page.section_scrolls[1].horizontalScrollBar().maximum(), 0)
+        finally:
+            apply_theme(self.app, DEFAULT_CONFIG)
+
 
 class SettingsWindowTests(unittest.TestCase):
     @classmethod

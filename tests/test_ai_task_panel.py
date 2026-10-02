@@ -192,3 +192,26 @@ class AITaskPanelTests(TestCase):
             controller._on_memory_finished(token)
             w.ai_task_view_controller._on_finished(token)
             apply_theme(self.app, DEFAULT_CONFIG)
+
+    def test_memory_summary_does_not_overwrite_cancel_or_pending_review_state(self):
+        from core.memory_progress import MemoryProgress
+        import threading
+        w = self.window
+        controller = w.ai_workflow_controller
+        run_id = object()
+        controller._memory_run_id = run_id
+        event = threading.Event()
+        summary = MemoryProgress('summary', state='done', request_count=3,
+            cache_hits=2, round_number=1, stage_times=(('facts', 2500),))
+        w.task_panel.set_state('pending', '结果待审阅')
+        controller._on_memory_progress(run_id, event, summary)
+        self.assertEqual(w.task_panel.detail.text(), '结果待审阅')
+        self.assertIn('业务请求 3', w.output_panel.toPlainText())
+        self.assertIn('提取事实 2.5 秒', w.output_panel.toPlainText())
+        event.set()
+        w.task_panel.set_state('cancelling', '正在取消')
+        controller._on_memory_progress(run_id, event, summary)
+        self.assertEqual(w.task_panel.detail.text(), '正在取消')
+        before = w.output_panel.toPlainText()
+        controller._on_memory_progress(object(), event, summary)
+        self.assertEqual(w.output_panel.toPlainText(), before)

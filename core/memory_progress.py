@@ -15,6 +15,16 @@ class MemoryProgress:
     elapsed_ms: float = 0.0
     cache_hits: int = 0
     round_number: int = 0
+    run_id: str = ""
+    request_count: int = 0
+    probe_count: int = 0
+    retry_count: int = 0
+    cache_reason: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    token_budget: int = 0
+    evidence_count: int = 0
+    stage_times: tuple[tuple[str, float], ...] = ()
 
 
 ProgressCallback = Callable[[MemoryProgress], None]

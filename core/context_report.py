@@ -72,6 +72,10 @@ class PromptContextReport:
     generation_ms: float = 0.0
     retry_ms: float = 0.0
     output_chars: int = 0
+    memory_run_id: str = ""
+    request_index: int = 0
+    source_unit: str = ""
+    probe_count: int = 0
 
     @property
     def health(self) -> str:
@@ -121,6 +125,7 @@ class PromptContextReport:
         generation_ms: float = 0.0,
         retry_ms: float = 0.0,
         output_chars: int = 0,
+        probe_count: int = 0,
     ) -> "PromptContextReport":
         return replace(
             self,
@@ -129,6 +134,7 @@ class PromptContextReport:
             generation_ms=max(0.0, float(generation_ms)),
             retry_ms=max(0.0, float(retry_ms)),
             output_chars=max(0, int(output_chars)),
+            probe_count=max(0, int(probe_count)),
             transport=str(transport or "unknown"),
             submitted_prompt_chars=max(0, int(submitted_prompt_chars)),
             command_chars=max(0, int(command_chars)),
