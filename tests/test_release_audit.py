@@ -8,8 +8,8 @@ from scripts.verify_release import REQUIRED, verify_release
 
 
 class ReleaseAuditTests(TestCase):
-    def fixture(self, root, extra=None, embedded_version="0.1.0-beta"):
-        version = "0.1.0-beta"
+    def fixture(self, root, extra=None, embedded_version=None, version="0.1.0-beta"):
+        embedded_version = version if embedded_version is None else embedded_version
         asset = root / f"DeepSonder-PySide6-v{version}-windows-x64.zip"
         with zipfile.ZipFile(asset, "w") as bundle:
             for name in REQUIRED:
@@ -25,9 +25,12 @@ class ReleaseAuditTests(TestCase):
         return asset
 
     def test_valid_bundle(self):
-        with TemporaryDirectory() as tmp:
-            root=Path(tmp); self.fixture(root)
-            self.assertTrue(verify_release(root)["passed"])
+        for version in ("0.1.0-beta", "0.1.1"):
+            with self.subTest(version=version), TemporaryDirectory() as tmp:
+                root=Path(tmp); self.fixture(root, version=version)
+                result = verify_release(root)
+                self.assertTrue(result["passed"])
+                self.assertEqual(result["version"], version)
 
     def test_rejects_data_runtime_and_path_escape(self):
         for name in ("projects/private/chapter.md", "_internal/config.json", "../secret", "node_modules/runtime.js"):

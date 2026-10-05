@@ -31,6 +31,8 @@ python -m pip install -r requirements.txt -r requirements-build.txt
 
 完整测试已在同一代码版本通过时，可用 `-SkipTests` 避免重复测试；它不跳过功能门槛、干净工作区检查、打包自检和资产审计。源码或运行逻辑变化后必须重新验证。
 
-发布顺序：提交发布材料 → 构建并校验 → 推送发布分支和带注释标签 → 等待 CI 与标签打包检查通过 → 创建草稿 Release 并上传 ZIP、SHA256SUMS.txt、release-manifest.json → 核对资产后公开为 prerelease。版本说明使用 `docs/releases/<version>.md`。不使用历史自动更新机制。
+发布顺序：提交发布材料 → 构建并校验 → 推送发布分支和带注释标签 → 等待 CI 与标签打包检查通过 → 创建草稿 Release 并上传 ZIP、SHA256SUMS.txt、release-manifest.json → 核对资产后公开。含预发布后缀的版本标记为 prerelease；`0.1.1` 使用普通 Release，标签为 `pyside6-v0.1.1`。版本说明使用 `docs/releases/<version>.md`。不使用历史自动更新机制。
+
+也可推送标签后由标签工作流在干净的远端检出中完成构建与校验；仍须等该源码提交的本系列 CI、打包自检和 ZIP 审计全部通过，才创建并公开 Release。本地演示或个人项目的未提交修改不纳入发布提交或产物。
 
 本系列的标签打包工作流会上传 Actions artifact；公开 Release 由维护者显式创建，避免把失败或不完整的包自动发布。
