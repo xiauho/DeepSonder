@@ -134,6 +134,11 @@ class AITaskPanelTests(TestCase):
     def test_memory_progress_is_queued_and_ignores_old_or_cancelled_runs(self):
         import threading
         from core.memory_progress import MemoryProgress
+        # Control the clock from task start. Adding 12 to a real monotonic
+        # float can subtract back to 11.999999... and make int() return 11.
+        clock_patch = patch('ui.ai_task_view_controller.time.monotonic', return_value=1000.0)
+        clock = clock_patch.start()
+        self.addCleanup(clock_patch.stop)
         w = self.window
         token = AITaskToken('memory', 'chapter_01')
         w.ai_task_view_controller._on_started(token)
@@ -148,8 +153,8 @@ class AITaskPanelTests(TestCase):
         self.assertNotIn('提取事实 2/4', w.task_panel.detail.text())
         self.app.processEvents()
         self.assertIn('提取事实 2/4', w.task_panel.detail.text())
-        with patch('ui.ai_task_view_controller.time.monotonic', return_value=w.ai_task_view_controller._task_started_at + 12):
-            w.ai_task_view_controller._refresh_elapsed()
+        clock.return_value = 1012.0
+        w.ai_task_view_controller._refresh_elapsed()
         self.assertIn('已用 12 秒', w.task_panel.detail.text())
         controller._on_memory_progress(object(), token.cancel_event, MemoryProgress('proposal'))
         self.assertIn('提取事实 2/4', w.task_panel.detail.text())
@@ -162,6 +167,29 @@ class AITaskPanelTests(TestCase):
         self.assertIsNone(controller._memory_run_id)
         w.ai_task_view_controller._on_finished(token)
         self.assertFalse(w.ai_task_view_controller._elapsed_timer.isActive())
+
+    def test_memory_elapsed_counts_completed_seconds_and_resets_for_next_task(self):
+        w = self.window
+        view = w.ai_task_view_controller
+        token = AITaskToken('memory', 'chapter_01')
+        with patch('ui.ai_task_view_controller.time.monotonic', return_value=1000.0) as clock:
+            view._on_started(token)
+            for now, seconds in ((1000.0, 0), (1011.75, 11), (1012.0, 12), (1060.0, 60)):
+                with self.subTest(now=now):
+                    clock.return_value = now
+                    view._refresh_elapsed()
+                    self.assertIn(f'已用 {seconds} 秒', w.task_panel.detail.text())
+            view._on_finished(token)
+            detail = w.task_panel.detail.text()
+            clock.return_value = 2000.0
+            view._refresh_elapsed()
+            self.assertEqual(w.task_panel.detail.text(), detail)
+            next_token = AITaskToken('memory', 'chapter_01')
+            view._on_started(next_token)
+            view._refresh_elapsed()
+            self.assertIn('已用 0 秒', w.task_panel.detail.text())
+            view._on_finished(next_token)
+            self.assertFalse(view._elapsed_timer.isActive())
 
     def test_memory_progress_wraps_at_narrow_width_in_both_themes(self):
         from ui.theme import apply_theme
