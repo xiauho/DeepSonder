@@ -11,7 +11,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Iterable
 
-from .memory_wire import MEMORY_WIRE_VERSION, WIRE_LEGEND, MemoryWireError, encode_memory_source
+from .memory_wire import MEMORY_WIRE_VERSION, WIRE_LEGEND, MemoryWireError, encode_memory_source, render_wire_payload
 from .memory_progress import MemoryProgress, ParallelMemoryPhase, ProgressCallback, memory_phase, publish_progress
 from .memory_task import MemoryTaskSession, memory_config_fingerprint
 from .app_paths import app_cache_dir
@@ -608,8 +608,8 @@ def generate_chapter_memory_proposal(
             raise MemoryProposalBudgetError("章节事实经过多轮归并后仍超过 token 预算。")
         _check_cancel(cancel_event)
         items = _source_items(source)
-        input_size = estimator.estimate(json.dumps(encode_memory_source(_model_source(source),
-            prompt_version=MEMORY_PROPOSAL_PROMPT_VERSION).value, ensure_ascii=False, separators=(",", ":")))
+        input_size = estimator.estimate(render_wire_payload(encode_memory_source(
+            _model_source(source), prompt_version=MEMORY_PROPOSAL_PROMPT_VERSION).value))
         if not items:
             raise MemoryProposalBudgetError(
                 "保留必要设定与证据后，事实归并仍无法装入预算，请增加输入空间。"
@@ -687,8 +687,8 @@ def generate_chapter_memory_proposal(
             estimator,
             context_hash,
         )
-        output_size = estimator.estimate(json.dumps(encode_memory_source(_model_source(source),
-            prompt_version=MEMORY_PROPOSAL_PROMPT_VERSION).value, ensure_ascii=False, separators=(",", ":")))
+        output_size = estimator.estimate(render_wire_payload(encode_memory_source(
+            _model_source(source), prompt_version=MEMORY_PROPOSAL_PROMPT_VERSION).value))
         publish_progress(progress_callback, MemoryProgress("reduction_round", state="done",
             round_number=round_number, input_tokens=input_size, output_tokens=output_size,
             evidence_count=len(_collect_fact_ids(source))))
@@ -798,8 +798,8 @@ def build_memory_proposal_prompt(
         "无法支持的 change 应省略，摘要也不得重复该未经支持的更新。"
     )
     wire = encode_memory_source(_model_source(source), prompt_version=MEMORY_PROPOSAL_PROMPT_VERSION)
-    source_json = json.dumps(wire.value, ensure_ascii=False, separators=(",", ":"))
-    state_json = json.dumps(relevant_state, ensure_ascii=False, separators=(",", ":"))
+    source_json = render_wire_payload(wire.value)
+    state_json = render_wire_payload(relevant_state)
     canon_text = canon_context or "（无相关设定）"
     user_prompt = f"""
 任务类型：chapter_memory_suggestion
@@ -923,7 +923,7 @@ def build_digest_shard_prompt(
         "你是 DeepSonder 的事实归并器。只压缩输入事实，不增加新事实。只输出合法 JSON。"
     )
     wire = encode_memory_source(items, prompt_version=MEMORY_PROPOSAL_PROMPT_VERSION)
-    payload = json.dumps(wire.value, ensure_ascii=False, separators=(",", ":"))
+    payload = render_wire_payload(wire.value)
     user_prompt = f"""
 任务类型：chapter_digest_shard
 章节 ID：{ledger.chapter_id}
@@ -1556,8 +1556,8 @@ def _pack_items(
     current: list[dict[str, Any]] = []
     for item in items:
         candidate = [*current, item]
-        rendered = json.dumps(encode_memory_source(candidate,
-            prompt_version=MEMORY_PROPOSAL_PROMPT_VERSION).value, ensure_ascii=False, separators=(",", ":"))
+        rendered = render_wire_payload(encode_memory_source(candidate,
+            prompt_version=MEMORY_PROPOSAL_PROMPT_VERSION).value)
         if current and estimator.estimate(rendered) > target:
             batches.append(current)
             current = [item]

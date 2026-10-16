@@ -28,6 +28,7 @@ from typing import Any
 
 from .prompt_transport import (
     DSH_FILE_ACK_PREFIX, DSH_FILE_READ_FAILED, DSH_FILE_TASK_SCHEMA,
+    TASK_FILE_SAFE_LINE_CHARS,
     combine_prompts, inject_middle_challenge, task_file_envelope,
     estimate_task_input_tokens,
 )
@@ -263,7 +264,9 @@ class DSHClient:
                 transport = "file_unavailable"
                 raise RuntimeError(
                     "DeepSeek Harness 无法验证读取 DeepSonder 的临时任务文件。"
-                    "为避免提示词截断，本次任务已停止；请检查 headless 的文件读取能力。"
+                    "为避免提示词截断，本次任务已停止；请检查 headless 的文件读取能力，"
+                    "以及 read/grep 工具的单行长度限制是否低于 "
+                    f"{TASK_FILE_SAFE_LINE_CHARS} 字符（默认 2000，grep 不可配置）。"
                 )
             self._remaining_timeout(effective_timeout, task_deadline, cancel_event)
             task_file = self._write_task_file(combined)
@@ -286,6 +289,15 @@ class DSHClient:
                     # native transport receipt. Reuse the exact task file and
                     # nonce challenge for one bounded formatting retry.
                     file_ack_error = first_error.reason
+                    if first_error.reason == "file_read_failed":
+                        # The agent explicitly reported an incomplete read of
+                        # the exact same file; retrying it only burns time.
+                        raise RuntimeError(
+                            "DeepSeek Harness 回复无法完整读取任务文件"
+                            f"（{DSH_FILE_READ_FAILED}）。为避免提示词截断，本次任务已停止；"
+                            "请检查 DSH 版本及其 read/grep 工具能否完整读取 "
+                            f"{TASK_FILE_SAFE_LINE_CHARS} 字符以内的行。"
+                        ) from None
                     retry_timeout = self._remaining_timeout(effective_timeout, task_deadline, cancel_event)
                     file_ack_retry_count = 1
                     with _measure_elapsed(timings, "retry_ms"):
@@ -569,10 +581,18 @@ class DSHClient:
             return True
 
         marker = DSH_FILE_PROBE_PREFIX + uuid.uuid4().hex.upper()
+        # The marker lives only at the end of a full-width line, so replying
+        # it proves the DSH read tool does not truncate lines below the
+        # width DeepSonder actually writes (grep has the same limit and no
+        # configuration option, so silent truncation must be caught here).
+        probe_line = "-" * (TASK_FILE_SAFE_LINE_CHARS - len(marker)) + marker
         probe_payload = (
             "NOVALIST_TASK_START\n"
             "这是 DeepSonder 的本地任务文件传输测试。\n"
-            f"请只回复这一行标记：{marker}\n"
+            "下面有一行很长的填充文本，其末尾是唯一的 "
+            f"{DSH_FILE_PROBE_PREFIX} 开头标记。\n"
+            "请完整读取该长行，然后只回复你读到的完整标记本身。\n"
+            f"{probe_line}\n"
             "NOVALIST_TASK_END\n"
         )
         task_file = self._write_task_file(probe_payload)

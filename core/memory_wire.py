@@ -105,3 +105,40 @@ def encode_memory_source(value: Any, *, prompt_version: int) -> MemoryWirePayloa
         ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     request_id = "wire_" + hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()[:24]
     return MemoryWirePayload(project(value), request_id, {alias: ref for ref, alias in encode_ids.items()})
+
+
+_SCALAR_TYPES = (str, int, float, bool, type(None))
+
+
+def render_wire_payload(value: Any) -> str:
+    """Render a wire payload with one record per line for DSH task files.
+
+    DSH ``read``/``grep`` tools truncate every line, so a compact single-line
+    JSON payload becomes unreadable past the line limit while the transport
+    protocol demands a complete read. Containers are exploded onto separate
+    lines while records of scalars stay compact on one line, keeping the
+    output valid JSON with minimal size overhead.
+    """
+
+    def dumps(item: Any) -> str:
+        return json.dumps(item, ensure_ascii=False, separators=(",", ":"))
+
+    def is_scalar_list(item: list) -> bool:
+        return bool(item) and all(
+            isinstance(element, _SCALAR_TYPES) for element in item
+        )
+
+    def render(item: Any) -> str:
+        if isinstance(item, list) and not is_scalar_list(item):
+            return "[\n" + ",\n".join(render(element) for element in item) + "\n]"
+        if isinstance(item, dict) and item:
+            return (
+                "{\n"
+                + ",\n".join(
+                    f"{dumps(key)}: {render(field)}" for key, field in item.items()
+                )
+                + "\n}"
+            )
+        return dumps(item)
+
+    return render(value)

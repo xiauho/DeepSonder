@@ -9,6 +9,34 @@ DSH_FILE_TASK_SCHEMA = "NOVALIST_TASK_FILE_V1"
 DSH_FILE_ACK_PREFIX = "NOVALIST_FILE_ACK:"
 DSH_FILE_READ_FAILED = "NOVALIST_FILE_TASK_READ_FAILED"
 
+# DSH's read tool keeps only READ_MAX_LINE_LENGTH characters per line
+# (default 2000, configurable via readMaxLineLength) and grep has the same
+# GREP_MAX_LINE_LENGTH = 2000 limit with no configuration option. Task files
+# must therefore keep every line safely below the DSH-side truncation point,
+# otherwise the agent can never read the middle and end of a long payload
+# while the transport protocol demands a complete read.
+DSH_READ_LINE_TRUNCATION = 2000
+TASK_FILE_SAFE_LINE_CHARS = 1800
+
+
+def wrap_long_lines(text: str, limit: int = TASK_FILE_SAFE_LINE_CHARS) -> str:
+    """Hard-wrap lines longer than ``limit`` characters.
+
+    Content stays lossless for the model, which reads the task file as text;
+    only the line boundaries change, so DSH read/grep tools never truncate
+    payload content.
+    """
+    value = str(text)
+    if limit <= 0:
+        return value
+    wrapped: list[str] = []
+    for line in value.split("\n"):
+        while len(line) > limit:
+            wrapped.append(line[:limit])
+            line = line[limit:]
+        wrapped.append(line)
+    return "\n".join(wrapped)
+
 
 def combine_prompts(system_prompt: str, user_prompt: str) -> str:
     system_prompt = (system_prompt or "").strip()
@@ -57,16 +85,25 @@ def inject_middle_challenge(payload: str, nonce_middle: str) -> str:
 
 
 def task_file_envelope(prompt: str, task_id: str, nonce_head: str, nonce_middle: str, nonce_tail: str) -> tuple[str, str]:
-    payload = str(prompt)
+    payload = wrap_long_lines(str(prompt))
     challenged_payload = inject_middle_challenge(payload, nonce_middle)
     payload_bytes = challenged_payload.encode("utf-8")
     payload_sha256 = hashlib.sha256(payload_bytes).hexdigest()
+    max_line_chars = max(
+        (len(line) for line in challenged_payload.split("\n")), default=0
+    )
+    if max_line_chars > TASK_FILE_SAFE_LINE_CHARS:
+        raise ValueError(
+            "任务文件存在超过安全行长限制的行"
+            f"（{max_line_chars} > {TASK_FILE_SAFE_LINE_CHARS} 字符）。"
+        )
     envelope = (
         f"{DSH_FILE_TASK_SCHEMA}\n"
         f"task_id: {task_id}\n"
         "encoding: UTF-8\n"
         f"payload_chars: {len(challenged_payload)}\n"
         f"payload_bytes: {len(payload_bytes)}\n"
+        f"payload_max_line_chars: {max_line_chars}\n"
         f"payload_sha256: {payload_sha256}\n"
         f"task_nonce_head: {nonce_head}\n\n"
         "[传输协议]\n"
