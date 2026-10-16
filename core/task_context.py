@@ -29,6 +29,7 @@ def context_paths(
         project.canon_dir / "timeline_events.json",
         project.system_registry_path,
         project.memory_dir / "story_state.json",
+        project.memory_dir / "character_identities.json",
         project.memory_dir / "chapter_summaries.json",
         project.memory_dir / "foreshadowing.json",
     ]
@@ -37,8 +38,12 @@ def context_paths(
         query = "\n".join(
             part for part in (chapter.title, chapter.outline, chapter.plot_brief) if part
         )
+        from .character_identity import bind_state, identity_names
+        from .project import chapter_number_from_id
+        identities = bind_state(project, {}, chapter_number_from_id(chapter_id) or -1)
         paths.extend(
-            path for path in project.list_characters() if path.stem and path.stem in query
+            path for path in project.list_characters()
+            if path.stem and any(name in query for name in identity_names(identities, path.stem))
         )
         paths.extend(project.list_world())
         paths.extend(project.list_power())

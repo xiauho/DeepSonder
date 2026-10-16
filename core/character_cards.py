@@ -32,11 +32,21 @@ def missing_character_cards(
     """
     if not isinstance(story_state, dict):
         return []
-    characters = story_state.get("characters")
+    from .character_identity import project_state
+    characters = project_state(story_state).get("characters")
     if not isinstance(characters, dict):
         return []
 
-    used_stems = {path.stem.casefold() for path in project.list_characters()}
+    from .character_identity import identity_names
+    from .character_card_sync import _character_names
+    used_stems = set()
+    for path in project.list_characters():
+        try:
+            card_names = _character_names(path, path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError):
+            card_names = {path.stem}
+        for name in card_names:
+            used_stems.update(n.casefold() for n in identity_names(story_state, name))
     candidates: list[CharacterCardCandidate] = []
     for raw_name, raw_details in characters.items():
         name = str(raw_name or "").strip()

@@ -428,7 +428,8 @@ class NovelProject:
         state = self._read_json(
             self.memory_dir / "story_state.json", DEFAULT_STORY_STATE
         )
-        return state if isinstance(state, dict) else dict(DEFAULT_STORY_STATE)
+        from .character_identity import bind_state
+        return bind_state(self, state if isinstance(state, dict) else dict(DEFAULT_STORY_STATE))
 
     def save_story_state(self, state: dict) -> None:
         self._write_json(self.memory_dir / "story_state.json", state)
@@ -458,7 +459,10 @@ class NovelProject:
         relevance_query: str | None = None,
     ) -> RelatedCanon:
         """Load task-relevant canon with deterministic, bounded selection."""
+        from .character_identity import bind_state, fingerprint, identity_names, load_registry
+        identity_state = bind_state(self, {}, chapter_number_from_id(chapter_id) or -1)
         cache_key = (
+            fingerprint(load_registry(self)),
             str(chapter_id),
             character_query,
             bool(include_world),
@@ -489,7 +493,7 @@ class NovelProject:
         character_paths = self.list_characters()
         for path in character_paths:
             name = path.stem
-            if name and name in haystack:
+            if name and any(alias in haystack for alias in identity_names(identity_state, name)):
                 characters_parts.append(f"### {name}\n{self.read_file(path).strip()}")
         selection_stats.append(
             CanonSelectionStat(

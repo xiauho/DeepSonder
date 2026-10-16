@@ -188,6 +188,9 @@ def build_task_context(
     state_scope = ""
     if history_view is not None and profile.include_story_state:
         story_state, state_scope = history_view.state_for(chapter_id, story_state)
+        from .character_identity import bind_state
+        number = chapter_number_from_id(chapter_id)
+        story_state = bind_state(project, story_state, number - 1 if number is not None else -1)
     character_query = None
     if character_scope == "planning":
         character_query = "\n".join(
@@ -453,8 +456,12 @@ def compact_story_state(
     """
     if not isinstance(state, dict):
         return {}
+    from .character_identity import project_state, REGISTRY, UPDATES
+    state = project_state(state)
     compacted: dict[str, object] = {}
     for key, value in state.items():
+        if key in {REGISTRY, UPDATES}:
+            continue
         if key == "foreshadowing" and isinstance(value, list):
             compacted[key] = [_cap_text(item, hook_cap) for item in value[:max_hooks]]
         else:

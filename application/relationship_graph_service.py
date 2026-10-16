@@ -81,7 +81,8 @@ class RelationshipGraphService:
 
     def snapshot(self, project: NovelProject) -> RelationshipGraphSnapshot:
         cards = tuple(self._read_card(path) for path in project.list_characters())
-        state = project.load_story_state()
+        from core.character_identity import project_state, canonical_name, identity_names, REGISTRY
+        state = project_state(project.load_story_state())
         characters = state.get("characters") if isinstance(state, dict) else {}
         if not isinstance(characters, dict):
             characters = {}
@@ -89,19 +90,19 @@ class RelationshipGraphService:
         aliases: dict[str, str] = {}
         card_by_name: dict[str, _Card] = {}
         for card in cards:
-            card_by_name[card.name] = card
+            card_by_name[canonical_name(state, card.name)] = card
             for value in (card.name, card.path.stem, *card.aliases):
                 key = _identity_key(value)
                 if key:
-                    aliases.setdefault(key, card.name)
+                    aliases.setdefault(key, canonical_name(state, card.name))
 
         def canonical(raw: object) -> str:
             value = str(raw or "").strip()
-            return aliases.get(_identity_key(value), value)
+            return canonical_name(state, aliases.get(_identity_key(value), value))
 
         node_details: dict[str, dict[str, Any]] = {}
         for card in cards:
-            node_details[card.name] = {
+            node_details[canonical(card.name)] = {
                 "card": card,
                 "state": "",
                 "location": "",
@@ -133,8 +134,8 @@ class RelationshipGraphService:
         for card in cards:
             for raw_target, label in card.relations:
                 target = canonical(raw_target)
-                if target and label:
-                    relations.setdefault((card.name, target), (label, "character_card"))
+                if target and label and canonical(card.name) != target:
+                    relations.setdefault((canonical(card.name), target), (label, "character_card"))
 
         for source, target in relations:
             node_details.setdefault(
@@ -144,7 +145,8 @@ class RelationshipGraphService:
                 target, {"card": card_by_name.get(target), "state": "", "location": ""}
             )
 
-        node_ids = {name: _stable_id("character", name) for name in node_details}
+        stable_ids = {g["primary"]: g["id"] for g in state.get(REGISTRY, {}).get("groups", [])}
+        node_ids = {name: stable_ids.get(name, _stable_id("character", name)) for name in node_details}
         evidence_by_pair, memory_warning = self._relationship_evidence(
             project, relations, canonical
         )
@@ -177,7 +179,7 @@ class RelationshipGraphService:
                 GraphNode(
                     node_id=node_ids[name],
                     name=name,
-                    aliases=card.aliases if resolved else (),
+                    aliases=tuple(sorted((set(card.aliases) if resolved else set()) | (identity_names(state, name) - {name}))),
                     state=str(details.get("state") or ""),
                     location=str(details.get("location") or ""),
                     resolved=resolved,

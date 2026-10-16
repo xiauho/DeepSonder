@@ -328,6 +328,7 @@ class MainWindow(QMainWindow):
         self.actions["delete_chapter"].setEnabled(False)
         action("new_character", "新建角色", self.new_character, "Ctrl+Alt+C")
         action("character_sync", "同步角色档案…", lambda: self.sync_character_card())
+        action("character_identity", "人物身份管理…", self.manage_character_identities)
         action("new_world", "新建世界观条目", self.new_world_entry)
         action("new_power", "新建体系设定", self.new_power_entry)
         action("new_timeline", "新建事件", self.new_timeline)
@@ -555,6 +556,7 @@ class MainWindow(QMainWindow):
         create_menu.addAction(self.actions["delete_chapter"])
         create_menu.addAction(self.actions["new_character"])
         create_menu.addAction(self.actions["character_sync"])
+        create_menu.addAction(self.actions["character_identity"])
         create_menu.addAction(self.actions["new_world"])
         create_menu.addAction(self.actions["new_power"])
         create_menu.addAction(self.actions["new_timeline"])
@@ -1349,6 +1351,24 @@ class MainWindow(QMainWindow):
     def new_character(self) -> None:
         self.new_canon_entry("character")
 
+    def manage_character_identities(self) -> None:
+        if self.project is None:
+            self._require_project()
+            return
+        if self.ai_controller.is_running() or self.ai_workflow_controller.has_pending_result:
+            QMessageBox.information(self, "请先处理 AI 任务", "请等待任务完成并采用或放弃待审结果，再修改人物身份。")
+            return
+        if not self._save_if_dirty():
+            return
+        from ui.character_identity_dialog import CharacterIdentityDialog
+        try:
+            dialog = CharacterIdentityDialog(self.project, self)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                self.project_session.notify_data_changed()
+                self.status_message.setText("人物身份关联已更新；角色卡可通过“同步角色档案”预览更新。")
+        except (ValueError, OSError) as exc:
+            QMessageBox.warning(self, "人物身份管理失败", str(exc))
+
     def sync_character_card(self, card_path: str | None = None) -> None:
         """Preview and apply an evidence-bound sync to one character card."""
         project = self.project
@@ -1818,6 +1838,8 @@ class MainWindow(QMainWindow):
         pending = workflow is not None and workflow.has_pending_result
         running = self.ai_controller.is_running() or pending
         chapter_open = not self._timeline_active() and self.project is not None and self.editor.current_chapter_id() is not None
+        if "character_identity" in self.actions:
+            self.actions["character_identity"].setEnabled(self.project is not None and not running)
         if "character_sync" in self.actions:
             self.actions["character_sync"].setEnabled(
                 self.project is not None

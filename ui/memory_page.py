@@ -143,7 +143,8 @@ class StoryMemoryPage(QWidget):
 
         self.sync_button.setEnabled(bool(project.list_chapters()))
         store = ProjectDataStore(project)
-        state = store.load_story_state()
+        from core.character_identity import project_state
+        state = project_state(store.load_story_state())
         summaries = store.load_chapter_summaries()
         characters = state.get("characters") or {}
         try:

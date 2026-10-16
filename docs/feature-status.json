@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-02",
+  "updated_at": "2026-10-16",
   "product": "DeepSonder-PySide6",
   "maintenance_policy": "independent",
   "features": [
@@ -189,6 +189,12 @@
       "requirement": "required",
       "status": "supported",
       "notes": "四项可选故事规划表单与默认关闭的 AI 开关；保存、外部冲突与过期保护；规划仅作方向参考且完整预算校验，不能作为既成事实。新项目取消总大纲及后续剧情规划文件，未来事件由时间线承接，自由笔记不自动加载到 AI。无旧资料迁移入口。"
+    },
+    {
+      "id": "character.identity_association",
+      "requirement": "optional",
+      "status": "supported",
+      "notes": "桌面“人物身份管理”支持人工确认多身份、固定人物 ID、揭露章节、字段冲突选择、扩展身份及撤销。新旧称呼的记忆更新统一读取状态，原始记录按称呼保留；角色卡检索、去重、同步和关系图共用关联；身份变化使待审结果和缓存失效。不包含 AI 自动发现身份揭露或通用剧情时间推理。"
     }
   ]
 }

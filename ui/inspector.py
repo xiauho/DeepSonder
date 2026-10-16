@@ -476,6 +476,8 @@ class Inspector(QWidget):
 
     @staticmethod
     def _state_html(state: dict, summary: str | None) -> str:
+        from core.character_identity import project_state
+        state = project_state(state)
         location = html.escape(str(state.get("current_location") or "尚未记录"))
         characters = state.get("characters") or {}
         foreshadowing = state.get("foreshadowing") or []

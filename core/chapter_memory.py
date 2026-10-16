@@ -16,6 +16,7 @@ from .memory_progress import MemoryProgress, ParallelMemoryPhase, ProgressCallba
 from .memory_task import MemoryTaskSession, memory_config_fingerprint
 from .app_paths import app_cache_dir
 from .chapter_facts import ChapterFactLedger, FactRecord
+from .character_identity import canonical_name, identity_names, character_details, record_update
 from .context_budget import compact_story_state
 from .context_report import PromptBundle, PromptContextReport, SectionUsage
 from .json_utils import JSONExtractionError, extract_json
@@ -558,7 +559,12 @@ def generate_chapter_memory_proposal(
 
     relevant_state = _relevant_story_state(base_state, ledger)
     prompt_state = relevant_state
-    prompt_canon = canon_context
+    identity_hint = "\n".join(
+        "＝".join(sorted(identity_names(base_state, name)))
+        for name in relevant_state.get("characters", {})
+        if len(identity_names(base_state, name)) > 1
+    )
+    prompt_canon = (("已人工确认的同一人物身份（变更 subject 仍使用事实中的原称呼）：\n" + identity_hint + "\n") if identity_hint else "") + canon_context
     base_state_hash = canonical_hash(base_state)
     cached_reduction = None if refresh_reduction else proposal_cache.load_reduction(ledger, config_hash)
     if cached_reduction is not None:
@@ -1204,7 +1210,9 @@ def apply_memory_patches(
     targets: dict[str, MemoryPatch] = {}
 
     for patch in patches:
-        target = _patch_target(patch)
+        routed = replace(patch, subject=canonical_name(state, patch.subject),
+                         field=canonical_name(state, patch.field) if patch.kind == "set_character_relation" else patch.field)
+        target = _patch_target(routed)
         previous = targets.get(target)
         if previous is not None and (
             previous.kind != patch.kind
@@ -1579,8 +1587,8 @@ def _relevant_story_state(
     subjects = {item.subject.casefold() for item in ledger.facts if item.subject.strip()}
     selected: dict[str, Any] = {}
     for name, value in characters.items():
-        normalized = str(name).casefold()
-        if normalized in subjects or any(normalized in subject for subject in subjects):
+        aliases = {n.casefold() for n in identity_names(base_state, str(name))}
+        if aliases & subjects or any(alias in subject for alias in aliases for subject in subjects):
             selected[str(name)] = value
         if len(selected) >= 50:
             break
@@ -1786,8 +1794,7 @@ def _parse_fact_ids(
 def _current_patch_value(state: dict[str, Any], patch: MemoryPatch) -> Any:
     if patch.kind == "set_current_location":
         return state.get("current_location")
-    characters = state.get("characters", {})
-    character = characters.get(patch.subject, {}) if isinstance(characters, dict) else {}
+    character = character_details(state, patch.subject)
     if not isinstance(character, dict):
         character = {}
     if patch.kind == "set_character_field":
@@ -1796,7 +1803,7 @@ def _current_patch_value(state: dict[str, Any], patch: MemoryPatch) -> Any:
         items = character.get("items", [])
         return isinstance(items, list) and patch.value in items
     relations = character.get("relations", {})
-    return relations.get(patch.field) if isinstance(relations, dict) else None
+    return relations.get(canonical_name(state, patch.field)) if isinstance(relations, dict) else None
 
 
 def _apply_patch_value(state: dict[str, Any], patch: MemoryPatch) -> None:
@@ -1806,9 +1813,13 @@ def _apply_patch_value(state: dict[str, Any], patch: MemoryPatch) -> None:
     characters = state.setdefault("characters", {})
     if not isinstance(characters, dict):
         raise MemoryProposalError("旧故事状态的 characters 不是对象。")
+    field = "items" if patch.kind in {"add_character_item", "remove_character_item"} else "relations" if patch.kind == "set_character_relation" else patch.field
+    effective = character_details(state, patch.subject)
     character = characters.setdefault(patch.subject, {})
     if not isinstance(character, dict):
         raise MemoryProposalError("目标角色的旧状态不是对象。")
+    if field in {"items", "relations"} and field in effective:
+        character[field] = copy.deepcopy(effective[field])
     if patch.kind == "set_character_field":
         character[patch.field] = patch.value
     elif patch.kind in {"add_character_item", "remove_character_item"}:
@@ -1824,7 +1835,9 @@ def _apply_patch_value(state: dict[str, Any], patch: MemoryPatch) -> None:
         relations = character.setdefault("relations", {})
         if not isinstance(relations, dict):
             raise MemoryProposalError("目标角色的 relations 不是对象。")
-        relations[patch.field] = patch.value
+        relations[canonical_name(state, patch.field)] = patch.value
+    if len(identity_names(state, patch.subject)) > 1:
+        record_update(state, patch.subject, field)
 
 
 def _patch_target(patch: MemoryPatch) -> str:

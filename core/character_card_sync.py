@@ -68,6 +68,7 @@ class CharacterCardSyncProposal:
     as_of_chapter: str
     expected_card_hash: str
     patches: tuple[CharacterCardPatch, ...]
+    identity_revision: str = ""
 
 
 @dataclass(frozen=True)
@@ -148,7 +149,11 @@ def build_character_card_sync_proposal(
             raise CharacterCardSyncError(
                 "截止章节的故事状态依赖已经变化，请重新更新并采用该章节的故事记忆。"
             )
-    endpoint_state = endpoint_record.get("state", {})
+    from .character_identity import bind_state, project_state, identity_names, fingerprint, load_registry
+    from .project import chapter_number_from_id
+    identity_state = bind_state(project, endpoint_record.get("state", {}), chapter_number_from_id(ordered[-1]) or -1)
+    names = set().union(*(identity_names(identity_state, name) for name in names))
+    endpoint_state = project_state(identity_state)
     characters = endpoint_state.get("characters", {}) if isinstance(endpoint_state, dict) else {}
     state_key = _match_character_key(characters, names)
     if state_key is None:
@@ -197,6 +202,7 @@ def build_character_card_sync_proposal(
         as_of_chapter=ordered[-1],
         expected_card_hash=text_hash(card_text),
         patches=tuple(patches),
+        identity_revision=fingerprint(load_registry(project)),
     )
 
 
@@ -211,6 +217,9 @@ def apply_character_card_sync(
     allowed = {patch.field: patch for patch in proposal.patches}
     if not selected or any(field not in allowed for field in selected):
         raise CharacterCardSyncError("没有选择有效的角色卡变更。")
+    from .character_identity import fingerprint, load_registry
+    if proposal.identity_revision and proposal.identity_revision != fingerprint(load_registry(project)):
+        raise CharacterCardSyncError("人物身份在预览后已变化，请重新生成同步预览。")
     original = path.read_text(encoding="utf-8")
     if text_hash(original) != proposal.expected_card_hash:
         raise CharacterCardSyncError("角色卡在预览生成后已发生变化，请重新生成同步预览。")

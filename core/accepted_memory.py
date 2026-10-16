@@ -238,4 +238,7 @@ def memory_base_state_for(project, chapter_id: str, latest: dict | None = None) 
     """Resolve the immutable pre-chapter state used by memory generation/commit."""
     latest_state = deepcopy(latest if isinstance(latest, dict) else project.load_story_state())
     summaries = project.load_chapter_summaries()
-    return AcceptedMemoryView(project, summaries).base_state_for(chapter_id, latest_state)
+    state, scope = AcceptedMemoryView(project, summaries).base_state_for(chapter_id, latest_state)
+    from .character_identity import bind_state
+    number = chapter_number_from_id(chapter_id)
+    return bind_state(project, state, number if number is not None else -1), scope
