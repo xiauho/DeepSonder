@@ -182,7 +182,7 @@ QLineEdit#navigationSearch {
     padding: 9px 11px;
 }
 QTreeWidget#projectTree {
-    background: transparent;
+    background: __BG__;
     border: none;
     outline: none;
     show-decoration-selected: 0;
@@ -194,7 +194,15 @@ QTreeWidget#projectTree::item {
     padding: 2px 10px;
     margin: 2px 0;
 }
-QTreeWidget#projectTree::branch { background: transparent; }
+QTreeWidget#projectTree::branch {
+    background: __BG__;
+    margin: 2px 0;
+}
+QTreeWidget#projectTree::branch:hover { background: __BG__; }
+QTreeWidget#projectTree::branch:pressed { background: __BG__; }
+QTreeWidget#projectTree::branch:selected,
+QTreeWidget#projectTree::branch:selected:active,
+QTreeWidget#projectTree::branch:selected:!active { background: __BG__; }
 QTreeWidget#projectTree::item:hover { background: __HOVER__; }
 QTreeWidget#projectTree::item:pressed { background: __SELECTION__; }
 QTreeWidget#projectTree::item:selected,
