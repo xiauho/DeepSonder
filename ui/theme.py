@@ -387,6 +387,15 @@ QToolButton#editorModeButton:checked {
     color: __ACCENT__;
     border-color: __ACCENT__;
 }
+QPushButton#indexFilterChip {
+    padding: 2px 5px;
+    font-size: __SMALL_FONT_SIZE__px;
+}
+QPushButton#indexFilterChip:checked {
+    background: __SELECTION__;
+    color: __ACCENT__;
+    border-color: __ACCENT__;
+}
 QFrame#outputContainer {
     background: __PANEL__;
     border-top: 1px solid __BORDER__;
