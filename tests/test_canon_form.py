@@ -127,7 +127,7 @@ class CanonFormTests(unittest.TestCase):
         self.path.write_text(external, encoding="utf-8")
         ok, error = widget.write_changes()
         self.assertFalse(ok)
-        self.assertIn("重新打开", error)
+        self.assertIn("重新载入", error)
         self.assertEqual(self.path.read_text(encoding="utf-8"), external)
         self.assertTrue(widget.is_modified())
 
@@ -137,7 +137,7 @@ class CanonFormTests(unittest.TestCase):
         self.path.unlink()
         ok, error = widget.write_changes()
         self.assertFalse(ok)
-        self.assertIn("重新打开", error)
+        self.assertIn("重新载入", error)
 
     # ---------- Phase C：仅表单视图，原文区块与手写行可编辑 ----------
 

@@ -34,6 +34,9 @@ class StubCanonPage:
         self.opened.append((Path(path), kind, project))
         return self.result
 
+    def refresh_from_disk(self):
+        return True
+
     def is_modified(self):
         return self.modified
 
@@ -61,8 +64,9 @@ def make_self(project, running=False, pending=False, page=None):
         _save_if_dirty=lambda: True,
         structured_canon_page=page,
         content_stack=StubContentStack(),
-        window_state_controller=SimpleNamespace(current_route="writing"),
-        editor=SimpleNamespace(current_path=lambda: None),
+        window_state_controller=SimpleNamespace(current_route="writing", activate_route=MagicMock(), set_route_shell_visible=MagicMock()),
+        _sync_document_context=MagicMock(),
+        editor=SimpleNamespace(current_path=lambda: None, is_dirty=lambda: False),
     )
     window._open_canon_page = lambda path_str, fallback=False: MainWindow._open_canon_page(
         window, path_str, fallback=fallback)

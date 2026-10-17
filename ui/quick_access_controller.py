@@ -78,7 +78,7 @@ class QuickAccessController:
             return "此命令已不可用。"
         if entry.key in self.PROJECT_COMMANDS and window.project is None:
             return "请先打开或新建项目。"
-        if entry.key in self.DOCUMENT_COMMANDS and not window.editor.current_path():
+        if entry.key in self.DOCUMENT_COMMANDS and window.current_document().path is None:
             return "请先打开一个章节或资料文档。"
         if not action.isEnabled():
             hint = action.statusTip() or action.toolTip()
@@ -102,21 +102,14 @@ class QuickAccessController:
             return window.ai_workflow_controller.manage_style_library()
         focused = window.window_state_controller.focus_mode
         window._on_file_selected(entry.category, entry.key)
-        if window.editor.current_path() != entry.key:
+        context = window.current_document()
+        if context.path is None or context.path.resolve() != Path(entry.key).resolve():
             window.status_message.setText("未切换文档，请先处理当前文档的保存问题。")
-            return False
-        route = window.story_navigation_controller.route_for_category(entry.category)
-        if window.window_state_controller.current_route != route and not window._show_route(route):
             return False
         window.left_panel.reveal_path(entry.key)
         if focused and not window.window_state_controller.focus_mode:
             window.window_state_controller.toggle_focus_mode()
-        if window.editor.is_story_plan():
-            window.editor.story_plan_form.focus_field()
-        elif window.editor.view_mode() == "preview":
-            window.editor.preview_browser.setFocus()
-        else:
-            window.editor.text_edit.setFocus()
+        window.focus_editor()
         return True
 
     def open(self, mode):

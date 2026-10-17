@@ -60,6 +60,7 @@ from ui.character_card_sync_dialog import (
     CharacterCardSyncSelectionDialog,
 )
 from ui.document_controller import DocumentController
+from ui.document_context import DocumentContext
 from ui.quick_access_controller import QuickAccessController
 from ui.export_controller import ExportController
 from ui.editor import Editor
@@ -147,6 +148,7 @@ class MainWindow(QMainWindow):
             self.reports_page,
             self.export_page,
             self,
+            current_document=self.current_document,
         )
         self.window_state_controller = WindowStateController(
             primary_nav=self.primary_nav,
@@ -174,6 +176,7 @@ class MainWindow(QMainWindow):
             outer_splitter=self.outer_splitter,
             focus_action=self.actions["focus"],
             exit_focus_button=self.editor.exit_focus_button,
+            current_document=self.current_document,
             parent=self,
         )
         self.story_navigation_controller = StoryNavigationController(
@@ -231,6 +234,7 @@ class MainWindow(QMainWindow):
         )
         self.ai_workflow_controller.review_requested.connect(self._ai_result_pending)
         self.ai_workflow_controller.pending_review_changed.connect(self._refresh_ai_actions)
+        self.ai_workflow_controller.pending_review_changed.connect(self._refresh_delete_action)
         self.ai_workflow_controller.review_finished.connect(self._ai_review_finished)
         self.ai_workflow_controller.check_report_ready.connect(lambda: setattr(self.task_panel, "report_ready", True))
         self.task_panel.review_requested.connect(self._review_ai_result)
@@ -280,12 +284,41 @@ class MainWindow(QMainWindow):
     def open_quick_access(self, mode="documents") -> None:
         self.quick_access_controller.open(mode)
 
+    def current_document(self) -> DocumentContext:
+        if self._canon_page_active():
+            page = self.structured_canon_page
+            category = {"character": "角色", "world": "世界观", "power": "体系设定"}.get(page.current_kind(), "")
+            return DocumentContext(page.current_path(), category, structured=True)
+        if self.content_stack.currentWidget() is self.timeline_page:
+            return DocumentContext(None)
+        path = self.editor.current_path()
+        return DocumentContext(Path(path) if path else None, self.editor.current_category(),
+                               chapter_id=self.editor.current_chapter_id())
+
+    def _edit_current_document(self, command: str) -> None:
+        context = self.current_document()
+        if context.path is None:
+            return
+        if context.structured:
+            self.structured_canon_page.form.edit_command(command)
+        else:
+            getattr(self.editor, command)()
+
+    def _find_current_document(self) -> None:
+        context = self.current_document()
+        if context.path is not None and not context.structured:
+            self.editor.show_find()
+
     def focus_editor(self) -> None:
-        if not self.editor.current_path():
+        context = self.current_document()
+        if context.path is None:
             self.status_message.setText("请先打开章节或资料文档。")
             return
-        route = self.story_navigation_controller.route_for_category(self.editor.current_category())
-        if self.window_state_controller.current_route != route and not self._show_route(route):
+        if context.structured:
+            self._reveal_canon_page()
+            self.structured_canon_page.form.focus_editor()
+            return
+        if self.window_state_controller.current_route != context.route and not self._show_route(context.route):
             return
         if self.editor.is_story_plan():
             self.editor.story_plan_form.focus_field()
@@ -340,9 +373,9 @@ class MainWindow(QMainWindow):
         action("new_power", "新建体系设定", self.new_power_entry)
         action("new_timeline", "新建事件", self.new_timeline)
         action("manage_timeline", "打开时间轴", self.manage_timeline)
-        action("undo", "撤销", lambda: self.editor.undo(), "Ctrl+Z")
-        action("redo", "重做", lambda: self.editor.redo(), "Ctrl+Y")
-        action("find", "查找与替换", lambda: self.editor.show_find(), "Ctrl+F")
+        action("undo", "撤销", lambda: self._edit_current_document("undo"), "Ctrl+Z")
+        action("redo", "重做", lambda: self._edit_current_document("redo"), "Ctrl+Y")
+        action("find", "查找与替换", self._find_current_document, "Ctrl+F")
         action("quick_open", "快速打开章节与资料…", lambda: self.open_quick_access("documents"), "Ctrl+P")
         action("commands", "查找命令与快捷键…", lambda: self.open_quick_access("commands"), "Ctrl+Shift+P")
         action("focus_editor", "回到正文编辑", self.focus_editor, "F6")
@@ -692,6 +725,10 @@ class MainWindow(QMainWindow):
         self.editor.text_edit.selectionChanged.connect(self._refresh_ai_actions)
         self.editor.stats_changed.connect(lambda _text: self._refresh_ai_actions())
         self.structured_canon_page.saved.connect(self._on_structured_canon_saved)
+        self.structured_canon_page.reloaded.connect(
+            lambda path: self.project_session.notify_data_changed([Path(path)], kind="canon"))
+        self.project_session.data_change_detail.connect(self._refresh_current_canon)
+        self.structured_canon_page.form.modified_changed.connect(self._on_dirty_changed)
         self.ai_controller.started.connect(self._on_ai_started)
         self.ai_controller.finished.connect(self._on_ai_finished)
         self.document_controller.auto_saved.connect(self._on_auto_saved)
@@ -731,7 +768,10 @@ class MainWindow(QMainWindow):
             self.view_refresh_controller.refresh_route(route)
         else:
             self.settings_page.synchronize_config(self.config)
+        keep_canon = route == "canon" and self._canon_page_active()
         self.window_state_controller.activate_route(route)
+        if keep_canon:
+            self.content_stack.setCurrentWidget(self.structured_canon_page)
         if route == "canon" and not self._canon_page_active():
             # 结构化表单页已是当前内容时不默认选材，避免覆盖用户正在查看的材料
             self.story_navigation_controller.select_default_canon()
@@ -980,8 +1020,9 @@ class MainWindow(QMainWindow):
             self._show_project_setup(project)
 
     def save_current_file(self, notify: bool = True) -> bool:
-        page_active = self._canon_page_active()
-        if self._timeline_active() and not page_active and notify:
+        context = self.current_document()
+        page_active = context.structured
+        if context.path is None:
             return False
         if page_active:
             # 结构化表单页为当前内容视图：全局保存动作直接保存当前设定材料
@@ -1095,22 +1136,15 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def delete_current_chapter(self) -> None:
-        if self._timeline_active():
+        context = self.current_document()
+        if context.path is None:
             return
-        category = self.editor.current_category()
-        if category == "角色":
-            current = self.editor.current_path()
-            self._delete_character(Path(current) if current else None)
-            return
-        if category in {"世界观", "体系设定", "时间线"}:
-            current = self.editor.current_path()
-            self._delete_canon(category, Path(current) if current else None)
-            return
-        chapter_id = self.editor.current_chapter_id()
-        if chapter_id is None:
-            QMessageBox.information(self, "需要章节", "请先打开要删除的章节。")
-            return
-        self._delete_chapter(chapter_id)
+        if context.category == "角色":
+            self._delete_character(context.path)
+        elif context.category in {"世界观", "体系设定", "时间线"}:
+            self._delete_canon(context.category, context.path)
+        elif context.chapter_id is not None:
+            self._delete_chapter(context.chapter_id)
 
     def delete_chapter_by_path(self, path_str: str) -> None:
         project = self.project
@@ -1129,7 +1163,7 @@ class MainWindow(QMainWindow):
         project = self.project
         if project is None:
             return
-        if self.ai_controller.is_running():
+        if self.ai_controller.is_running() or self.ai_workflow_controller.has_pending_result:
             QMessageBox.information(self, "AI 正在工作", "当前 AI 任务完成后才能删除章节。")
             return
 
@@ -1235,7 +1269,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "删除失败", "目标角色卡不存在，项目资料可能已经发生变化。")
             self.project_session.notify_data_changed()
             return
-        if self.ai_controller.is_running():
+        if self.ai_controller.is_running() or self.ai_workflow_controller.has_pending_result:
             QMessageBox.information(self, "AI 正在工作", "当前 AI 任务完成后才能删除角色卡。")
             return
 
@@ -1274,6 +1308,9 @@ class MainWindow(QMainWindow):
                 discard_current_changes = True
             else:
                 return
+
+        if not self._confirm_canon_delete(target):
+            return
 
         try:
             self.document_controller.delete_character(
@@ -1342,7 +1379,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "删除失败", "目标故事资料不存在，项目资料可能已经发生变化。")
             self.project_session.notify_data_changed()
             return
-        if self.ai_controller.is_running():
+        if self.ai_controller.is_running() or self.ai_workflow_controller.has_pending_result:
             QMessageBox.information(self, "AI 正在工作", "当前 AI 任务完成后才能删除故事资料。")
             return
 
@@ -1385,6 +1422,9 @@ class MainWindow(QMainWindow):
                 discard_current_changes = True
             else:
                 return
+
+        if not self._confirm_canon_delete(target):
+            return
 
         try:
             self.document_controller.delete_canon_entry(
@@ -1466,7 +1506,11 @@ class MainWindow(QMainWindow):
         page = self.structured_canon_page
         if (page.current_path() is not None and kind == page.current_kind()
                 and Path(path_str) == page.current_path()):
-            # 已在该材料上：仅确保表单页成为当前内容视图，不触发未保存确认
+            # Preserve the canon draft, but commit a separately edited background
+            # document through its own owner before checking the disk revision.
+            if self.editor.is_dirty() and not self._save_background_editor():
+                return True
+            page.refresh_from_disk()
             self._reveal_canon_page()
             return True
         if not self._save_if_dirty():
@@ -1482,13 +1526,52 @@ class MainWindow(QMainWindow):
         return True
 
     def _reveal_canon_page(self) -> None:
-        """把结构化表单页切换为内容区当前视图（必要时先回到写作路由）。"""
+        """Present the canon editor and synchronize the shell without selecting another file."""
+        if self.window_state_controller.current_route != "canon":
+            self.window_state_controller.activate_route("canon")
         self.content_stack.setCurrentWidget(self.structured_canon_page)
-        if self.window_state_controller.current_route not in {"writing", "canon", "timeline"}:
-            # 内容区宿主在写作相关路由之外（如项目概览）：先回到写作路由再展示表单页；
-            # activate_route 会把内容区切回通用编辑器，随后再切回表单页
-            self._show_route("canon")
-            self.content_stack.setCurrentWidget(self.structured_canon_page)
+        self.window_state_controller.set_route_shell_visible(True)
+        self._sync_document_context()
+
+    def _sync_document_context(self) -> None:
+        context = self.current_document()
+        self.left_panel.set_current_document(context.path)
+        if context.path is not None:
+            self.left_panel.reveal_path(context.path)
+        self.view_refresh_controller.refresh_inspector(self.project)
+        self._refresh_document_actions()
+        self._refresh_delete_action()
+        self._refresh_ai_actions()
+
+    def _refresh_current_canon(self, project, change) -> None:
+        page = self.structured_canon_page
+        path = page.current_path()
+        if path is None or project is not self.project:
+            return
+        if change is None or change.full_refresh or not change.paths or str(path.resolve()).casefold() in change.path_set:
+            page.refresh_from_disk()
+
+    def _confirm_canon_delete(self, target: Path) -> bool:
+        page = self.structured_canon_page
+        current = page.current_path()
+        if current is None or current.resolve() != target.resolve() or not page.is_modified():
+            return True
+        box = QMessageBox(self)
+        box.setWindowTitle("资料尚未保存")
+        box.setText("当前资料有未保存修改，移入回收站前如何处理？")
+        save = box.addButton("保存后删除", QMessageBox.ButtonRole.AcceptRole)
+        discard = box.addButton("放弃修改并删除", QMessageBox.ButtonRole.DestructiveRole)
+        box.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(save)
+        box.exec()
+        if box.clickedButton() is discard:
+            return True  # Keep the draft until deletion has actually succeeded.
+        if box.clickedButton() is not save:
+            return False
+        ok, error = page.write_changes()
+        if not ok:
+            QMessageBox.warning(self, "删除失败", error)
+        return ok
 
     def _canon_page_active(self) -> bool:
         """结构化表单页是否为当前内容视图。"""
@@ -1537,8 +1620,9 @@ class MainWindow(QMainWindow):
             return
 
         default_card: Path | str | None = card_path
-        if default_card is None and self.editor.current_category() == "角色":
-            default_card = self.editor.current_path()
+        context = self.current_document()
+        if default_card is None and context.category == "角色":
+            default_card = context.path
         selection = CharacterCardSyncSelectionDialog(
             project,
             default_card=default_card,
@@ -1624,13 +1708,21 @@ class MainWindow(QMainWindow):
         return hasattr(self, "window_state_controller") and self.window_state_controller.current_route == "timeline"
 
     def _refresh_document_actions(self) -> None:
+        context = self.current_document()
         for key in ("save", "undo", "redo", "find", "focus", "focus_editor", "locate_document", "inspector"):
-            if key in self.actions:
-                # 结构化表单页在时间线路由下仍可作为当前内容视图，此时保存等文档动作保持可用
-                self.actions[key].setEnabled(
-                    (not self._timeline_active() or self._canon_page_active())
-                    and not (self.editor.is_story_plan() and key in {"find", "inspector"})
-                )
+            if key not in self.actions:
+                continue
+            enabled = (context.path is not None or key in {"focus", "inspector"})
+            if self.content_stack.currentWidget() is self.timeline_page:
+                enabled = False
+            if context.structured and key == "find":
+                enabled = False
+                self.actions[key].setToolTip("资料表单暂不支持跨模块查找与替换。")
+            elif key == "find":
+                self.actions[key].setToolTip("查找与替换")
+            if not context.structured and self.editor.is_story_plan() and key in {"find", "inspector"}:
+                enabled = False
+            self.actions[key].setEnabled(enabled)
 
     def new_canon_entry(self, kind: str) -> None:
         if kind == "timeline":
@@ -1736,32 +1828,31 @@ class MainWindow(QMainWindow):
             return
         if self._open_canon_page(path_str, fallback=True):
             # 设定材料以主编辑区内的结构化表单页打开；AI 任务期间自动回退通用 md 编辑器
-            self._refresh_delete_action()
-            self._refresh_document_actions()
+            self._sync_document_context()
             self._update_window_title()
             return
         if not self._leave_canon_page_guard():
+            self._sync_document_context()
             return  # 用户取消了未保存确认，保持结构化表单页
         current = self.editor.current_path()
         if current and Path(current) == Path(path_str):
-            if self._timeline_active():
-                self._show_route(self.story_navigation_controller.route_for_category(category))
-            else:
-                self.content_stack.setCurrentWidget(self.editor)
+            self.content_stack.setCurrentWidget(self.editor)
+            self._show_route(self.story_navigation_controller.route_for_category(category))
+            self._sync_document_context()
             return
         opened = self.document_controller.open_file(category, path_str)
         if not opened and self.document_controller.save_conflict_path is not None:
             if self._resolve_save_conflict():
                 opened = self.document_controller.open_file(category, path_str)
         if opened and self.project:
+            self.content_stack.setCurrentWidget(self.editor)
             self.view_refresh_controller.refresh_inspector(self.project)
             self._show_route(
                 self.story_navigation_controller.route_for_category(category)
             )
         else:
             self.content_stack.setCurrentWidget(self.editor)
-        self._refresh_delete_action()
-        self._refresh_document_actions()
+        self._sync_document_context()
         self._update_window_title()
 
     def _open_memory_chapter(self, chapter_id: str) -> None:
@@ -1834,6 +1925,8 @@ class MainWindow(QMainWindow):
         if self.window_state_controller.current_route not in {"writing", "canon", "timeline"}:
             self._show_route("writing")
         self.window_state_controller.toggle_focus_mode()
+        if self._canon_page_active():
+            self.structured_canon_page.form.focus_editor()
 
     def _exit_focus_mode(self) -> None:
         self.window_state_controller.exit_focus_mode()
@@ -1968,18 +2061,13 @@ class MainWindow(QMainWindow):
         action = self.actions.get("delete_chapter")
         if action is None:
             return
-        enabled = (
-            not self._timeline_active()
-            and self.project is not None
-            and self.editor.current_category()
-            in {"章节", "角色", "世界观", "体系设定", "时间线"}
-            and self.editor.current_path() is not None
-            and not self.ai_controller.is_running()
-        )
-        if enabled and self.editor.current_category() == "体系设定":
-            enabled = not ProjectDataStore(self.project).is_core_power_path(
-                Path(self.editor.current_path())
-            )
+        context = self.current_document()
+        enabled = (self.project is not None and context.path is not None
+                   and context.category in {"章节", "角色", "世界观", "体系设定", "时间线"}
+                   and not self.ai_controller.is_running()
+                   and not self.ai_workflow_controller.has_pending_result)
+        if enabled and context.category == "体系设定":
+            enabled = not ProjectDataStore(self.project).is_core_power_path(context.path)
         action.setEnabled(enabled)
 
     def _save_if_dirty(self) -> bool:
@@ -1993,7 +2081,16 @@ class MainWindow(QMainWindow):
             return False
         if not self.editor.is_dirty():
             return True
-        return self.save_current_file(notify=False)
+        return self._save_background_editor()
+
+    def _save_background_editor(self) -> bool:
+        if self.content_stack.currentWidget() is self.editor:
+            return self.save_current_file(notify=False)
+        if self.document_controller.save():
+            return True
+        if self.document_controller.save_conflict_path is not None:
+            return self._resolve_save_conflict()
+        return False
 
     def expand_chapter(self) -> None:
         self.ai_workflow_controller.expand()
@@ -2007,7 +2104,7 @@ class MainWindow(QMainWindow):
         workflow = getattr(self, "ai_workflow_controller", None)
         pending = workflow is not None and workflow.has_pending_result
         running = self.ai_controller.is_running() or pending
-        chapter_open = not self._timeline_active() and self.project is not None and self.editor.current_chapter_id() is not None
+        chapter_open = self.project is not None and self.current_document().chapter_id is not None
         if "character_identity" in self.actions:
             self.actions["character_identity"].setEnabled(self.project is not None and not running)
         if "canon_structured_edit" in self.actions:
@@ -2104,13 +2201,18 @@ class MainWindow(QMainWindow):
             self._show_route("settings")
 
     def _locate_current_document(self) -> None:
-        path = self.editor.current_path()
-        if path:
-            if not self._show_route("writing" if self.editor.current_chapter_id() else "canon"):
+        context = self.current_document()
+        if context.path is not None:
+            if self.window_state_controller.focus_mode:
+                self.window_state_controller.exit_focus_mode()
+            if context.structured:
+                self._reveal_canon_page()
+            elif not self._show_route(context.route):
                 return
             if not self.window_state_controller.navigation_visible:
                 self.window_state_controller.toggle_navigation_panel()
-            self.left_panel.reveal_path(Path(path))
+            self.left_panel.set_current_document(context.path)
+            self.left_panel.reveal_path(context.path)
 
     def check_consistency(self) -> None:
         self.ai_workflow_controller.check()
@@ -2170,7 +2272,7 @@ class MainWindow(QMainWindow):
                 and not self.structured_canon_page.confirm_discard_or_save(self)):
             event.ignore()  # 用户取消：结构化表单页的修改绝不经关窗静默丢弃
             return
-        if self.editor.is_dirty() and not self.save_current_file(notify=False):
+        if self.editor.is_dirty() and not self._save_background_editor():
             answer = QMessageBox.question(
                 self,
                 "文件尚未保存",

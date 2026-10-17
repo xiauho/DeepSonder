@@ -34,6 +34,7 @@ class WindowStateController(QObject):
         content_stack=None,
         timeline_page=None,
         title_bar=None,
+        current_document=None,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -51,6 +52,7 @@ class WindowStateController(QObject):
         self.left_panel = left_panel
         self.inspector = inspector
         self.editor = editor
+        self.current_document = current_document
         self.output_container = output_container
         self.main_splitter = main_splitter
         self.outer_splitter = outer_splitter
@@ -152,7 +154,9 @@ class WindowStateController(QObject):
         self.status_bar.setVisible(visible)
         self._apply_action_bar_visibility(visible)
         self.left_panel.setVisible(visible and self.navigation_visible)
-        self.inspector.setVisible(visible and self.inspector_visible and self._current_route != "timeline" and not self.editor.is_story_plan())
+        structured = self.current_document is not None and self.current_document().structured
+        self.inspector.setVisible(visible and self.inspector_visible and self._current_route != "timeline"
+                                  and (structured or not self.editor.is_story_plan()))
         self.exit_focus_button.setVisible(not visible and self.title_bar is None)
         self.output_container.setVisible(visible and self._output_visible)
         if visible:

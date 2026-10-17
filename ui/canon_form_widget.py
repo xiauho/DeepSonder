@@ -17,10 +17,11 @@
 from __future__ import annotations
 
 import hashlib
+from copy import deepcopy
 from pathlib import Path
 
-from PySide6.QtCore import Signal
-from PySide6.QtWidgets import (QButtonGroup, QDialog, QFormLayout, QGroupBox,
+from PySide6.QtCore import QFileSystemWatcher, QTimer, Signal
+from PySide6.QtWidgets import (QApplication, QButtonGroup, QDialog, QFormLayout, QGroupBox,
     QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMessageBox, QPlainTextEdit,
     QPushButton, QRadioButton, QScrollArea, QVBoxLayout, QWidget)
 
@@ -102,14 +103,12 @@ class NewModuleDialog(QDialog):
             self.error_label.show()
             return
         try:
-            add_module(self.form.entry, self.name_edit.text(), self.selected_role())
+            self.form._change_structure(
+                lambda draft: add_module(draft, self.name_edit.text(), self.selected_role()))
         except ValueError as exc:
             self.error_label.setText(str(exc))
             self.error_label.show()
             return
-        self.form.feedback.clear()
-        self.form._build_form()
-        self.form._mark_modified()
         self.accept()
 
 
@@ -117,6 +116,8 @@ class CanonFormWidget(QWidget):
     """单份设定材料的结构化表单；不感知宿主页面，也不负责导航。"""
 
     modified_changed = Signal(bool)
+    state_changed = Signal()
+    reloaded = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -125,7 +126,11 @@ class CanonFormWidget(QWidget):
         self.kind: str | None = None
         self._on_saved = None  # 实际写盘成功后回调（参数为保存路径）
         self._modified = False
+        self._last_editor = None
         self._expected_hash = ""
+        self.external_changed = False
+        self.save_error = ""
+        self._baseline_text = ""
         self.entry: CanonEntry | None = None  # 由 load_entry 载入
         self._field_widgets: list[tuple[CanonSection, str, QLineEdit]] = []
         self._group_widgets: list[tuple[CanonSection, str, str, QLineEdit]] = []
@@ -133,6 +138,7 @@ class CanonFormWidget(QWidget):
         self._raw_widgets: list[tuple[CanonSection, QPlainTextEdit]] = []
         self._extras_rows: list[tuple[CanonSection, str | None, list[QLineEdit]]] = []
         self._relation_rows: list[tuple[CanonSection, QLineEdit]] = []
+        self._relation_sections: list[CanonSection] = []
         self._alias_map: dict[str, str] = {}
         self._theme_config: dict = {"theme": "light"}
 
@@ -149,6 +155,18 @@ class CanonFormWidget(QWidget):
         self.feedback.setWordWrap(True)
         layout.addWidget(self.feedback)
 
+        self._pending_view_restore = None
+        self._view_restore_timer = QTimer(self)
+        self._view_restore_timer.setSingleShot(True)
+        self._view_restore_timer.timeout.connect(self._restore_pending_view)
+        self._watcher = QFileSystemWatcher(self)
+        self._refresh_timer = QTimer(self)
+        self._refresh_timer.setSingleShot(True)
+        self._refresh_timer.setInterval(120)
+        self._refresh_timer.timeout.connect(self.refresh_from_disk)
+        self._watcher.fileChanged.connect(lambda _path: self._refresh_timer.start())
+        self._watcher.directoryChanged.connect(lambda _path: self._refresh_timer.start())
+        QApplication.instance().focusChanged.connect(self._remember_focus)
         self._build_form()  # 初始为空表单，等待 load_entry
 
     # ---------- 对外状态 ----------
@@ -182,11 +200,20 @@ class CanonFormWidget(QWidget):
 
     def reset(self) -> None:
         """清空当前材料（项目切换等场景），不触发任何确认或写盘。"""
+        self._refresh_timer.stop()
+        self._view_restore_timer.stop()
+        self._pending_view_restore = None
+        watched = self._watcher.files() + self._watcher.directories()
+        if watched:
+            self._watcher.removePaths(watched)
         self.project = None
         self.path = None
         self.kind = None
         self.entry = None
         self._expected_hash = ""
+        self.external_changed = False
+        self.save_error = ""
+        self._baseline_text = ""
         self._alias_map = {}
         self._field_widgets.clear()
         self._group_widgets.clear()
@@ -194,9 +221,11 @@ class CanonFormWidget(QWidget):
         self._raw_widgets.clear()
         self._extras_rows.clear()
         self._relation_rows.clear()
+        self._relation_sections.clear()
         self._build_form()
         self.feedback.clear()
         self._set_modified(False)
+        self.state_changed.emit()
 
     def load_entry(self, path: Path | str, kind: str, project=None) -> None:
         """载入（或切换到）一份设定材料，并重置全部单文件状态。
@@ -214,10 +243,18 @@ class CanonFormWidget(QWidget):
         self.path = path
         self.kind = kind
         self._expected_hash = hashlib.sha256(original).hexdigest()
+        self._baseline_text = original.decode("utf-8")
+        self.external_changed = False
+        self.save_error = ""
+        watched = self._watcher.files() + self._watcher.directories()
+        if watched:
+            self._watcher.removePaths(watched)
+        self._watcher.addPaths([str(path), str(path.parent)])
         self.entry = entry
         self._build_form()
         self.feedback.clear()
         self._set_modified(False)
+        self.state_changed.emit()
 
     def confirm_discard_or_save(self, parent=None) -> bool:
         """未保存修改时的 保存/放弃修改/取消 三选一。
@@ -250,37 +287,120 @@ class CanonFormWidget(QWidget):
             return False
         return True
 
-    def write_changes(self) -> tuple[bool, str]:
-        """执行保存（不切换材料）；返回 (是否成功, 错误信息)。
+    def refresh_from_disk(self) -> bool:
+        """Refresh a clean document; an external revision must never replace a draft."""
+        if self.path is None:
+            return True
+        try:
+            if self.path.is_file() and str(self.path) not in self._watcher.files():
+                self._watcher.addPath(str(self.path))
+            current = self.path.read_bytes()
+            if hashlib.sha256(current).hexdigest() == self._expected_hash:
+                if self.external_changed:
+                    self.external_changed = False
+                    self.save_error = ""
+                    self.feedback.clear()
+                    self.state_changed.emit()
+                return True
+            if not self.is_modified():
+                self.load_entry(self.path, self.kind, self.project)
+                self.reloaded.emit(str(self.path))
+                return True
+            error = "原资料已有新版本，本地修改已保留。请查看差异、另存草稿，或重新载入。"
+        except (OSError, ValueError) as exc:
+            error = f"原文件暂时无法读取，本地内容已保留，请重新载入或另存草稿：{exc}"
+        self._save_failed(error, external=True)
+        return False
 
-        实际写盘成功后回调 on_saved（内容未变化的无操作保存不回调）。
-        """
+    def _save_failed(self, error: str, *, external: bool = False) -> tuple[bool, str]:
+        self.external_changed = self.external_changed or external
+        self.save_error = error
+        self.feedback.setText(error)
+        self.state_changed.emit()
+        return False, error
+
+    def _commit_saved(self, draft: CanonEntry, data: bytes) -> None:
+        # Keep widget section references alive; only replace their collected data.
+        for section, saved in zip(self.entry.sections, draft.sections):
+            if saved.dirty:
+                saved.raw = render_canon_entry(CanonEntry(
+                    kind=draft.kind, title="", preamble="", sections=[saved]))
+                saved.marked = True
+            saved.dirty = False
+            section.__dict__.update(saved.__dict__)
+        self._expected_hash = hashlib.sha256(data).hexdigest()
+        self._baseline_text = data.decode("utf-8")
+        self.external_changed = False
+        self.save_error = ""
+        self.feedback.clear()
+        self._set_modified(False)
+        self.state_changed.emit()
+
+    def write_changes(self) -> tuple[bool, str]:
+        """Commit collected input and update the revision only after a successful write."""
         if self.path is None or self.entry is None:
             return False, "尚未打开设定材料。"
         try:
             current = self.path.read_bytes()
         except OSError as exc:
-            return False, f"无法读取原文件，请重新打开后再保存：{exc}"
+            return self._save_failed(f"无法读取原文件，本地修改已保留，请重新载入或另存草稿：{exc}", external=True)
         if hashlib.sha256(current).hexdigest() != self._expected_hash:
-            return False, "文件已在打开后被修改，为避免覆盖他人改动，请重新打开。"
+            return self._save_failed(
+                "原资料已有新版本，尚未覆盖。本地修改已保留，请查看差异、另存草稿或重新载入。",
+                external=True)
         try:
-            text = self._effective_text()
+            draft = self._collected_entry()
+            text = render_canon_entry(draft)
+            unchanged = text.replace("\r\n", "\n") == current.decode("utf-8").replace("\r\n", "\n")
+            if not unchanged:
+                atomic_write_text(self.path, text, encoding="utf-8")
         except (ValueError, OSError) as exc:
-            return False, str(exc)
-        # 换行符差异不视为内容变化，避免对 CRLF 文件做无意义的整文件重写
-        if text.replace("\r\n", "\n") == current.decode("utf-8").replace("\r\n", "\n"):
-            self._set_modified(False)
-            return True, ""
-        try:
-            atomic_write_text(self.path, text, encoding="utf-8")
-        except OSError as exc:
-            return False, str(exc)
-        self._set_modified(False)
-        if self._on_saved is not None:
+            return self._save_failed(str(exc))
+        self._commit_saved(draft, current if unchanged else text.encode("utf-8"))
+        if not unchanged and self._on_saved is not None:
             self._on_saved(self.path)
         return True, ""
 
     # ---------- 内部状态 ----------
+
+    def _restore_pending_view(self) -> None:
+        callback = self._pending_view_restore
+        self._pending_view_restore = None
+        if callback is not None:
+            callback()
+
+    def _editor_bindings(self):
+        yield from ((s, ("field", k), e) for s, k, e in self._field_widgets)
+        yield from ((s, ("group", g, k), e) for s, g, k, e in self._group_widgets)
+        yield from ((s, ("text",), e) for s, e in self._text_widgets)
+        yield from ((s, ("raw",), e) for s, e in self._raw_widgets)
+        yield from ((s, ("relation", i), e) for i, (s, e) in enumerate(self._relation_rows))
+        for section, group, rows in self._extras_rows:
+            yield from ((section, ("extras", group, i), e) for i, e in enumerate(rows))
+
+    def _editable_widgets(self):
+        return [editor for _section, _key, editor in self._editor_bindings()]
+
+    def _remember_focus(self, _old, current) -> None:
+        if any(current is editor for editor in self._editable_widgets()):
+            self._last_editor = current
+
+    def focus_editor(self):
+        editors = self._editable_widgets()
+        editor = next((e for e in editors if e is self._last_editor), None)
+        if editor is None:
+            editor = next(iter(editors), None)
+        if editor is not None:
+            editor.setFocus()
+        return editor
+
+    def edit_command(self, command: str) -> None:
+        # A menu command must not fall back to another field when its previous
+        # target was removed. F6 may choose a first field; undo/redo may not.
+        editor = next((e for e in self._editable_widgets() if e is self._last_editor), None)
+        if editor is not None:
+            editor.setFocus()
+            getattr(editor, command)()
 
     def _set_modified(self, value: bool) -> None:
         value = bool(value)
@@ -303,12 +423,14 @@ class CanonFormWidget(QWidget):
     # ---------- 表单构建 ----------
 
     def _build_form(self) -> None:
+        self._last_editor = None
         self._field_widgets.clear()
         self._group_widgets.clear()
         self._text_widgets.clear()
         self._raw_widgets.clear()
         self._extras_rows.clear()
         self._relation_rows.clear()
+        self._relation_sections.clear()
         content = QWidget()
         body = QVBoxLayout(content)
         body.setSpacing(12)
@@ -484,6 +606,7 @@ class CanonFormWidget(QWidget):
 
     def _relation_body(self, section: CanonSection) -> QWidget:
         """关键关系分区主体（标题与模块操作按钮由 _wrap_module 提供）。"""
+        self._relation_sections.append(section)
         body = QWidget()
         vbox = QVBoxLayout(body)
         vbox.setContentsMargins(0, 0, 0, 0)
@@ -549,9 +672,11 @@ class CanonFormWidget(QWidget):
             return
         spec = section_spec(self.kind, section.heading)
         declared = list(spec.get("keys", [])) if spec else []
-        set_group_field(self.entry, section.heading, name, declared[0] if declared else "备注", "")
-        self.feedback.clear()
-        self._build_form()
+        try:
+            self._change_structure(lambda draft: set_group_field(
+                draft, section.heading, name, declared[0] if declared else "备注", ""))
+        except ValueError as exc:
+            self.feedback.setText(str(exc))
 
     # ---------- 用户模块操作（新建/重命名/上移/下移/删除） ----------
 
@@ -569,23 +694,19 @@ class CanonFormWidget(QWidget):
         if not ok:
             return
         try:
-            rename_module(self.entry, section.heading, text)
+            self._change_structure(lambda draft: rename_module(draft, section.heading, text))
         except ValueError as exc:
             self.feedback.setText(str(exc))
             return
-        self.feedback.clear()
-        self._build_form()
-        self._mark_modified()
+
 
     def _move_module(self, section: CanonSection, offset: int) -> None:
         try:
-            move_module(self.entry, section.heading, offset)
+            self._change_structure(lambda draft: move_module(draft, section.heading, offset))
         except ValueError as exc:
             self.feedback.setText(str(exc))
             return
-        self.feedback.clear()
-        self._build_form()
-        self._mark_modified()
+
 
     def _delete_module(self, section: CanonSection) -> None:
         answer = QMessageBox.question(
@@ -596,31 +717,32 @@ class CanonFormWidget(QWidget):
         if answer != QMessageBox.StandardButton.Yes:
             return
         try:
-            delete_module(self.entry, section.heading)
+            self._change_structure(lambda draft: delete_module(draft, section.heading))
         except ValueError as exc:
             self.feedback.setText(str(exc))
             return
-        self.feedback.clear()
-        self._build_form()
-        self._mark_modified()
+
 
     # ---------- 保存 ----------
 
-    def _sync_form_to_entry(self) -> None:
+    def _collected_entry(self) -> CanonEntry:
+        draft = deepcopy(self.entry)
+        targets = {id(original): CanonEntry(kind=draft.kind, title="", preamble="", sections=[copy])
+                   for original, copy in zip(self.entry.sections, draft.sections)}
         for section, key, editor in self._field_widgets:
             if editor.text() != section.fields.get(key, ""):
-                set_section_field(self.entry, section.heading, key, editor.text())
+                set_section_field(targets[id(section)], section.heading, key, editor.text())
         for section, group_name, key, editor in self._group_widgets:
             group = next(g for g in section.groups if g.name == group_name)
             if editor.text() != group.fields.get(key, ""):
-                set_group_field(self.entry, section.heading, group_name, key, editor.text())
+                set_group_field(targets[id(section)], section.heading, group_name, key, editor.text())
         for section, editor in self._text_widgets:
             if editor.toPlainText().strip("\n") != section.text:
-                set_section_text(self.entry, section.heading, editor.toPlainText())
+                set_section_text(targets[id(section)], section.heading, editor.toPlainText())
         # 原文区块：正文整块逐字写回（未修改的区块保持原字节）
         for section, editor in self._raw_widgets:
             if editor.toPlainText() != raw_section_body(section):
-                set_raw_section_text(self.entry, section.heading, editor.toPlainText())
+                set_raw_section_text(targets[id(section)], section.heading, editor.toPlainText())
         # 模块内手写行：按行逐字写回
         for section, group_name, rows in self._extras_rows:
             if group_name is None:
@@ -630,19 +752,66 @@ class CanonFormWidget(QWidget):
             lines = [editor.text() for editor in rows]
             if lines != current:
                 if group_name is None:
-                    set_section_extras(self.entry, section.heading, lines)
+                    set_section_extras(targets[id(section)], section.heading, lines)
                 else:
-                    set_group_extras(self.entry, section.heading, group_name, lines)
+                    set_group_extras(targets[id(section)], section.heading, group_name, lines)
         # 关键关系选择器：按行拼接后写回
-        relation_sections: list[CanonSection] = []
-        for section, _editor in self._relation_rows:
-            if not any(s is section for s in relation_sections):
-                relation_sections.append(section)
-        for section in relation_sections:
-            joined = "\n".join(e.text() for s, e in self._relation_rows if s is section)
-            if joined != section.text:
-                set_section_text(self.entry, section.heading, joined)
+        for section in self._relation_sections:
+            lines = [e.text() for s, e in self._relation_rows if s is section]
+            original = [line for line in section.text.split("\n") if line.strip()]
+            if lines != original:
+                set_section_text(targets[id(section)], section.heading, "\n".join(lines))
+
+        return draft
+
+    def _change_structure(self, operation) -> None:
+        draft = self._collected_entry()
+        # Remember the field before a dialog/menu took focus. Track the copied
+        # section object so renames and moves do not invalidate its identity.
+        focus = self._last_editor or QApplication.focusWidget()
+        focused = None
+        old_sections = list(self.entry.sections)
+        for section, key, editor in self._editor_bindings():
+            if editor is focus:
+                index = next(i for i, item in enumerate(old_sections) if item is section)
+                if isinstance(editor, QLineEdit):
+                    cursor = (editor.cursorPosition(), editor.selectionStart(), len(editor.selectedText()))
+                else:
+                    cursor = (editor.textCursor().position(), editor.textCursor().anchor())
+                focused = (draft.sections[index], key, cursor)
+                break
+        scroll = self.form_scroll.verticalScrollBar().value()
+        operation(draft)
+        self.entry = draft
+        self._build_form()
+        self.feedback.setText(self.save_error)
+        self._mark_modified()
+
+        def restore_view():
+            if self.entry is not draft:
+                return
+            if focused is not None:
+                section, key, cursor = focused
+                for item, item_key, editor in self._editor_bindings():
+                    if item is section and item_key == key:
+                        self._last_editor = editor
+                        editor.setFocus()
+                        if isinstance(editor, QLineEdit):
+                            if cursor[1] >= 0:
+                                editor.setSelection(cursor[1], cursor[2])
+                            else:
+                                editor.setCursorPosition(cursor[0])
+                        else:
+                            text_cursor = editor.textCursor()
+                            text_cursor.setPosition(cursor[1])
+                            text_cursor.setPosition(cursor[0], text_cursor.MoveMode.KeepAnchor)
+                            editor.setTextCursor(text_cursor)
+                        break
+            self.form_scroll.verticalScrollBar().setValue(scroll)
+
+        restore_view()
+        self._pending_view_restore = restore_view
+        self._view_restore_timer.start(0)
 
     def _effective_text(self) -> str:
-        self._sync_form_to_entry()
-        return render_canon_entry(self.entry)
+        return render_canon_entry(self._collected_entry())

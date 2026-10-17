@@ -35,10 +35,13 @@ class ViewRefreshController(QObject):
         reports_page: ReportsPage,
         export_page: ExportPage,
         parent=None,
+        *,
+        current_document=None,
     ) -> None:
         super().__init__(parent)
         self.project_session = project_session
         self.editor = editor
+        self.current_document = current_document
         self.left_panel = left_panel
         self.inspector = inspector
         self.dashboard_page = dashboard_page
@@ -151,7 +154,8 @@ class ViewRefreshController(QObject):
         if project is None:
             self.inspector.show_project(None)
             return
-        chapter_id = self.editor.current_chapter_id()
+        chapter_id = (self.current_document().chapter_id if self.current_document is not None
+                      else self.editor.current_chapter_id())
         self.inspector.show_project(project, chapter_id) if chapter_id else self.inspector.show_project(project)
 
     def refresh_route(self, route: str) -> None:

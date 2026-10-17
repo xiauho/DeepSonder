@@ -424,9 +424,13 @@ def _rebuild_extras_raw(section: CanonSection, group_name: str | None,
         start = sub + 1
         stop = next((i for i in range(start, len(lines))
                      if _SUB_RE.match(lines[i].rstrip("\r\n")) is not None), len(lines))
-    if (section.marked and lines and stop >= len(lines) - 1
-            and lines[-1].rstrip("\r\n") == SECTION_END):
-        stop = len(lines) - 1  # 结尾的受管标记行保持原样
+    if section.marked:
+        # The end marker may be followed by blank lines or an untouched suffix.
+        # Neither belongs to editable handwritten slots.
+        marker_end = next((i for i in range(start, stop)
+                           if lines[i].rstrip("\r\n") == SECTION_END), None)
+        if marker_end is not None:
+            stop = marker_end
     newline = "\r\n" if "\r\n" in section.raw else "\n"
     out = lines[:start]
     pending = list(new_lines)
