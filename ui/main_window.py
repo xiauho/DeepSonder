@@ -333,6 +333,7 @@ class MainWindow(QMainWindow):
         action("new_character", "新建角色", self.new_character, "Ctrl+Alt+C")
         action("character_sync", "同步角色档案…", lambda: self.sync_character_card())
         action("character_identity", "人物身份管理…", self.manage_character_identities)
+        action("canon_structured_edit", "结构化编辑设定…", self.edit_canon_structured)
         action("new_world", "新建世界观条目", self.new_world_entry)
         action("new_power", "新建体系设定", self.new_power_entry)
         action("new_timeline", "新建事件", self.new_timeline)
@@ -579,6 +580,7 @@ class MainWindow(QMainWindow):
         create_menu.addAction(self.actions["new_character"])
         create_menu.addAction(self.actions["character_sync"])
         create_menu.addAction(self.actions["character_identity"])
+        create_menu.addAction(self.actions["canon_structured_edit"])
         create_menu.addAction(self.actions["new_world"])
         create_menu.addAction(self.actions["new_power"])
         create_menu.addAction(self.actions["new_timeline"])
@@ -1391,6 +1393,41 @@ class MainWindow(QMainWindow):
         except (ValueError, OSError) as exc:
             QMessageBox.warning(self, "人物身份管理失败", str(exc))
 
+    def edit_canon_structured(self) -> None:
+        """以表单 ⇄ 源码 ⇄ 预览三模式编辑设定材料；带索引侧栏与关系选择器。"""
+        if self.project is None:
+            self._require_project()
+            return
+        if self.ai_controller.is_running() or self.ai_workflow_controller.has_pending_result:
+            QMessageBox.information(self, "请先处理 AI 任务", "请等待任务完成并采用或放弃待审结果，再修改设定材料。")
+            return
+        if not self._save_if_dirty():
+            return
+        from core.canon_schema import kind_for_path
+        from ui.structured_canon_editor import StructuredCanonEditor
+        current = self.editor.current_path()
+        kind = kind_for_path(current) if current else None
+        if kind is None:
+            # 编辑器当前不在设定材料上：回退为从索引打开第一个角色卡
+            paths = self.project.list_characters()
+            if not paths:
+                QMessageBox.information(
+                    self, "结构化编辑设定",
+                    "尚无设定材料：请先在创作菜单新建角色、世界观或体系设定，即可在索引中结构化编辑。")
+                return
+            current, kind = paths[0], "character"
+        try:
+            dialog = StructuredCanonEditor(current, kind, self.project, self)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                self.project_session.notify_data_changed([Path(dialog.path)], kind="canon")
+                now = self.editor.current_path()
+                if now and Path(now).resolve() == Path(dialog.path).resolve():
+                    self.editor.reload_current_file()
+                self.status_message.setText(
+                    f"设定材料已更新 · {Path(dialog.path).stem}；索引徽章已随最新文件刷新。")
+        except (ValueError, OSError) as exc:
+            QMessageBox.warning(self, "结构化编辑失败", str(exc))
+
     def sync_character_card(self, card_path: str | None = None) -> None:
         """Preview and apply an evidence-bound sync to one character card."""
         project = self.project
@@ -1862,6 +1899,8 @@ class MainWindow(QMainWindow):
         chapter_open = not self._timeline_active() and self.project is not None and self.editor.current_chapter_id() is not None
         if "character_identity" in self.actions:
             self.actions["character_identity"].setEnabled(self.project is not None and not running)
+        if "canon_structured_edit" in self.actions:
+            self.actions["canon_structured_edit"].setEnabled(self.project is not None and not running)
         if "character_sync" in self.actions:
             self.actions["character_sync"].setEnabled(
                 self.project is not None
