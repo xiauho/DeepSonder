@@ -6,9 +6,10 @@ from pathlib import Path
 
 from core.character_card_sync import MANAGED_STATE_START, MANAGED_STATE_END
 from core.canon_schema import (
-    SECTION_END, SECTION_START, CanonEntry, load_canon_entry, parse_canon_entry,
-    render_canon_entry, schema_for, set_group_field, set_section_field, set_section_text,
-    write_canon_entry,
+    ROLE_RAW, SECTION_END, SECTION_START, CanonEntry, load_canon_entry,
+    parse_canon_entry, raw_section_body, render_canon_entry, schema_for,
+    set_group_extras, set_group_field, set_raw_section_text, set_section_extras,
+    set_section_field, set_section_text, write_canon_entry,
 )
 from core.project_data import CANON_ENTRY_TYPES
 
@@ -208,6 +209,175 @@ class CanonSchemaTests(unittest.TestCase):
         self.assertEqual(reloaded.section("基础档案").fields["身份／阵营"], "北港向导")
         self.assertEqual(reloaded.section("基础档案").fields["别名"], "林舟")
         self.assertIn("临时想法。", render_canon_entry(reloaded))
+
+
+class RawSectionAndExtrasTests(unittest.TestCase):
+    """Phase C：原文区块（set_raw_section_text）与手写行（set_section_extras）的逐字写回。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    # ---------- set_raw_section_text ----------
+
+    def test_set_raw_section_text_round_trip_and_idempotent(self):
+        text = character_text()
+        entry = parse_canon_entry("character", text)
+        set_raw_section_text(entry, "作者自由备注", "新的想法一\n新的想法二")
+        rendered = render_canon_entry(entry)
+        # 其余区块逐字节不变（含受管同步区）
+        self.assertTrue(rendered.startswith(text[:text.index("## 作者自由备注")]))
+        self.assertIn("## 作者自由备注\n\n新的想法一\n新的想法二\n", rendered)
+        reparsed = parse_canon_entry("character", rendered)
+        self.assertEqual(reparsed.section("作者自由备注").role, "free")
+        self.assertEqual(raw_section_body(reparsed.section("作者自由备注")),
+                         "新的想法一\n新的想法二")
+        # 再次写入相同内容：幂等无操作，字节不变
+        set_raw_section_text(reparsed, "作者自由备注", "新的想法一\n新的想法二")
+        self.assertEqual(render_canon_entry(reparsed), rendered)
+
+    def test_set_raw_section_text_no_change_preserves_bytes(self):
+        text = character_text()
+        entry = parse_canon_entry("character", text)
+        # 与当前正文一致（仅行尾差异）：无操作，原字节（含结尾单个换行）保留
+        set_raw_section_text(entry, "作者自由备注", "临时想法。\n")
+        self.assertEqual(render_canon_entry(entry), text)
+
+    def test_set_raw_section_text_crlf_section_keeps_crlf(self):
+        text = character_text().replace(
+            "## 作者自由备注\n\n临时想法。\n",
+            "## 作者自由备注\r\n\r\n临时想法。\r\n")
+        entry = parse_canon_entry("character", text)
+        set_raw_section_text(entry, "作者自由备注", "窗口外有雾。")
+        rendered = render_canon_entry(entry)
+        self.assertIn("## 作者自由备注\r\n\r\n窗口外有雾。\r\n\r\n", rendered)
+        reparsed = parse_canon_entry("character", rendered)
+        set_raw_section_text(reparsed, "作者自由备注", "窗口外有雾。")
+        self.assertEqual(render_canon_entry(reparsed), rendered)
+
+    def test_set_raw_section_text_edits_raw_module(self):
+        text = character_text() + "\n## 对照表\n\n| 键 | 值 |\n| --- | --- |\n| a | b |\n"
+        entry = parse_canon_entry("character", text)
+        self.assertEqual(entry.section("对照表").role, ROLE_RAW)
+        set_raw_section_text(entry, "对照表", "| 键 | 值 |\n| --- | --- |\n| a | c |")
+        rendered = render_canon_entry(entry)
+        self.assertTrue(rendered.startswith(text[:text.index("## 对照表")]))
+        self.assertIn("| a | c |", rendered)
+        reparsed = parse_canon_entry("character", rendered)
+        self.assertEqual(reparsed.section("对照表").role, ROLE_RAW)
+        self.assertEqual(raw_section_body(reparsed.section("对照表")),
+                         "| 键 | 值 |\n| --- | --- |\n| a | c |")
+
+    def test_set_raw_section_text_rejections(self):
+        entry = parse_canon_entry("character", character_text())
+        with self.assertRaisesRegex(ValueError, "不存在"):
+            set_raw_section_text(entry, "没有这节", "x")
+        with self.assertRaisesRegex(ValueError, "只读"):
+            set_raw_section_text(entry, "当前剧情状态（DeepSonder 同步）", "x")
+        with self.assertRaisesRegex(ValueError, "不是原文区块"):
+            set_raw_section_text(entry, "外貌与辨识特征", "x")
+        self.assertEqual(render_canon_entry(entry), character_text())
+
+    # ---------- set_section_extras / set_group_extras ----------
+
+    def test_set_section_extras_surgical_round_trip(self):
+        text = character_text().replace(
+            "- 首次出场：chapter_01\n",
+            "- 首次出场：chapter_01\n手写行甲。\n手写行乙。\n")
+        entry = parse_canon_entry("character", text)
+        set_section_extras(entry, "基础档案", ["手写行甲（改）。", "手写行乙。"])
+        rendered = render_canon_entry(entry)
+        # extras-only 编辑不规范化字段部分，也不引入受管标记
+        self.assertNotIn(SECTION_START, rendered)
+        self.assertIn("- 首次出场：chapter_01\n手写行甲（改）。\n手写行乙。\n", rendered)
+        self.assertIn("- 姓名：白鸥\n- 别名：林舟\n", rendered)
+        reparsed = parse_canon_entry("character", rendered)
+        self.assertEqual(reparsed.section("基础档案").extras,
+                         ["手写行甲（改）。", "手写行乙。"])
+        self.assertEqual(reparsed.section("基础档案").fields["身份／阵营"], "旧站守灯人")
+        # 幂等：相同内容再次写入不改变字节
+        set_section_extras(reparsed, "基础档案", ["手写行甲（改）。", "手写行乙。"])
+        self.assertEqual(render_canon_entry(reparsed), rendered)
+
+    def test_set_section_extras_append_and_remove_lines(self):
+        text = character_text().replace(
+            "- 首次出场：chapter_01\n",
+            "- 首次出场：chapter_01\n仅有一行手写。\n")
+        entry = parse_canon_entry("character", text)
+        set_section_extras(entry, "基础档案", ["仅有一行手写。", "新增手写行。"])
+        rendered = render_canon_entry(entry)
+        self.assertIn("- 首次出场：chapter_01\n仅有一行手写。\n新增手写行。\n", rendered)
+        reparsed = parse_canon_entry("character", rendered)
+        self.assertEqual(reparsed.section("基础档案").extras,
+                         ["仅有一行手写。", "新增手写行。"])
+        # 清空：纯空白行被剔除，不产生解析漂移
+        set_section_extras(reparsed, "基础档案", ["", "   "])
+        self.assertEqual(reparsed.section("基础档案").extras, [])
+        final = render_canon_entry(reparsed)
+        self.assertNotIn("仅有一行手写。", final)
+        self.assertEqual(parse_canon_entry("character", final)
+                         .section("基础档案").extras, [])
+
+    def test_set_section_extras_crlf_preserves_line_endings(self):
+        text = character_text().replace("\n", "\r\n").replace(
+            "- 首次出场：chapter_01\r\n",
+            "- 首次出场：chapter_01\r\n手写行。\r\n")
+        entry = parse_canon_entry("character", text)
+        set_section_extras(entry, "基础档案", ["手写行（改）。"])
+        rendered = render_canon_entry(entry)
+        self.assertIn("- 首次出场：chapter_01\r\n手写行（改）。\r\n", rendered)
+
+    def test_set_group_extras_round_trip(self):
+        text = character_text().replace(
+            "- 能力属性：记忆\n",
+            "- 能力属性：记忆\n忆潮每晚自动触发。\n")
+        entry = parse_canon_entry("character", text)
+        self.assertEqual(
+            next(g.extras for g in entry.section("能力档案").groups
+                 if g.name == "忆潮"),
+            ["忆潮每晚自动触发。"])
+        set_group_extras(entry, "能力档案", "忆潮", ["触发条件：满月。"])
+        rendered = render_canon_entry(entry)
+        self.assertNotIn(SECTION_START, rendered)
+        self.assertIn("- 能力属性：记忆\n触发条件：满月。\n", rendered)
+        # 其他分组逐字节不受影响
+        self.assertIn("- 使用条件：临水\n- 限制与代价：消耗记忆片段\n- 克制关系：\n",
+                      rendered)
+        reparsed = parse_canon_entry("character", rendered)
+        self.assertEqual(
+            next(g.extras for g in reparsed.section("能力档案").groups
+                 if g.name == "忆潮"),
+            ["触发条件：满月。"])
+        self.assertEqual(
+            next(g.fields for g in reparsed.section("能力档案").groups
+                 if g.name == "忆潮")["所属体系"], "灵能体系")
+
+    def test_set_extras_on_dirty_section_keeps_content(self):
+        entry = parse_canon_entry("character", character_text().replace(
+            "- 首次出场：chapter_01\n",
+            "- 首次出场：chapter_01\n手写行。\n"))
+        set_section_field(entry, "基础档案", "性别", "女")  # 先置脏：走整块规范化渲染
+        set_section_extras(entry, "基础档案", ["手写行（改）。"])
+        rendered = render_canon_entry(entry)
+        self.assertIn(SECTION_START, rendered)
+        reparsed = parse_canon_entry("character", rendered)
+        self.assertEqual(reparsed.section("基础档案").extras, ["手写行（改）。"])
+        self.assertEqual(reparsed.section("基础档案").fields["性别"], "女")
+        self.assertEqual(reparsed.section("基础档案").fields["别名"], "林舟")
+
+    def test_set_extras_rejections(self):
+        entry = parse_canon_entry("character", character_text())
+        with self.assertRaisesRegex(ValueError, "不存在"):
+            set_section_extras(entry, "没有这节", ["x"])
+        with self.assertRaisesRegex(ValueError, "不是字段或分组分区"):
+            set_section_extras(entry, "外貌与辨识特征", ["x"])
+        with self.assertRaisesRegex(ValueError, "不是字段或分组分区"):
+            set_section_extras(entry, "当前剧情状态（DeepSonder 同步）", ["x"])
+        with self.assertRaisesRegex(ValueError, "不是可重复分组分区"):
+            set_group_extras(entry, "基础档案", "条目", ["x"])
+        with self.assertRaisesRegex(ValueError, "不存在"):
+            set_group_extras(entry, "能力档案", "没有条目", ["x"])
+        self.assertEqual(render_canon_entry(entry), character_text())
 
 
 if __name__ == "__main__":

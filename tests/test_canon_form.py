@@ -6,14 +6,14 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from PySide6.QtWidgets import (QApplication, QDialog, QLabel, QLineEdit,
-    QPlainTextEdit, QPushButton, QScrollArea)
+    QPlainTextEdit, QPushButton, QScrollArea, QToolButton)
 from PySide6.QtGui import QFontDatabase
 from core.canon_schema import SECTION_START, load_canon_entry
 from core.character_card_sync import MANAGED_STATE_START
 from core.project_data import CANON_ENTRY_TYPES
 from tests.test_canon_index import FakeProject
 from tests.test_canon_schema import character_text
-from ui.canon_form_widget import CanonFormWidget, MODE_SOURCE, NewModuleDialog
+from ui.canon_form_widget import CanonFormWidget, NewModuleDialog
 from ui.structured_canon_page import StructuredCanonPage
 from ui.theme import apply_theme
 
@@ -55,6 +55,15 @@ class CanonFormTests(unittest.TestCase):
     def group_field(self, host, group_name, key):
         widget = host.form if isinstance(host, StructuredCanonPage) else host
         return next(e for s, g, k, e in widget._group_widgets if g == group_name and k == key)
+
+    def raw_editor(self, host, heading):
+        widget = host.form if isinstance(host, StructuredCanonPage) else host
+        return next(e for s, e in widget._raw_widgets if s.heading == heading)
+
+    def extras_rows(self, host, heading, group_name=None):
+        widget = host.form if isinstance(host, StructuredCanonPage) else host
+        return next(rows for s, g, rows in widget._extras_rows
+                    if s.heading == heading and g == group_name)
 
     def fake_project(self):
         tmp = tempfile.TemporaryDirectory()
@@ -130,17 +139,104 @@ class CanonFormTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("重新打开", error)
 
-    def test_source_mode_edit_writes_through_and_form_reparses(self):
+    # ---------- Phase C：仅表单视图，原文区块与手写行可编辑 ----------
+
+    def test_widget_exposes_no_mode_buttons(self):
         widget = self.widget()
-        widget._mode_buttons[MODE_SOURCE].click()
-        self.assertEqual(widget.stack.currentIndex(), 1)
-        widget.source_edit.setPlainText(widget.source_edit.toPlainText() + "\n## 附记\n\n手写追加。\n")
+        self.assertEqual(widget.findChildren(QToolButton), [])
+        mode_texts = {"表单", "源码", "预览"}
+        for button in widget.findChildren(QPushButton):
+            self.assertNotIn(button.text(), mode_texts)
+
+    def test_raw_block_edit_saves_verbatim_and_keeps_other_sections(self):
+        widget = self.widget()
+        editor = self.raw_editor(widget, "作者自由备注")
+        self.assertFalse(editor.isReadOnly())
+        self.assertEqual(editor.toPlainText(), "临时想法。")
+        editor.setPlainText("新的想法。\n- 保留原有列表格式")
         ok, _error = widget.write_changes()
         self.assertTrue(ok)
         saved = self.path.read_text(encoding="utf-8")
-        self.assertIn("## 附记", saved)
+        original = character_text()
+        # 其余区块逐字节不变，原文区块正文逐字写入
+        self.assertTrue(saved.startswith(original[:original.index("## 作者自由备注")]))
+        self.assertIn("## 作者自由备注\n\n新的想法。\n- 保留原有列表格式\n", saved)
         reparsed = load_canon_entry(self.path, "character")
-        self.assertEqual(reparsed.section("附记").role, "text")
+        self.assertEqual(reparsed.section("作者自由备注").role, "free")
+        # 重新载入后不做修改再保存：零写入，字节不变
+        before = self.path.read_bytes()
+        widget2 = self.widget()
+        ok, _error = widget2.write_changes()
+        self.assertTrue(ok)
+        self.assertEqual(self.path.read_bytes(), before)
+
+    def test_raw_module_block_editable_with_badge(self):
+        self.path.write_text(
+            character_text() + "\n## 对照表\n\n| a | b |\n| --- | --- |\n",
+            encoding="utf-8")
+        widget = self.widget()
+        badges = [l for l in widget.findChildren(QLabel)
+                  if l.objectName() == "rawModuleBadge"]
+        self.assertEqual([b.text() for b in badges], ["原文区块", "原文区块"])
+        captions = [l for l in widget.findChildren(QLabel)
+                    if l.text() == "该区块保留原文格式，修改后原样写入文档。"]
+        self.assertEqual(len(captions), 2)
+        editor = self.raw_editor(widget, "对照表")
+        editor.setPlainText("| a | c |")
+        ok, _error = widget.write_changes()
+        self.assertTrue(ok)
+        saved = self.path.read_text(encoding="utf-8")
+        self.assertIn("## 对照表\n\n| a | c |\n", saved)
+        reparsed = load_canon_entry(self.path, "character")
+        self.assertEqual(reparsed.section("对照表").role, "raw")
+
+    def test_extras_rows_edit_round_trip(self):
+        self.path.write_text(character_text().replace(
+            "- 首次出场：chapter_01\n",
+            "- 首次出场：chapter_01\n手写备注行。\n"), encoding="utf-8")
+        widget = self.widget()
+        rows = self.extras_rows(widget, "基础档案")
+        self.assertEqual([e.text() for e in rows], ["手写备注行。"])
+        rows[0].setText("手写备注行（修改后）。")
+        ok, _error = widget.write_changes()
+        self.assertTrue(ok)
+        saved = self.path.read_text(encoding="utf-8")
+        self.assertIn("- 首次出场：chapter_01\n手写备注行（修改后）。\n", saved)
+        self.assertNotIn(SECTION_START, saved)  # 手写行编辑不引入受管标记
+        reparsed = load_canon_entry(self.path, "character")
+        self.assertEqual(reparsed.section("基础档案").extras, ["手写备注行（修改后）。"])
+        self.assertEqual(reparsed.section("基础档案").fields["姓名"], "白鸥")
+
+    def test_group_extras_rows_edit_round_trip(self):
+        self.path.write_text(character_text().replace(
+            "- 能力属性：记忆\n",
+            "- 能力属性：记忆\n忆潮每晚自动触发（手写）。\n"), encoding="utf-8")
+        widget = self.widget()
+        rows = self.extras_rows(widget, "能力档案", "忆潮")
+        rows[0].setText("触发条件：满月（手写改）。")
+        ok, _error = widget.write_changes()
+        self.assertTrue(ok)
+        saved = self.path.read_text(encoding="utf-8")
+        self.assertIn("- 能力属性：记忆\n触发条件：满月（手写改）。\n", saved)
+        self.assertNotIn(SECTION_START, saved)
+        reparsed = load_canon_entry(self.path, "character")
+        groups = reparsed.section("能力档案").groups
+        self.assertEqual([g.name for g in groups], ["潮汐感知", "忆潮"])
+        self.assertEqual(next(g.extras for g in groups if g.name == "忆潮"),
+                         ["触发条件：满月（手写改）。"])
+
+    def test_form_renders_all_module_types(self):
+        self.path.write_text(
+            character_text() + "\n## 对照表\n\n| a | b |\n| --- | --- |\n",
+            encoding="utf-8")
+        widget = self.widget()
+        self.assertTrue(widget._field_widgets)   # 字段型
+        self.assertTrue(widget._group_widgets)   # 分组型
+        self.assertTrue(widget._text_widgets)    # 文本型
+        self.assertEqual([(s.heading, s.role) for s, _e in widget._raw_widgets],
+                         [("作者自由备注", "free"), ("对照表", "raw")])
+        self.assertEqual([e.toPlainText() for s, e in widget._raw_widgets
+                          if s.heading == "作者自由备注"], ["临时想法。"])
 
     def test_managed_section_is_readonly_without_field_widgets(self):
         widget = self.widget()

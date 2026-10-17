@@ -444,7 +444,7 @@ QPushButton#moduleDeleteButton {
     font-size: __SMALL_FONT_SIZE__px;
 }
 QPushButton#moduleDeleteButton:hover { background: __HOVER__; color: __DANGER__; border-color: __DANGER__; }
-QLabel#systemModuleBadge {
+QLabel#systemModuleBadge, QLabel#rawModuleBadge {
     color: __MUTED__;
     background: __FIELD__;
     border: 1px solid __BORDER__;

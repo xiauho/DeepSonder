@@ -1422,7 +1422,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "人物身份管理失败", str(exc))
 
     def edit_canon_structured(self) -> None:
-        """以表单 ⇄ 源码 ⇄ 预览三模式编辑设定材料（内嵌于主编辑区）。"""
+        """以结构化表单编辑设定材料（内嵌于主编辑区，md 源码完全后台化）。"""
         if self.project is None:
             self._require_project()
             return

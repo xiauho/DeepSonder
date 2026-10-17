@@ -1,10 +1,11 @@
-"""设定材料的结构化表单控件：表单 ⇄ 源码 ⇄ 预览三模式（可嵌入页面）。
+"""设定材料的结构化表单控件：仅表单视图，md 源码完全后台化（可嵌入页面）。
 
 从原结构化编辑对话框提取的文档表单核心，宿主可以是页面、对话框或分割器：
-- 表单模式：按 schema 渲染分区；只有实际变化的分区会被规范化并加受管标记，
+- 表单按 schema 渲染分区；只有实际变化的分区会被规范化并加受管标记，
   其余分区保存时逐字节还原（core.canon_schema 的 round-trip 保证）。
-- 源码模式：等同通用 md 编辑，整文件写回；切回表单时重新解析。
-- 预览模式：只读 Markdown 渲染（不检索远程资源）。
+- 不再提供源码/预览模式：自由备注与无法结构化的未识别小节以可编辑的
+  “原文区块”呈现（正文整块编辑、修改后原样逐字写回），字段/分组模块
+  内的手写行同样直接可编辑；任何内容都有编辑入口。
 - 修订锁：保存前校验文件自打开以来的字节指纹，外部修改必须重新打开。
 - 未保存修改经 confirm_discard_or_save 提供 保存/放弃修改/取消 三选一，
   由宿主在切换材料或离开页面前调用；取消返回 False 表示中止操作。
@@ -21,21 +22,18 @@ from pathlib import Path
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (QButtonGroup, QDialog, QFormLayout, QGroupBox,
     QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMessageBox, QPlainTextEdit,
-    QPushButton, QRadioButton, QScrollArea, QStackedWidget, QToolButton,
-    QVBoxLayout, QWidget)
+    QPushButton, QRadioButton, QScrollArea, QVBoxLayout, QWidget)
 
 from core.canon_schema import (
     CanonEntry, CanonSection, add_module, delete_module, is_system_section,
-    move_module, parse_canon_entry, rename_module, render_canon_entry,
-    schema_for, section_spec, set_section_field, set_group_field,
-    set_section_text, ROLE_FIELDS, ROLE_GROUP, ROLE_MANAGED, ROLE_TEXT,
+    move_module, parse_canon_entry, raw_section_body, render_canon_entry,
+    rename_module, schema_for, section_spec, set_group_extras,
+    set_group_field, set_raw_section_text, set_section_extras,
+    set_section_field, set_section_text, ROLE_FIELDS, ROLE_FREE, ROLE_GROUP,
+    ROLE_MANAGED, ROLE_RAW, ROLE_TEXT,
 )
 from core.character_identity import load_registry
 from core.storage import atomic_write_text
-from ui.editor import MarkdownPreview
-from ui.theme import document_css
-
-MODE_FORM, MODE_SOURCE, MODE_PREVIEW = "form", "source", "preview"
 
 
 class NewModuleDialog(QDialog):
@@ -126,13 +124,14 @@ class CanonFormWidget(QWidget):
         self.path: Path | None = None
         self.kind: str | None = None
         self._on_saved = None  # 实际写盘成功后回调（参数为保存路径）
-        self._mode = MODE_FORM
         self._modified = False
         self._expected_hash = ""
         self.entry: CanonEntry | None = None  # 由 load_entry 载入
         self._field_widgets: list[tuple[CanonSection, str, QLineEdit]] = []
         self._group_widgets: list[tuple[CanonSection, str, str, QLineEdit]] = []
         self._text_widgets: list[tuple[CanonSection, QPlainTextEdit]] = []
+        self._raw_widgets: list[tuple[CanonSection, QPlainTextEdit]] = []
+        self._extras_rows: list[tuple[CanonSection, str | None, list[QLineEdit]]] = []
         self._relation_rows: list[tuple[CanonSection, QLineEdit]] = []
         self._alias_map: dict[str, str] = {}
         self._theme_config: dict = {"theme": "light"}
@@ -141,43 +140,15 @@ class CanonFormWidget(QWidget):
         layout.setContentsMargins(18, 10, 18, 12)
         layout.setSpacing(8)
 
-        bar = QHBoxLayout()
-        self._mode_buttons: dict[str, QToolButton] = {}
-        self._mode_group = QButtonGroup(self)
-        self._mode_group.setExclusive(True)
-        for mode, label in ((MODE_FORM, "表单"), (MODE_SOURCE, "源码"), (MODE_PREVIEW, "预览")):
-            button = QToolButton()
-            button.setText(label)
-            button.setObjectName("editorModeButton")
-            button.setCheckable(True)
-            button.setChecked(mode == MODE_FORM)
-            self._mode_group.addButton(button)
-            self._mode_buttons[mode] = button
-            self._mode_group.setId(button, {"form": 0, "source": 1, "preview": 2}[mode])
-            bar.addWidget(button)
-        bar.addStretch()
-        layout.addLayout(bar)
-
-        self.stack = QStackedWidget(self)
         self.form_scroll = QScrollArea(self)
         self.form_scroll.setObjectName("pageScroll")
         self.form_scroll.setWidgetResizable(True)
-        self.stack.addWidget(self.form_scroll)
-        self.source_edit = QPlainTextEdit(self)
-        self.source_edit.setObjectName("writingEditor")
-        self.stack.addWidget(self.source_edit)
-        self.preview = MarkdownPreview(self)
-        self.preview.setObjectName("markdownPreview")
-        self.preview.document().setDefaultStyleSheet(document_css(self._theme_config))
-        self.stack.addWidget(self.preview)
-        layout.addWidget(self.stack, stretch=1)
+        layout.addWidget(self.form_scroll, stretch=1)
 
         self.feedback = QLabel()
         self.feedback.setWordWrap(True)
         layout.addWidget(self.feedback)
 
-        self.source_edit.textChanged.connect(self._mark_modified)
-        self._mode_group.idClicked.connect(self._switch_mode)
         self._build_form()  # 初始为空表单，等待 load_entry
 
     # ---------- 对外状态 ----------
@@ -206,9 +177,8 @@ class CanonFormWidget(QWidget):
         return self._modified
 
     def set_theme(self, config: dict | None = None) -> None:
-        """跟随应用主题更新预览文档样式。"""
+        """记录应用主题配置（表单配色由全局样式表驱动）。"""
         self._theme_config = dict(config or {"theme": "light"})
-        self.preview.document().setDefaultStyleSheet(document_css(self._theme_config))
 
     def reset(self) -> None:
         """清空当前材料（项目切换等场景），不触发任何确认或写盘。"""
@@ -221,12 +191,11 @@ class CanonFormWidget(QWidget):
         self._field_widgets.clear()
         self._group_widgets.clear()
         self._text_widgets.clear()
+        self._raw_widgets.clear()
+        self._extras_rows.clear()
         self._relation_rows.clear()
         self._build_form()
-        self._fill_source("")
-        self.preview.clear()
         self.feedback.clear()
-        self._set_mode(MODE_FORM)
         self._set_modified(False)
 
     def load_entry(self, path: Path | str, kind: str, project=None) -> None:
@@ -246,10 +215,8 @@ class CanonFormWidget(QWidget):
         self.kind = kind
         self._expected_hash = hashlib.sha256(original).hexdigest()
         self.entry = entry
-        self._fill_source("")
         self._build_form()
         self.feedback.clear()
-        self._set_mode(MODE_FORM)
         self._set_modified(False)
 
     def confirm_discard_or_save(self, parent=None) -> bool:
@@ -324,17 +291,6 @@ class CanonFormWidget(QWidget):
     def _mark_modified(self) -> None:
         self._set_modified(True)
 
-    def _fill_source(self, text: str) -> None:
-        # 回填源码触发的 textChanged 不算用户修改
-        modified = self._modified
-        self.source_edit.setPlainText(text)
-        self._set_modified(modified)
-
-    def _set_mode(self, mode: str) -> None:
-        self._mode = mode
-        self._mode_buttons[mode].setChecked(True)
-        self.stack.setCurrentIndex({"form": 0, "source": 1, "preview": 2}[mode])
-
     def _load_alias_map(self) -> dict[str, str]:
         """从人物身份记录构建 别名 → 主名 映射；记录损坏时降级为空映射。"""
         try:
@@ -350,6 +306,8 @@ class CanonFormWidget(QWidget):
         self._field_widgets.clear()
         self._group_widgets.clear()
         self._text_widgets.clear()
+        self._raw_widgets.clear()
+        self._extras_rows.clear()
         self._relation_rows.clear()
         content = QWidget()
         body = QVBoxLayout(content)
@@ -385,6 +343,10 @@ class CanonFormWidget(QWidget):
         title.setObjectName("sectionTitle")
         title.setWordWrap(True)
         row.addWidget(title, 1)
+        if section.role in (ROLE_RAW, ROLE_FREE):
+            badge = QLabel("原文区块")
+            badge.setObjectName("rawModuleBadge")
+            row.addWidget(badge)
         if is_system_section(self.entry, section):
             badge = QLabel("系统区块")
             badge.setObjectName("systemModuleBadge")
@@ -427,13 +389,13 @@ class CanonFormWidget(QWidget):
                 self._field_widgets.append((section, key, editor))
                 form.addRow(key, editor)
             if section.extras:
-                note = QLabel("含手写内容，保存时原样保留：" + "／".join(section.extras))
-                note.setWordWrap(True)
-                form.addRow(note)
+                form.addRow(self._extras_panel(section, None))
             return body
         if section.role == ROLE_GROUP:
             body = QWidget()
             vbox = QVBoxLayout(body)
+            if section.extras:
+                vbox.addWidget(self._extras_panel(section, None))
             spec = section_spec(self.kind, section.heading)
             declared = list(spec.get("keys", [])) if spec else []
             for group in section.groups:
@@ -447,9 +409,7 @@ class CanonFormWidget(QWidget):
                     self._group_widgets.append((section, group.name, key, editor))
                     form.addRow(key, editor)
                 if group.extras:
-                    note = QLabel("含手写内容，保存时原样保留：" + "／".join(group.extras))
-                    note.setWordWrap(True)
-                    form.addRow(note)
+                    form.addRow(self._extras_panel(section, group.name))
                 vbox.addWidget(group_box)
             add_button = QPushButton("＋ 添加条目")
             add_button.setProperty("moduleHeading", section.heading)
@@ -466,18 +426,40 @@ class CanonFormWidget(QWidget):
             editor.textChanged.connect(lambda: self._mark_modified())
             self._text_widgets.append((section, editor))
             return editor
-        # 自由备注 / 未识别章节：不做结构化，源码模式编辑
+        # 自由备注 / 未识别章节：原文区块，正文整块编辑、逐字写回
         body = QWidget()
         vbox = QVBoxLayout(body)
-        viewer = QPlainTextEdit()
-        viewer.setPlainText(section.raw.strip("\n"))
-        viewer.setReadOnly(True)
-        viewer.setMaximumHeight(140)
-        caption = QLabel("该分区不做结构化，请在源码模式中编辑。")
+        vbox.setContentsMargins(0, 0, 0, 0)
+        editor = QPlainTextEdit()
+        editor.setPlainText(raw_section_body(section))
+        editor.setMaximumHeight(140)
+        editor.textChanged.connect(lambda: self._mark_modified())
+        self._raw_widgets.append((section, editor))
+        vbox.addWidget(editor)
+        caption = QLabel("该区块保留原文格式，修改后原样写入文档。")
         caption.setWordWrap(True)
-        vbox.addWidget(viewer)
         vbox.addWidget(caption)
         return body
+
+    def _extras_panel(self, section: CanonSection, group_name: str | None) -> QWidget:
+        """模块内手写行的可编辑行组：每行一个输入框，保存时逐字写回。"""
+        lines = (section.extras if group_name is None
+                 else next(g.extras for g in section.groups if g.name == group_name))
+        panel = QWidget()
+        vbox = QVBoxLayout(panel)
+        vbox.setContentsMargins(0, 0, 0, 0)
+        vbox.setSpacing(4)
+        caption = QLabel("以下为手写内容，保存时逐字保留：")
+        caption.setWordWrap(True)
+        vbox.addWidget(caption)
+        rows: list[QLineEdit] = []
+        for text in lines:
+            editor = QLineEdit(text)
+            editor.textChanged.connect(lambda _text: self._mark_modified())
+            rows.append(editor)
+            vbox.addWidget(editor)
+        self._extras_rows.append((section, group_name, rows))
+        return panel
 
     def _managed_widget(self, section: CanonSection) -> QGroupBox:
         # 受管区不用 QGroupBox 标题：长标题会撑大最小宽度，窄窗口下溢出
@@ -622,24 +604,6 @@ class CanonFormWidget(QWidget):
         self._build_form()
         self._mark_modified()
 
-    # ---------- 模式切换 ----------
-
-    def _switch_mode(self, button_id: int) -> None:
-        mode = {0: MODE_FORM, 1: MODE_SOURCE, 2: MODE_PREVIEW}[button_id]
-        if mode == self._mode:
-            return
-        previous = self._mode
-        if previous == MODE_FORM:
-            self._sync_form_to_entry()
-            self._fill_source(render_canon_entry(self.entry))
-        if mode == MODE_FORM:
-            self.entry = parse_canon_entry(self.kind, self.source_edit.toPlainText())
-            self._build_form()
-        if mode == MODE_PREVIEW:
-            self.preview.setMarkdown(self.source_edit.toPlainText())
-        self._mode = mode
-        self.stack.setCurrentIndex({"form": 0, "source": 1, "preview": 2}[mode])
-
     # ---------- 保存 ----------
 
     def _sync_form_to_entry(self) -> None:
@@ -653,6 +617,22 @@ class CanonFormWidget(QWidget):
         for section, editor in self._text_widgets:
             if editor.toPlainText().strip("\n") != section.text:
                 set_section_text(self.entry, section.heading, editor.toPlainText())
+        # 原文区块：正文整块逐字写回（未修改的区块保持原字节）
+        for section, editor in self._raw_widgets:
+            if editor.toPlainText() != raw_section_body(section):
+                set_raw_section_text(self.entry, section.heading, editor.toPlainText())
+        # 模块内手写行：按行逐字写回
+        for section, group_name, rows in self._extras_rows:
+            if group_name is None:
+                current = section.extras
+            else:
+                current = next(g.extras for g in section.groups if g.name == group_name)
+            lines = [editor.text() for editor in rows]
+            if lines != current:
+                if group_name is None:
+                    set_section_extras(self.entry, section.heading, lines)
+                else:
+                    set_group_extras(self.entry, section.heading, group_name, lines)
         # 关键关系选择器：按行拼接后写回
         relation_sections: list[CanonSection] = []
         for section, _editor in self._relation_rows:
@@ -664,7 +644,5 @@ class CanonFormWidget(QWidget):
                 set_section_text(self.entry, section.heading, joined)
 
     def _effective_text(self) -> str:
-        if self._mode == MODE_FORM:
-            self._sync_form_to_entry()
-            return render_canon_entry(self.entry)
-        return self.source_edit.toPlainText()
+        self._sync_form_to_entry()
+        return render_canon_entry(self.entry)

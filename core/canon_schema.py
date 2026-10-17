@@ -5,7 +5,7 @@
 - 未修改的区块渲染时逐字节还原（round-trip 保证），只有被编辑的分区才会被
   重排并以 novalist:section:v1 受管标记包裹（与 auto-state 同款标记风格）。
 - 解析容错：无法识别的行、手写内容、未知章节一律原样保留（进入 extras / raw），
-  由上层提示用户改用源码模式，绝不丢弃内容。
+  由上层以可编辑的“原文区块”或手写行形式逐字写回，绝不丢弃内容。
 - "当前剧情状态（DeepSonder 同步）"为只读同步区块，"作者自由备注"永不结构化，
   二者只做逐字节透传。
 """
@@ -290,7 +290,7 @@ def set_section_field(entry: CanonEntry, heading: str, key: str, value: str) -> 
     if section.role == ROLE_MANAGED:
         raise ValueError("该分区由 DeepSonder 自动同步，表单内只读。")
     if section.role != ROLE_FIELDS:
-        raise ValueError(f"分区「{heading}」不是字段分区，请用源码模式编辑。")
+        raise ValueError(f"分区「{heading}」不是字段分区，无法以字段方式编辑。")
     section.fields[key] = str(value)
     section.dirty = True
 
@@ -312,9 +312,192 @@ def set_section_text(entry: CanonEntry, heading: str, text: str) -> None:
     if section.role == ROLE_MANAGED:
         raise ValueError("该分区由 DeepSonder 自动同步，表单内只读。")
     if section.role != ROLE_TEXT:
-        raise ValueError(f"分区「{heading}」不是文本分区，请用源码模式编辑。")
+        raise ValueError(f"分区「{heading}」不是文本分区，无法以文本方式编辑。")
     section.text = str(text).strip("\n")
     section.dirty = True
+
+
+# ---------- 原文区块与手写行（Phase C）：md 完全后台化的逐字写回 ----------
+
+
+def raw_section_body(section: CanonSection) -> str:
+    """读取 RAW/FREE 原文区块去掉标题行后的正文（LF 归一，去首尾空行）。
+
+    无标题的原文区块（历史文件中标记包裹却无 ## 标题的罕见残片）返回
+    整段原文（含受管标记行），由 set_raw_section_text 整块写回。
+    """
+    text = section.raw.replace("\r\n", "\n").replace("\r", "\n")
+    lines = text.split("\n")
+    if section.heading:
+        body_start = 0
+        for i, line in enumerate(lines):
+            if _HEADING_RE.match(line) is not None:
+                body_start = i + 1
+                break
+        lines = lines[body_start:]
+        while lines and not lines[0].strip():
+            lines.pop(0)
+    return "\n".join(lines).strip("\n")
+
+
+def set_raw_section_text(entry: CanonEntry, heading: str, text: str) -> None:
+    """整块替换 RAW/FREE 原文区块的正文；标题行不动，正文逐字写回。
+
+    - 重建格式为 标题行 + 空行 + 正文 + 结尾空行；该区块原本使用 CRLF
+      行尾时按原行尾风格写回。不加受管标记、不改变分区角色。
+    - 与当前正文一致时为无操作（幂等），不触碰原文字节；未编辑的区块
+      保存时仍逐字节还原。
+    - extras/fields 等结构化数据不受影响：原文区块本就不参与结构化。
+    """
+    section = section_or_raise(entry, heading)
+    if section.role == ROLE_MANAGED:
+        raise ValueError("该分区由 DeepSonder 自动同步，表单内只读。")
+    if section.role not in (ROLE_RAW, ROLE_FREE):
+        raise ValueError(f"分区「{heading}」不是原文区块。")
+    body = str(text).replace("\r\n", "\n").replace("\r", "\n").strip("\n")
+    if body == raw_section_body(section):
+        return  # 幂等：正文未变化时保持原字节
+    newline = "\r\n" if "\r\n" in section.raw else "\n"
+    body_text = body.replace("\n", newline) if newline == "\r\n" else body
+    if section.heading:
+        section.raw = f"## {section.heading}{newline}{newline}{body_text}{newline}{newline}"
+        section.marked = False  # 重建后的原文不再携带旧的受管标记
+    else:
+        # 无标题残片：正文即整段原文（含标记行），整块写回
+        section.raw = f"{body_text}{newline}" if body_text else ""
+
+
+def _clean_extras_lines(lines) -> list[str]:
+    """手写行清洗：拆开内嵌换行并 LF 归一；剔除纯空白行。
+
+    纯空白行写回后会因解析跳过空行而丢失，造成表单与文件的来回漂移，
+    因此在入口统一剔除。
+    """
+    cleaned: list[str] = []
+    for line in lines:
+        for part in str(line).replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+            if part.strip():
+                cleaned.append(part)
+    return cleaned
+
+
+def _is_extras_slot(line: str) -> bool:
+    """该行是否为手写行槽位：非空、非字段条目、非子分组标题。"""
+    stripped = line.rstrip("\r\n")
+    return (bool(stripped.strip()) and _SUB_RE.match(stripped) is None
+            and _ITEM_RE.match(stripped) is None)
+
+
+def _rebuild_extras_raw(section: CanonSection, group_name: str | None,
+                        new_lines: list[str]) -> str | None:
+    """在 raw 原位替换手写行槽位；结构行（条目/子分组/空行/标记）逐字节保留。
+
+    返回 None 表示无法安全手术（raw 无标题行，或目标子分组不在 raw 中），
+    调用方应回退为整块规范化渲染（置 dirty）。
+    """
+    lines = section.raw.splitlines(keepends=True)
+    head_end = None
+    for i, line in enumerate(lines):
+        if _HEADING_RE.match(line.rstrip("\r\n")) is not None:
+            head_end = i + 1
+            break
+    if head_end is None:
+        return None
+    if group_name is None:
+        start = head_end
+        stop = len(lines)
+        if section.role == ROLE_GROUP:
+            # 分组分区顶层手写行只存在于首个 ### 之前（与解析口径一致）
+            first_sub = next((i for i in range(start, stop)
+                             if _SUB_RE.match(lines[i].rstrip("\r\n")) is not None), None)
+            if first_sub is not None:
+                stop = first_sub
+    else:
+        sub = None
+        for i in range(head_end, len(lines)):
+            match = _SUB_RE.match(lines[i].rstrip("\r\n"))
+            if match is not None and match.group(1) == group_name:
+                sub = i
+                break
+        if sub is None:
+            return None
+        start = sub + 1
+        stop = next((i for i in range(start, len(lines))
+                     if _SUB_RE.match(lines[i].rstrip("\r\n")) is not None), len(lines))
+    if (section.marked and lines and stop >= len(lines) - 1
+            and lines[-1].rstrip("\r\n") == SECTION_END):
+        stop = len(lines) - 1  # 结尾的受管标记行保持原样
+    newline = "\r\n" if "\r\n" in section.raw else "\n"
+    out = lines[:start]
+    pending = list(new_lines)
+    span: list[str] = []
+    for line in lines[start:stop]:
+        if _is_extras_slot(line):
+            if pending:
+                ending = line[len(line.rstrip("\r\n")):] or newline
+                span.append(pending.pop(0) + ending)
+            continue  # 新手写行更少：删除多余槽位
+        span.append(line)
+    if pending:
+        trailing = []
+        while span and not span[-1].strip():
+            trailing.insert(0, span.pop())
+        has_content = any(line.strip() for line in span)
+        if not trailing or not has_content:
+            span.append(newline)  # 与既有正文之间补一个空行分隔
+        for text in pending:
+            span.append(text + newline)
+        span.extend(trailing)
+    out.extend(span)
+    out.extend(lines[stop:])
+    return "".join(out)
+
+
+def set_section_extras(entry: CanonEntry, heading: str, lines) -> None:
+    """逐字替换字段/分组分区顶部的手写行（extras）。
+
+    分区未处于脏渲染路径时对 raw 做原位手术：字段条目、子分组、空行与
+    行尾逐字节保留，仅手写行槽位被替换（extras-only 的编辑不规范化分区
+    其余部分，也不引入受管标记）。分区已置脏时只更新数据，由
+    _render_dirty 统一重组。内容一致时为无操作（幂等）。
+    """
+    section = section_or_raise(entry, heading)
+    if section.role not in (ROLE_FIELDS, ROLE_GROUP):
+        raise ValueError(f"分区「{heading}」不是字段或分组分区，无法替换手写行。")
+    new_lines = _clean_extras_lines(lines)
+    if new_lines == section.extras:
+        return
+    section.extras = new_lines
+    if not section.dirty:
+        rebuilt = _rebuild_extras_raw(section, None, new_lines)
+        if rebuilt is not None:
+            section.raw = rebuilt
+        else:
+            section.dirty = True  # 无法手术时回退整块规范化渲染
+
+
+def set_group_extras(entry: CanonEntry, heading: str, name: str, lines) -> None:
+    """逐字替换分组分区中某个条目（### 小节）内的手写行。
+
+    写回语义与 set_section_extras 一致：非脏路径原位手术，脏路径交给
+    _render_dirty；内容一致时为无操作（幂等）。
+    """
+    section = section_or_raise(entry, heading)
+    if section.role != ROLE_GROUP:
+        raise ValueError(f"分区「{heading}」不是可重复分组分区。")
+    group = next((g for g in section.groups if g.name == name), None)
+    if group is None:
+        raise ValueError(f"分组分区「{heading}」中不存在条目「{name}」。")
+    new_lines = _clean_extras_lines(lines)
+    if new_lines == group.extras:
+        return
+    group.extras = new_lines
+    if not section.dirty:
+        rebuilt = _rebuild_extras_raw(section, name, new_lines)
+        if rebuilt is not None:
+            section.raw = rebuilt
+        else:
+            section.dirty = True
 
 
 # ---------- 用户模块（Phase B）：非系统区块的新建/重命名/删除/移动 ----------
