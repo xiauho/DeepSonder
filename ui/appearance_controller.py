@@ -42,6 +42,9 @@ class AppearanceController(QObject):
         editor = getattr(self.root, "editor", None)
         if editor is not None and hasattr(editor, "set_theme"):
             editor.set_theme(self.config)
+        canon_page = getattr(self.root, "structured_canon_page", None)
+        if canon_page is not None and hasattr(canon_page, "set_theme"):
+            canon_page.set_theme(self.config)
         self.left_panel.set_theme(self.config)
         self.settings_page.synchronize_config(self.config)
         self.refresh_icons()

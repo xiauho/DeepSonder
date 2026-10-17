@@ -33,11 +33,13 @@ ROLE_FREE = "free"
 ROLE_RAW = "raw"
 
 # 每类设定材料的分区 Schema。heading 必须与 project_data.CANON_ENTRY_TYPES
-# 模板中的章节标题完全一致；未列出的标题按 ROLE_RAW 原样保留。
+# 模板中的章节标题完全一致；未列出的标题按内容自动识别为用户模块
+# （detect_module_role），识别不了的按 ROLE_RAW 原样保留。
+# "fixed": True 标记系统区块：结构（标题、位置、去留）受保护，内容仍可编辑。
 FIELD_SCHEMAS: dict[str, dict] = {
     "character": {
         "sections": [
-            {"heading": "基础档案", "role": ROLE_FIELDS, "keys": [
+            {"heading": "基础档案", "role": ROLE_FIELDS, "fixed": True, "keys": [
                 "姓名", "别名", "年龄／出生信息", "性别", "身份／阵营", "首次出场"]},
             {"heading": "外貌与辨识特征", "role": ROLE_TEXT},
             {"heading": "性格、动机与核心欲望", "role": ROLE_TEXT},
@@ -101,10 +103,31 @@ def kind_for_path(path: Path | str) -> str | None:
     return None
 
 
-def _role_for(kind: str, heading: str) -> str:
-    for spec in schema_for(kind)["sections"]:
-        if spec["heading"] == heading:
-            return spec["role"]
+def detect_module_role(heading: str, raw_body: str) -> str:
+    """对 schema 未声明的小节按内容猜测用户模块类型（旧文件兼容）。
+
+    猜测规则（保证每种猜测都能被 _render_dirty 无损写回）：
+    - ### 子分组开头且其后含 - 键：值 列表项 → 分组型；
+    - 含 - 键：值 列表项且无子分组 → 字段型（混杂的手写行进 extras 保留）；
+    - 其余普通文本（含只有子分组标题的骨架）→ 文本型；
+    - 表格、代码块、含受管标记的内容，以及顶层字段与子分组混排的结构
+      无法按单一角色无损渲染，一律保持 ROLE_RAW 原样只读。
+    未编辑的模块渲染时逐字节还原，类型猜测不影响 round-trip。
+    """
+    lines = [line.strip() for line in str(raw_body).splitlines()]
+    body = [line for line in lines if line]
+    if not body:
+        return ROLE_TEXT
+    if any(line.startswith(("|", "```")) or "<!--" in line for line in body):
+        return ROLE_RAW
+    has_sub = any(_SUB_RE.match(line) for line in body)
+    has_item = any(_ITEM_RE.match(line) for line in body)
+    if has_sub and has_item and _SUB_RE.match(body[0]):
+        return ROLE_GROUP
+    if has_item and not has_sub:
+        return ROLE_FIELDS
+    if not has_item:
+        return ROLE_TEXT
     return ROLE_RAW
 
 
@@ -181,9 +204,10 @@ def parse_canon_entry(kind: str, text: str) -> CanonEntry:
             entry.sections.append(CanonSection(heading="", role=ROLE_RAW, raw=raw, marked=marked))
             continue
         heading = _HEADING_RE.match(heading_line.rstrip("\r\n")).group(1)
-        role = _role_for(kind, heading)
-        section = CanonSection(heading=heading, role=role, raw=raw, marked=marked)
         body = content[content.index(heading_line) + 1:]
+        spec = section_spec(kind, heading)
+        role = spec["role"] if spec is not None else detect_module_role(heading, "".join(body))
+        section = CanonSection(heading=heading, role=role, raw=raw, marked=marked)
         if role in (ROLE_FIELDS, ROLE_GROUP):
             _parse_structured(section, body)
         elif role == ROLE_TEXT:
@@ -291,6 +315,115 @@ def set_section_text(entry: CanonEntry, heading: str, text: str) -> None:
         raise ValueError(f"分区「{heading}」不是文本分区，请用源码模式编辑。")
     section.text = str(text).strip("\n")
     section.dirty = True
+
+
+# ---------- 用户模块（Phase B）：非系统区块的新建/重命名/删除/移动 ----------
+
+_MODULE_ROLES = (ROLE_FIELDS, ROLE_TEXT, ROLE_GROUP)
+
+
+def is_system_section(entry: CanonEntry, section: CanonSection) -> bool:
+    """系统区块：受管同步区或 schema 声明的固定结构（角色卡基础档案）。
+
+    系统区块的结构（标题、位置、去留）受保护；内容仍可正常编辑。
+    """
+    if section.role == ROLE_MANAGED:
+        return True
+    spec = section_spec(entry.kind, section.heading)
+    return bool(spec and spec.get("fixed"))
+
+
+def _clean_module_name(name: str) -> str:
+    name = str(name or "").strip()
+    if not name:
+        raise ValueError("模块名称不能为空。")
+    if "\n" in name or "\r" in name:
+        raise ValueError("模块名称不能包含换行。")
+    return name
+
+
+def add_module(entry: CanonEntry, name: str, module_role: str,
+               position: int | None = None) -> CanonSection:
+    """新建用户模块（自定义名称与类型），默认插入到受管区块之前或末尾。
+
+    受管同步区块保持末尾相对位置：未指定 position 时插入到首个受管区块
+    之前；显式 position 也会被限制在受管区块之前，越界值收敛到边界。
+    """
+    name = _clean_module_name(name)
+    if module_role not in _MODULE_ROLES:
+        raise ValueError("模块类型必须是字段型、文本型或分组型。")
+    if name.casefold() in {s.heading.casefold() for s in entry.sections}:
+        raise ValueError(f"模块名称「{name}」已存在。")
+    first_managed = next((i for i, s in enumerate(entry.sections)
+                          if s.role == ROLE_MANAGED), None)
+    limit = first_managed if first_managed is not None else len(entry.sections)
+    index = limit if position is None else max(0, min(int(position), limit))
+    section = CanonSection(heading=name, role=module_role,
+                           raw=f"## {name}\n\n", dirty=True)
+    entry.sections.insert(index, section)
+    return section
+
+
+def _replace_heading_line(raw: str, old: str, new: str) -> str:
+    """把 raw 中的 `## old` 标题行原地替换为 `## new`，行尾与正文不动。"""
+    lines = raw.splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        match = _HEADING_RE.match(line.rstrip("\r\n"))
+        if match is not None and match.group(1) == old:
+            ending = line[len(line.rstrip("\r\n")):]
+            lines[i] = f"## {new}{ending}"
+            return "".join(lines)
+    return raw
+
+
+def rename_module(entry: CanonEntry, old: str, new: str) -> None:
+    """重命名用户模块：只替换原始字节中的标题行，正文逐字节保留。
+
+    不置 dirty（含 ROLE_RAW 的模块置 dirty 会触发整块规范化甚至无法
+    渲染）；raw 即事实源，重命名后保存直接以新标题原样写回。
+    """
+    section = section_or_raise(entry, old)
+    if is_system_section(entry, section):
+        raise ValueError("系统区块不可重命名。")
+    new = _clean_module_name(new)
+    if new == section.heading:
+        return
+    if new.casefold() in {s.heading.casefold() for s in entry.sections
+                          if s is not section}:
+        raise ValueError(f"模块名称「{new}」已存在。")
+    section.raw = _replace_heading_line(section.raw, section.heading, new)
+    section.heading = new
+
+
+def delete_module(entry: CanonEntry, name: str) -> None:
+    """删除用户模块：渲染时该区块整体从 md 文档中移除，其余区块不动。"""
+    section = section_or_raise(entry, name)
+    if is_system_section(entry, section):
+        raise ValueError("系统区块不可删除。")
+    entry.sections.remove(section)
+
+
+def move_module(entry: CanonEntry, name: str, offset: int) -> None:
+    """在非系统区块之间上移/下移一位；系统与受管区块位置固定不被穿越。
+
+    相邻位置是系统区块时按同方向继续查找，因此受管同步区块保持原有
+    相对位置；已到可移动边界时抛出异常而不是静默失败。
+    """
+    section = section_or_raise(entry, name)
+    if section.role == ROLE_MANAGED:
+        raise ValueError("受管区块位置固定，不能移动。")
+    if is_system_section(entry, section):
+        raise ValueError("系统区块位置固定，不能移动。")
+    step = 1 if int(offset) > 0 else -1
+    idx = entry.sections.index(section)
+    target = idx + step
+    while 0 <= target < len(entry.sections) and is_system_section(
+            entry, entry.sections[target]):
+        target += step
+    if not 0 <= target < len(entry.sections):
+        raise ValueError("模块已在可移动范围的边界。")
+    entry.sections.remove(section)
+    entry.sections.insert(target, section)
 
 
 def load_canon_entry(path: Path | str, kind: str) -> CanonEntry:

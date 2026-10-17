@@ -120,9 +120,13 @@ class CanonSchemaTests(unittest.TestCase):
         self.assertIn("左腕旧疤源于沉船事故（手写）。", reparsed.section("基础档案").extras)
 
     def test_unknown_heading_section_stays_verbatim(self):
+        # 旧文件中的自定义小节按内容自动识别类型（此处为纯文本 → 文本型），
+        # 未编辑时仍逐字节还原；无法无损结构化的内容回退 raw 的用例
+        # 见 tests/test_canon_modules.py。
         text = character_text() + "\n## 作者注（临时）\n\n草稿备注。\n"
         entry = parse_canon_entry("character", text)
-        self.assertEqual(entry.section("作者注（临时）").role, "raw")
+        self.assertEqual(entry.section("作者注（临时）").role, "text")
+        self.assertEqual(entry.section("作者注（临时）").text, "草稿备注。")
         set_section_field(entry, "基础档案", "性别", "女")
         rendered = render_canon_entry(entry)
         self.assertIn("## 作者注（临时）\n\n草稿备注。", rendered)

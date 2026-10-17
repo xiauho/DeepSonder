@@ -410,7 +410,7 @@ QPlainTextEdit#outputPanel, QTextBrowser#inspectorBrowser, QTextBrowser#pageBrow
 }
 QPlainTextEdit#outputPanel { font-family: "JetBrains Mono", "Cascadia Mono", "Microsoft YaHei UI"; font-size: __SMALL_FONT_SIZE__px; }
 
-QLabel#savedBadge, QLabel#dirtyBadge, QLabel#saveErrorBadge {
+QLabel#savedBadge, QLabel#dirtyBadge, QLabel#saveErrorBadge, QLabel#canonKindBadge {
     padding: 4px 10px;
     border-radius: 10px;
     font-size: __SMALL_FONT_SIZE__px;
@@ -419,6 +419,39 @@ QLabel#saveErrorBadge { color: __DANGER__; background: __FIELD__; }
 QLabel#saveErrorMessage { color: __DANGER__; padding: 6px 8px; background: __FIELD__; border-left: 3px solid __DANGER__; }
 QLabel#savedBadge { color: __GOOD__; background: __GOOD_BG__; }
 QLabel#dirtyBadge { color: __ACCENT__; background: __SELECTION__; }
+QLabel#canonKindBadge {
+    color: __ACCENT__;
+    background: __SELECTION__;
+    border: 1px solid __BORDER__;
+    font-weight: 700;
+}
+QFrame#canonPageHeader { border: none; }
+QPushButton#moduleOpButton {
+    background: transparent;
+    color: __MUTED__;
+    border: 1px solid __BORDER__;
+    border-radius: 6px;
+    padding: 2px 8px;
+    font-size: __SMALL_FONT_SIZE__px;
+}
+QPushButton#moduleOpButton:hover { background: __HOVER__; color: __TEXT__; border-color: __ACCENT__; }
+QPushButton#moduleDeleteButton {
+    background: transparent;
+    color: __DANGER__;
+    border: 1px solid __BORDER__;
+    border-radius: 6px;
+    padding: 2px 8px;
+    font-size: __SMALL_FONT_SIZE__px;
+}
+QPushButton#moduleDeleteButton:hover { background: __HOVER__; color: __DANGER__; border-color: __DANGER__; }
+QLabel#systemModuleBadge {
+    color: __MUTED__;
+    background: __FIELD__;
+    border: 1px solid __BORDER__;
+    border-radius: 10px;
+    padding: 2px 8px;
+    font-size: __SMALL_FONT_SIZE__px;
+}
 
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
     background: __FIELD__;
