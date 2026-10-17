@@ -1,0 +1,12 @@
+test_native_close_command_preserves_review_guard (tests.test_window_chrome_native.NativeWindowChromeTests.test_native_close_command_preserves_review_guard) ... ok
+test_native_frame_keeps_capabilities_without_visible_caption (tests.test_window_chrome_native.NativeWindowChromeTests.test_native_frame_keeps_capabilities_without_visible_caption) ... ok
+test_native_hit_testing_separates_drag_controls_and_resize (tests.test_window_chrome_native.NativeWindowChromeTests.test_native_hit_testing_separates_drag_controls_and_resize) ... ok
+test_native_large_font_menus_fit_in_both_themes (tests.test_window_chrome_native.NativeWindowChromeTests.test_native_large_font_menus_fit_in_both_themes) ... ok
+test_native_maximize_mouse_sequence_toggles_only_once (tests.test_window_chrome_native.NativeWindowChromeTests.test_native_maximize_mouse_sequence_toggles_only_once) ... ok
+test_native_maximize_respects_work_area_and_restore_state (tests.test_window_chrome_native.NativeWindowChromeTests.test_native_maximize_respects_work_area_and_restore_state) ... ok
+test_native_minimize_restore_keeps_frame_and_controls (tests.test_window_chrome_native.NativeWindowChromeTests.test_native_minimize_restore_keeps_frame_and_controls) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 2.254s
+
+OK

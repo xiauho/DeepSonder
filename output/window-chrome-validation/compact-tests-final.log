@@ -1,0 +1,15 @@
+
+[1/1] test_compact_workspace.py
+test_inspector_close_button_hides_panel_and_keeps_controls_in_sync (test_compact_workspace.CompactWorkspaceTests.test_inspector_close_button_hides_panel_and_keeps_controls_in_sync) ... ok
+test_narrow_editor_stacks_tools_without_losing_title (test_compact_workspace.CompactWorkspaceTests.test_narrow_editor_stacks_tools_without_losing_title) ... ok
+test_panel_buttons_restore_panels_and_track_shortcuts (test_compact_workspace.CompactWorkspaceTests.test_panel_buttons_restore_panels_and_track_shortcuts) ... ok
+test_save_failure_remains_visible_in_compact_header (test_compact_workspace.CompactWorkspaceTests.test_save_failure_remains_visible_in_compact_header) ... ok
+test_small_window_reserves_space_for_manuscript (test_compact_workspace.CompactWorkspaceTests.test_small_window_reserves_space_for_manuscript) ... ok
+test_task_menu_keeps_records_reachable_when_actions_disabled (test_compact_workspace.CompactWorkspaceTests.test_task_menu_keeps_records_reachable_when_actions_disabled) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 9.528s
+
+OK
+
+Modules: 1; tests: 6; skipped: 0; failed modules: 0

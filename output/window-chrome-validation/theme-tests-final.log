@@ -1,0 +1,21 @@
+
+[1/1] test_theme_config.py
+test_dark_theme_qss_uses_dark_accent (test_theme_config.ThemeConfigTests.test_dark_theme_qss_uses_dark_accent) ... ok
+test_document_css_switches_browser_field_background (test_theme_config.ThemeConfigTests.test_document_css_switches_browser_field_background) ... ok
+test_expansion_length_migrates_from_legacy_setting (test_theme_config.ThemeConfigTests.test_expansion_length_migrates_from_legacy_setting) ... ok
+test_file_business_transport_limits_are_normalized (test_theme_config.ThemeConfigTests.test_file_business_transport_limits_are_normalized) ... ok
+test_foreshadowing_selection_list_uses_themed_indicator (test_theme_config.ThemeConfigTests.test_foreshadowing_selection_list_uses_themed_indicator) ... ok
+test_history_chapter_setting_is_bounded (test_theme_config.ThemeConfigTests.test_history_chapter_setting_is_bounded) ... ok
+test_light_theme_defaults_stay_in_sync (test_theme_config.ThemeConfigTests.test_light_theme_defaults_stay_in_sync) ... ok
+test_message_box_qss_uses_theme_colors (test_theme_config.ThemeConfigTests.test_message_box_qss_uses_theme_colors) ... ok
+test_target_chapter_length_defaults_to_three_thousand (test_theme_config.ThemeConfigTests.test_target_chapter_length_defaults_to_three_thousand) ... ok
+test_token_budget_settings_are_normalized (test_theme_config.ThemeConfigTests.test_token_budget_settings_are_normalized) ... ok
+test_trash_dialog_has_opaque_theme_surfaces (test_theme_config.ThemeConfigTests.test_trash_dialog_has_opaque_theme_surfaces) ... ok
+test_ui_language_defaults_to_chinese (test_theme_config.ThemeConfigTests.test_ui_language_defaults_to_chinese) ... ok
+
+----------------------------------------------------------------------
+Ran 12 tests in 0.004s
+
+OK
+
+Modules: 1; tests: 12; skipped: 0; failed modules: 0

@@ -1,0 +1,17 @@
+Use case: ads-marketing. Create one polished Chinese social media launch poster for the novel writing desktop app DeepSonder. Landscape 3:2 aspect ratio, high resolution, impeccably legible simplified Chinese typography. Match the actual application's dark theme EXACTLY: charcoal background #181818, panels #242424, fine borders #383838, white text #F2F2F2, secondary gray #B3B3B3, blue accent #60A5FA and restrained deeper blue #2563EB. No purple or teal.
+Art direction: refined editorial software launch artwork, restrained, literary, spacious, premium professional product design. Large DeepSonder wordmark at upper left, small outlined version badge, bold Chinese headline below. Center visual: elegant abstract open manuscript pages made of dark layered paper with thin white writing lines, a delicate blue timeline with connected event nodes threading across the pages, subtle light tracing the page edge. This is a conceptual illustration, NOT a fabricated app screenshot. Beautiful subtle texture and depth without noisy glow. Bottom section: three balanced columns with small clean line icons (timeline nodes, pen, subtle AI spark), clear headings and a single concise description each. Strong hierarchy, abundant margins, readable on mobile. No people, no robots, no fake interface, no QR codes, no invented logo.
+Render ONLY the following exact text, with correct Chinese characters, no additional filler text:
+"DeepSonder"
+"0.1.0-beta"
+"让故事连贯，让灵感成章"
+"从 Novalist 出发，开启新的创作篇章"
+"故事时间轴"
+"编排事件 · 关联章节"
+"文风管理"
+"文风审校 · 表达打磨"
+"AI 辅助创作"
+"续写扩写 · 故事记忆"
+"Windows 公开测试版"
+"github.com/xiauho/DeepSonder"
+Small unobtrusive footer note: "AI 功能需另行配置 DeepSeek Harness"
+Ensure all text has excellent contrast, no clipping, no misspellings. The dark charcoal dominates, blue is an accent only.

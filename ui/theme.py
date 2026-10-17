@@ -48,6 +48,28 @@ QLabel#eyebrow {
     font-weight: 700;
 }
 
+QFrame#workbenchTitleBar {
+    background: __PANEL__;
+    border: none;
+    border-bottom: 1px solid __BORDER__;
+}
+QLabel#windowBrand { font-size: 14px; font-weight: 700; }
+QLabel#windowProjectTitle { color: __MUTED__; padding-left: 20px; }
+QFrame#workbenchTitleBar QMenuBar { background: transparent; border: none; padding: 0px 4px; }
+QFrame#workbenchTitleBar QMenuBar::item { padding: 4px 10px; }
+QToolButton#windowControlButton, QToolButton#windowCloseButton {
+    background: transparent; color: __TEXT__;
+    border: none; border-radius: 0px; padding: 0px;
+    min-width: 46px; max-width: 46px; min-height: 44px; max-height: 44px;
+}
+QToolButton#windowControlButton:hover, QToolButton#windowControlButton[nativeHover="true"] {
+    background: __HOVER__;
+}
+QToolButton#windowControlButton:pressed { background: __SELECTION__; }
+QToolButton#windowCloseButton:hover, QToolButton#windowCloseButton:pressed {
+    background: #C42B1C; color: #FFFFFF;
+}
+QToolButton#windowExitFocusButton { padding: 0px 12px; }
 QFrame#appHeader {
     background: __PANEL__;
     border-bottom: 1px solid __BORDER__;

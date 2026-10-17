@@ -1,0 +1,20 @@
+test_inactive_window_hides_keyboard_ring (tests.test_window_control_focus.WindowControlFocusTests.test_inactive_window_hides_keyboard_ring) ... ok
+test_keyboard_minimize_remains_operable_and_visible_after_restore (tests.test_window_control_focus.WindowControlFocusTests.test_keyboard_minimize_remains_operable_and_visible_after_restore) ... ok
+test_mouse_click_clears_existing_keyboard_ring (tests.test_window_control_focus.WindowControlFocusTests.test_mouse_click_clears_existing_keyboard_ring) ... ok
+test_mouse_minimize_restore_preserves_editor_focus_and_cursor (tests.test_window_control_focus.WindowControlFocusTests.test_mouse_minimize_restore_preserves_editor_focus_and_cursor) ... ok
+test_pointer_on_another_window_control_clears_keyboard_ring (tests.test_window_control_focus.WindowControlFocusTests.test_pointer_on_another_window_control_clears_keyboard_ring) ... ok
+test_programmatic_focus_does_not_paint_a_keyboard_ring (tests.test_window_control_focus.WindowControlFocusTests.test_programmatic_focus_does_not_paint_a_keyboard_ring) ... ok
+test_tab_and_backtab_keep_visible_focus_for_all_controls (tests.test_window_control_focus.WindowControlFocusTests.test_tab_and_backtab_keep_visible_focus_for_all_controls) ... ok
+test_native_close_command_preserves_review_guard (tests.test_window_chrome_native.NativeWindowChromeTests.test_native_close_command_preserves_review_guard) ... ok
+test_native_frame_keeps_capabilities_without_visible_caption (tests.test_window_chrome_native.NativeWindowChromeTests.test_native_frame_keeps_capabilities_without_visible_caption) ... ok
+test_native_hit_testing_separates_drag_controls_and_resize (tests.test_window_chrome_native.NativeWindowChromeTests.test_native_hit_testing_separates_drag_controls_and_resize) ... ok
+test_native_large_font_menus_fit_in_both_themes (tests.test_window_chrome_native.NativeWindowChromeTests.test_native_large_font_menus_fit_in_both_themes) ... ok
+test_native_maximize_mouse_sequence_toggles_only_once (tests.test_window_chrome_native.NativeWindowChromeTests.test_native_maximize_mouse_sequence_toggles_only_once) ... ok
+test_native_maximize_respects_work_area_and_restore_state (tests.test_window_chrome_native.NativeWindowChromeTests.test_native_maximize_respects_work_area_and_restore_state) ... ok
+test_native_minimize_restore_keeps_frame_and_controls (tests.test_window_chrome_native.NativeWindowChromeTests.test_native_minimize_restore_keeps_frame_and_controls) ... ok
+test_native_mouse_minimize_restore_keeps_editor_focus (tests.test_window_chrome_native.NativeWindowChromeTests.test_native_mouse_minimize_restore_keeps_editor_focus) ... ok
+
+----------------------------------------------------------------------
+Ran 15 tests in 4.640s
+
+OK

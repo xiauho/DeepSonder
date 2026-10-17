@@ -76,6 +76,8 @@ from ui.story_navigation_controller import StoryNavigationController
 from ui.trash_dialog import TrashDialog
 from ui.view_refresh_controller import ViewRefreshController
 from ui.window_state_controller import WindowStateController
+from ui.workbench_title_bar import WorkbenchTitleBar
+from ui.window_chrome import WindowChromeController
 
 
 def fallback_chapter_after_delete(
@@ -97,6 +99,7 @@ class MainWindow(QMainWindow):
     DELETE_CHAPTER_SHORTCUT = "Ctrl+Shift+Delete"
     def __init__(self, parent=None, config: dict | None = None, ui_state_path=None):
         super().__init__(parent)
+        self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
         self.project_session = ProjectSession(self)
         self.ai_controller = AIController(self)
         self.config = dict(config) if config is not None else load_config()
@@ -159,6 +162,7 @@ class MainWindow(QMainWindow):
             action_bar=self.action_bar,
             app_header=self.app_header,
             menu_bar=self.menuBar(),
+            title_bar=self.title_bar,
             status_bar=self.statusBar(),
             left_panel=self.left_panel,
             inspector=self.inspector,
@@ -356,7 +360,25 @@ class MainWindow(QMainWindow):
         action("memory", "更新故事记忆", self.update_memory, "Ctrl+Shift+M")
         action("about", "关于 DeepSonder", self.show_about)
 
+    def menuBar(self):
+        # Preserve the public menu API without QMainWindow replacing our menu widget.
+        if hasattr(self, "title_bar"):
+            return self.title_bar.menu_bar
+        return super().menuBar()
+
+    def nativeEvent(self, event_type, message):
+        controller = getattr(self, "window_chrome", None)
+        if controller is not None:
+            result = controller.native_event(event_type, message)
+            if result is not None:
+                return result
+        return super().nativeEvent(event_type, message)
+
     def _build_ui(self) -> None:
+        self.title_bar = WorkbenchTitleBar(self)
+        self.setMenuWidget(self.title_bar)
+        self.window_chrome = WindowChromeController(self, self.title_bar)
+        self.title_bar.exit_focus_button.clicked.connect(self._exit_focus_mode)
         central = QWidget(self)
         central.setObjectName("appRoot")
         self.setCentralWidget(central)

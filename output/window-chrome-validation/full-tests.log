@@ -1,0 +1,1601 @@
+
+[1/112] test_accepted_memory.py
+test_alias_matching_and_no_irrelevant_filler (test_accepted_memory.AcceptedMemoryTests.test_alias_matching_and_no_irrelevant_filler) ... ok
+test_chapter_500_retrieves_chapter_30_and_excludes_future (test_accepted_memory.AcceptedMemoryTests.test_chapter_500_retrieves_chapter_30_and_excludes_future) ... ok
+test_commit_can_replace_latest_chapter_from_prior_snapshot (test_accepted_memory.AcceptedMemoryTests.test_commit_can_replace_latest_chapter_from_prior_snapshot) ... ok
+test_commit_invalidates_downstream_memory_atomically (test_accepted_memory.AcceptedMemoryTests.test_commit_invalidates_downstream_memory_atomically) ... ok
+test_corrupt_records_do_not_fall_back_to_trusted_history (test_accepted_memory.AcceptedMemoryTests.test_corrupt_records_do_not_fall_back_to_trusted_history) ... ok
+test_deleted_chapter_not_retrieved_and_restore_can_revalidate (test_accepted_memory.AcceptedMemoryTests.test_deleted_chapter_not_retrieved_and_restore_can_revalidate) ... ok
+test_failed_provenance_write_rolls_back_summary_and_state (test_accepted_memory.AcceptedMemoryTests.test_failed_provenance_write_rolls_back_summary_and_state) ... ok
+test_first_chapter_replacement_reuses_recorded_pre_state (test_accepted_memory.AcceptedMemoryTests.test_first_chapter_replacement_reuses_recorded_pre_state) ... ok
+test_historical_task_uses_prior_snapshot_not_future_state (test_accepted_memory.AcceptedMemoryTests.test_historical_task_uses_prior_snapshot_not_future_state) ... ok
+test_legacy_summary_is_recent_only_and_marked_unverified (test_accepted_memory.AcceptedMemoryTests.test_legacy_summary_is_recent_only_and_marked_unverified) ... ok
+test_memory_replacement_uses_previous_chapter_snapshot (test_accepted_memory.AcceptedMemoryTests.test_memory_replacement_uses_previous_chapter_snapshot) ... ok
+test_modified_source_and_summary_are_excluded (test_accepted_memory.AcceptedMemoryTests.test_modified_source_and_summary_are_excluded) ... ok
+test_only_adoption_creates_portable_provenance_and_evidence (test_accepted_memory.AcceptedMemoryTests.test_only_adoption_creates_portable_provenance_and_evidence) ... ok
+test_recent_has_priority_and_remote_shares_hard_budget (test_accepted_memory.AcceptedMemoryTests.test_recent_has_priority_and_remote_shares_hard_budget) ... ok
+test_scoped_replacement_rejects_concurrent_global_state_change (test_accepted_memory.AcceptedMemoryTests.test_scoped_replacement_rejects_concurrent_global_state_change) ... ok
+test_snapshot_invalidates_when_earlier_dependency_changes (test_accepted_memory.AcceptedMemoryTests.test_snapshot_invalidates_when_earlier_dependency_changes) ... ok
+test_tampered_record_is_not_retrieved (test_accepted_memory.AcceptedMemoryTests.test_tampered_record_is_not_retrieved) ... ok
+test_zero_and_remote_toggle_disable_retrieval (test_accepted_memory.AcceptedMemoryTests.test_zero_and_remote_toggle_disable_retrieval) ... ok
+
+----------------------------------------------------------------------
+Ran 18 tests in 1.432s
+
+OK
+
+[2/112] test_ai_controller.py
+test_result_context_exposes_task_selection_until_release (test_ai_controller.AIControllerTests.test_result_context_exposes_task_selection_until_release) ... ok
+test_start_captures_context_and_clears_after_finish (test_ai_controller.AIControllerTests.test_start_captures_context_and_clears_after_finish) ... ok
+test_start_rejects_duplicate_and_cancel_is_forwarded (test_ai_controller.AIControllerTests.test_start_rejects_duplicate_and_cancel_is_forwarded) ... ok
+test_success_context_survives_worker_finish_until_result_release (test_ai_controller.AIControllerTests.test_success_context_survives_worker_finish_until_result_release) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.317s
+
+OK
+
+[3/112] test_ai_engine_controller.py
+test_idle_reconfiguration_cleans_old_client_immediately (test_ai_engine_controller.AIEngineControllerTests.test_idle_reconfiguration_cleans_old_client_immediately) ... ok
+test_running_task_defers_old_client_cleanup (test_ai_engine_controller.AIEngineControllerTests.test_running_task_defers_old_client_cleanup) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.003s
+
+OK
+
+[4/112] test_ai_output_feedback.py
+test_empty_output_is_normalized (test_ai_output_feedback.AIOutputFeedbackTests.test_empty_output_is_normalized) ... ok
+test_long_output_keeps_both_ends_and_stays_bounded (test_ai_output_feedback.AIOutputFeedbackTests.test_long_output_keeps_both_ends_and_stays_bounded) ... ok
+test_short_output_is_preserved (test_ai_output_feedback.AIOutputFeedbackTests.test_short_output_is_preserved) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.000s
+
+OK
+
+[5/112] test_ai_protocol.py
+test_agent_preamble_is_not_accepted_as_continuation (test_ai_protocol.AIProtocolTests.test_agent_preamble_is_not_accepted_as_continuation) ... ok
+test_consistency_repair_requires_exact_anchor (test_ai_protocol.AIProtocolTests.test_consistency_repair_requires_exact_anchor) ... ok
+test_consistency_report_is_validated_and_rendered (test_ai_protocol.AIProtocolTests.test_consistency_report_is_validated_and_rendered) ... ok
+test_consistency_report_normalizes_legacy_values_and_checks_chapter (test_ai_protocol.AIProtocolTests.test_consistency_report_normalizes_legacy_values_and_checks_chapter) ... ok
+test_consistency_report_prevents_non_chapter_automatic_repair (test_ai_protocol.AIProtocolTests.test_consistency_report_prevents_non_chapter_automatic_repair) ... ok
+test_consistency_report_rejects_duplicate_issue_ids (test_ai_protocol.AIProtocolTests.test_consistency_report_rejects_duplicate_issue_ids) ... ok
+test_consistency_report_rejects_unknown_enum_values (test_ai_protocol.AIProtocolTests.test_consistency_report_rejects_unknown_enum_values) ... ok
+test_consistency_report_safely_normalizes_generic_data_target (test_ai_protocol.AIProtocolTests.test_consistency_report_safely_normalizes_generic_data_target) ... ok
+test_continuation_requires_explicit_text_marker (test_ai_protocol.AIProtocolTests.test_continuation_requires_explicit_text_marker) ... ok
+test_expansion_parses_scoped_foreshadowing_feedback (test_ai_protocol.AIProtocolTests.test_expansion_parses_scoped_foreshadowing_feedback) ... ok
+test_expansion_protocol_accepts_only_expansion_json_type (test_ai_protocol.AIProtocolTests.test_expansion_protocol_accepts_only_expansion_json_type) ... ok
+test_expansion_protocol_has_expansion_completion_message (test_ai_protocol.AIProtocolTests.test_expansion_protocol_has_expansion_completion_message) ... ok
+test_expansion_supplement_rejects_wrong_chapter_and_oversized_text (test_ai_protocol.AIProtocolTests.test_expansion_supplement_rejects_wrong_chapter_and_oversized_text) ... ok
+test_expansion_supplement_requires_unique_source_anchor (test_ai_protocol.AIProtocolTests.test_expansion_supplement_requires_unique_source_anchor) ... ok
+test_invalid_foreshadowing_feedback_does_not_invalidate_prose (test_ai_protocol.AIProtocolTests.test_invalid_foreshadowing_feedback_does_not_invalidate_prose) ... ok
+test_malformed_markers_are_repaired_without_leaking_into_prose (test_ai_protocol.AIProtocolTests.test_malformed_markers_are_repaired_without_leaking_into_prose) ... ok
+test_plain_narrative_is_accepted_for_headless_compatibility (test_ai_protocol.AIProtocolTests.test_plain_narrative_is_accepted_for_headless_compatibility) ... ok
+test_prose_supplement_uses_app_anchor_ids_and_keeps_valid_items (test_ai_protocol.AIProtocolTests.test_prose_supplement_uses_app_anchor_ids_and_keeps_valid_items) ... ok
+test_protocol_artifacts_without_repairable_body_are_not_plain_prose (test_ai_protocol.AIProtocolTests.test_protocol_artifacts_without_repairable_body_are_not_plain_prose) ... ok
+
+----------------------------------------------------------------------
+Ran 19 tests in 0.003s
+
+OK
+
+[6/112] test_ai_result_coordinator.py
+test_continuation_commits_only_after_confirmation_and_fresh_context (test_ai_result_coordinator.AIResultCoordinatorTests.test_continuation_commits_only_after_confirmation_and_fresh_context) ... ok
+test_every_selected_foreshadowing_gets_a_review_row (test_ai_result_coordinator.AIResultCoordinatorTests.test_every_selected_foreshadowing_gets_a_review_row) ... ok
+test_expansion_cancel_does_not_replace_body (test_ai_result_coordinator.AIResultCoordinatorTests.test_expansion_cancel_does_not_replace_body) ... ok
+test_expansion_commits_the_candidate_selected_in_preview (test_ai_result_coordinator.AIResultCoordinatorTests.test_expansion_commits_the_candidate_selected_in_preview) ... ok
+test_expansion_returns_user_selected_foreshadowing_resolutions (test_ai_result_coordinator.AIResultCoordinatorTests.test_expansion_returns_user_selected_foreshadowing_resolutions) ... ok
+test_expansion_stale_context_does_not_replace_body (test_ai_result_coordinator.AIResultCoordinatorTests.test_expansion_stale_context_does_not_replace_body) ... ok
+test_memory_cancel_and_stale_context_do_not_commit (test_ai_result_coordinator.AIResultCoordinatorTests.test_memory_cancel_and_stale_context_do_not_commit) ... ok
+test_memory_confirmation_passes_counts_and_commits (test_ai_result_coordinator.AIResultCoordinatorTests.test_memory_confirmation_passes_counts_and_commits) ... ok
+test_repair_cancel_and_stale_context_do_not_apply (test_ai_result_coordinator.AIResultCoordinatorTests.test_repair_cancel_and_stale_context_do_not_apply) ... ok
+test_severely_short_expansion_requires_explicit_second_confirmation (test_ai_result_coordinator.AIResultCoordinatorTests.test_severely_short_expansion_requires_explicit_second_confirmation) ... ok
+test_stale_continuation_is_not_appended (test_ai_result_coordinator.AIResultCoordinatorTests.test_stale_continuation_is_not_appended) ... ok
+test_under_length_continuation_can_request_another_supplement (test_ai_result_coordinator.AIResultCoordinatorTests.test_under_length_continuation_can_request_another_supplement) ... ok
+
+----------------------------------------------------------------------
+Ran 12 tests in 0.005s
+
+OK
+
+[7/112] test_ai_result_service.py
+test_expansion_and_consistency_parsing_are_centralized (test_ai_result_service.AIResultServiceTests.test_expansion_and_consistency_parsing_are_centralized) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.001s
+
+OK
+
+[8/112] test_ai_task_panel.py
+test_failure_and_cancellation_are_visible_without_modal_popup (test_ai_task_panel.AITaskPanelTests.test_failure_and_cancellation_are_visible_without_modal_popup) ... ok
+test_focus_mode_keeps_task_results_hidden_until_exit (test_ai_task_panel.AITaskPanelTests.test_focus_mode_keeps_task_results_hidden_until_exit) ... ok
+test_logs_expand_and_clear_without_discarding_candidate (test_ai_task_panel.AITaskPanelTests.test_logs_expand_and_clear_without_discarding_candidate) ... ok
+test_long_task_target_does_not_expand_window (test_ai_task_panel.AITaskPanelTests.test_long_task_target_does_not_expand_window) ... ok
+test_memory_elapsed_counts_completed_seconds_and_resets_for_next_task (test_ai_task_panel.AITaskPanelTests.test_memory_elapsed_counts_completed_seconds_and_resets_for_next_task) ... ok
+test_memory_progress_is_queued_and_ignores_old_or_cancelled_runs (test_ai_task_panel.AITaskPanelTests.test_memory_progress_is_queued_and_ignores_old_or_cancelled_runs) ... ok
+test_memory_progress_wraps_at_narrow_width_in_both_themes (test_ai_task_panel.AITaskPanelTests.test_memory_progress_wraps_at_narrow_width_in_both_themes) ... ok
+test_memory_reports_are_queued_and_bound_to_current_uncancelled_task (test_ai_task_panel.AITaskPanelTests.test_memory_reports_are_queued_and_bound_to_current_uncancelled_task) ... ok
+test_memory_summary_does_not_overwrite_cancel_or_pending_review_state (test_ai_task_panel.AITaskPanelTests.test_memory_summary_does_not_overwrite_cancel_or_pending_review_state) ... ok
+test_pending_result_blocks_close_and_project_switch (test_ai_task_panel.AITaskPanelTests.test_pending_result_blocks_close_and_project_switch) ... ok
+test_pending_result_does_not_interrupt_and_survives_worker_finish (test_ai_task_panel.AITaskPanelTests.test_pending_result_does_not_interrupt_and_survives_worker_finish) ... ok
+
+----------------------------------------------------------------------
+Ran 11 tests in 41.422s
+
+OK
+
+[9/112] test_ai_task_runner.py
+test_runner_cancel_emits_cancelled_without_success (test_ai_task_runner.AITaskRunnerTests.test_runner_cancel_emits_cancelled_without_success) ... ok
+test_runner_emits_typed_success_and_rejects_duplicate_start (test_ai_task_runner.AITaskRunnerTests.test_runner_emits_typed_success_and_rejects_duplicate_start) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.031s
+
+OK
+
+[10/112] test_ai_workflow.py
+test_consistency_check_forwards_remote_history_setting (test_ai_workflow.AIWorkflowTests.test_consistency_check_forwards_remote_history_setting) ... ok
+test_consistency_repair_uses_json_protocol (test_ai_workflow.AIWorkflowTests.test_consistency_repair_uses_json_protocol) ... ok
+test_memory_workflow_exposes_only_fact_patch_entry (test_ai_workflow.AIWorkflowTests.test_memory_workflow_exposes_only_fact_patch_entry) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.065s
+
+OK
+
+[11/112] test_appearance_refresh.py
+test_default_palettes_have_readable_interactions (test_appearance_refresh.AppearanceRefreshTests.test_default_palettes_have_readable_interactions) ... ok
+test_existing_stock_presets_update_and_custom_palettes_survive (test_appearance_refresh.AppearanceRefreshTests.test_existing_stock_presets_update_and_custom_palettes_survive) ... ok
+test_narrow_workspace_layout_in_both_themes (test_appearance_refresh.AppearanceRefreshTests.test_narrow_workspace_layout_in_both_themes) ... ok
+test_saved_dark_profile_gets_dark_defaults_for_new_tokens (test_appearance_refresh.AppearanceRefreshTests.test_saved_dark_profile_gets_dark_defaults_for_new_tokens) ... ok
+test_theme_switch_updates_navigation_buttons_and_selection (test_appearance_refresh.AppearanceRefreshTests.test_theme_switch_updates_navigation_buttons_and_selection) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 1.593s
+
+OK
+
+[12/112] test_application_ai_task_service.py
+test_notice_and_single_active_task_are_enforced (test_application_ai_task_service.AITaskServiceTests.test_notice_and_single_active_task_are_enforced) ... ok
+test_running_task_can_be_cancelled_cooperatively (test_application_ai_task_service.AITaskServiceTests.test_running_task_can_be_cancelled_cooperatively) ... ok
+test_stale_context_blocks_apply (test_application_ai_task_service.AITaskServiceTests.test_stale_context_blocks_apply) ... ok
+test_writing_result_is_review_first_and_revision_guarded (test_application_ai_task_service.AITaskServiceTests.test_writing_result_is_review_first_and_revision_guarded) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.283s
+
+OK
+
+[13/112] test_application_ai_v2.py
+test_completed_result_is_scoped_to_its_project (test_application_ai_v2.AIV2TaskTests.test_completed_result_is_scoped_to_its_project) ... ok
+test_production_v2_executor_covers_all_review_result_types (test_application_ai_v2.AIV2TaskTests.test_production_v2_executor_covers_all_review_result_types) ... ok
+test_v2_context_change_blocks_apply (test_application_ai_v2.AIV2TaskTests.test_v2_context_change_blocks_apply) ... ok
+test_v2_context_never_reads_legacy_material (test_application_ai_v2.AIV2TaskTests.test_v2_context_never_reads_legacy_material) ... ok
+test_v2_memory_is_only_written_after_review_and_bound_to_revision (test_application_ai_v2.AIV2TaskTests.test_v2_memory_is_only_written_after_review_and_bound_to_revision) ... ok
+test_v2_memory_protocol_is_strict (test_application_ai_v2.AIV2TaskTests.test_v2_memory_protocol_is_strict) ... ok
+test_v2_style_is_shared_but_never_injected_into_fact_tasks (test_application_ai_v2.AIV2TaskTests.test_v2_style_is_shared_but_never_injected_into_fact_tasks) ... ok
+test_v2_writing_result_is_review_first_and_preserves_heading (test_application_ai_v2.AIV2TaskTests.test_v2_writing_result_is_review_first_and_preserves_heading) ... ok
+
+----------------------------------------------------------------------
+Ran 8 tests in 0.536s
+
+OK
+
+[14/112] test_application_document_service.py
+test_create_import_and_delete_operations_publish_mutations (test_application_document_service.DocumentServiceTests.test_create_import_and_delete_operations_publish_mutations) ... ok
+test_document_paths_are_confined_to_editable_project_files (test_application_document_service.DocumentServiceTests.test_document_paths_are_confined_to_editable_project_files) ... ok
+test_open_and_save_return_versioned_snapshots (test_application_document_service.DocumentServiceTests.test_open_and_save_return_versioned_snapshots) ... ok
+test_save_detects_external_revision_and_force_is_explicit (test_application_document_service.DocumentServiceTests.test_save_detects_external_revision_and_force_is_explicit) ... ok
+test_timeline_notes_have_a_stable_display_title_without_changing_content (test_application_document_service.DocumentServiceTests.test_timeline_notes_have_a_stable_display_title_without_changing_content) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.233s
+
+OK
+
+[15/112] test_application_document_v2_service.py
+test_append_import_records_provenance_and_exports_in_order (test_application_document_v2_service.DocumentV2ServiceTests.test_append_import_records_provenance_and_exports_in_order) ... ok
+test_append_import_rejects_duplicate_and_rolls_back_failed_provenance_write (test_application_document_v2_service.DocumentV2ServiceTests.test_append_import_rejects_duplicate_and_rolls_back_failed_provenance_write) ... ok
+test_chapter_lifecycle_preserves_stable_ids_and_recovery (test_application_document_v2_service.DocumentV2ServiceTests.test_chapter_lifecycle_preserves_stable_ids_and_recovery) ... ok
+test_failed_index_write_rolls_back_chapter_and_clears_journal (test_application_document_v2_service.DocumentV2ServiceTests.test_failed_index_write_rolls_back_chapter_and_clears_journal) ... ok
+test_invalid_reorder_does_not_change_index (test_application_document_v2_service.DocumentV2ServiceTests.test_invalid_reorder_does_not_change_index) ... ok
+test_open_save_and_external_revision_conflict (test_application_document_v2_service.DocumentV2ServiceTests.test_open_save_and_external_revision_conflict) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.543s
+
+OK
+
+[16/112] test_application_knowledge_curation.py
+test_identity_collision_and_proposal_reopen_are_safe (test_application_knowledge_curation.KnowledgeCurationTests.test_identity_collision_and_proposal_reopen_are_safe) ... ok
+test_merge_rewrites_identity_and_removes_self_relation (test_application_knowledge_curation.KnowledgeCurationTests.test_merge_rewrites_identity_and_removes_self_relation) ... ok
+test_rename_alias_relation_edit_delete_and_audit (test_application_knowledge_curation.KnowledgeCurationTests.test_rename_alias_relation_edit_delete_and_audit) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.565s
+
+OK
+
+[17/112] test_application_manuscript_import_service.py
+test_binary_or_empty_source_fails_closed (test_application_manuscript_import_service.ManuscriptImportServiceTests.test_binary_or_empty_source_fails_closed) ... ok
+test_external_scan_uses_natural_order_and_supported_chinese_encoding (test_application_manuscript_import_service.ManuscriptImportServiceTests.test_external_scan_uses_natural_order_and_supported_chinese_encoding) ... ok
+test_v1_scan_reads_only_chapter_body_and_never_writes_source (test_application_manuscript_import_service.ManuscriptImportServiceTests.test_v1_scan_reads_only_chapter_body_and_never_writes_source) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.056s
+
+OK
+
+[18/112] test_application_project_service.py
+test_create_and_open_project_without_ui_dependencies (test_application_project_service.ProjectServiceTests.test_create_and_open_project_without_ui_dependencies) ... ok
+test_create_rejects_existing_target_and_invalid_parent (test_application_project_service.ProjectServiceTests.test_create_rejects_existing_target_and_invalid_parent) ... ok
+test_open_migrates_legacy_project_before_activation (test_application_project_service.ProjectServiceTests.test_open_migrates_legacy_project_before_activation) ... ok
+test_recent_projects_are_normalized_deduplicated_and_bounded (test_application_project_service.ProjectServiceTests.test_recent_projects_are_normalized_deduplicated_and_bounded) ... ok
+test_recent_projects_reports_invalid_config_shape_for_persistence (test_application_project_service.ProjectServiceTests.test_recent_projects_reports_invalid_config_shape_for_persistence) ... ok
+test_remember_project_moves_it_to_front (test_application_project_service.ProjectServiceTests.test_remember_project_moves_it_to_front) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.640s
+
+OK
+
+[19/112] test_application_project_v2_service.py
+test_create_empty_project_has_review_first_schema (test_application_project_v2_service.ProjectV2ServiceTests.test_create_empty_project_has_review_first_schema) ... ok
+test_create_from_v1_plan_copies_only_normalized_manuscript (test_application_project_v2_service.ProjectV2ServiceTests.test_create_from_v1_plan_copies_only_normalized_manuscript) ... ok
+test_legacy_service_rejects_v2_without_modifying_it (test_application_project_v2_service.ProjectV2ServiceTests.test_legacy_service_rejects_v2_without_modifying_it) ... ok
+test_new_project_opens_without_normalization_writes (test_application_project_v2_service.ProjectV2ServiceTests.test_new_project_opens_without_normalization_writes) ... ok
+test_open_preserves_semantically_equivalent_json_formatting (test_application_project_v2_service.ProjectV2ServiceTests.test_open_preserves_semantically_equivalent_json_formatting) ... ok
+test_phase8_project_without_evidence_projection_opens_compatibly (test_application_project_v2_service.ProjectV2ServiceTests.test_phase8_project_without_evidence_projection_opens_compatibly) ... ok
+test_validation_rejects_missing_collection_without_repair (test_application_project_v2_service.ProjectV2ServiceTests.test_validation_rejects_missing_collection_without_repair) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 0.434s
+
+OK
+
+[20/112] test_application_reconstruction_evaluation_service.py
+test_corpus_must_be_explicitly_synthetic_and_personal_data_free (test_application_reconstruction_evaluation_service.ReconstructionEvaluationServiceTests.test_corpus_must_be_explicitly_synthetic_and_personal_data_free) ... ok
+test_failed_quality_gate_is_machine_readable (test_application_reconstruction_evaluation_service.ReconstructionEvaluationServiceTests.test_failed_quality_gate_is_machine_readable) ... ok
+test_local_expectations_use_the_same_strict_annotation_contract (test_application_reconstruction_evaluation_service.ReconstructionEvaluationServiceTests.test_local_expectations_use_the_same_strict_annotation_contract) ... ok
+test_synthetic_baseline_reports_metrics_calibration_and_diagnostics (test_application_reconstruction_evaluation_service.ReconstructionEvaluationServiceTests.test_synthetic_baseline_reports_metrics_calibration_and_diagnostics) ... ok
+test_v1_corpus_remains_readable_for_historical_comparison (test_application_reconstruction_evaluation_service.ReconstructionEvaluationServiceTests.test_v1_corpus_remains_readable_for_historical_comparison) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.011s
+
+OK
+
+[21/112] test_application_reconstruction_service.py
+test_batch_review_is_atomic_and_accepts_relation_dependencies_together (test_application_reconstruction_service.ReconstructionServiceTests.test_batch_review_is_atomic_and_accepts_relation_dependencies_together) ... ok
+test_conflicting_character_fields_cannot_both_be_accepted (test_application_reconstruction_service.ReconstructionServiceTests.test_conflicting_character_fields_cannot_both_be_accepted) ... ok
+test_event_links_manual_order_and_diagnostics_are_rebuild_safe (test_application_reconstruction_service.ReconstructionServiceTests.test_event_links_manual_order_and_diagnostics_are_rebuild_safe) ... ok
+test_generate_review_and_graph_projection (test_application_reconstruction_service.ReconstructionServiceTests.test_generate_review_and_graph_projection) ... ok
+test_manuscript_change_invalidates_batch_and_reviewed_knowledge (test_application_reconstruction_service.ReconstructionServiceTests.test_manuscript_change_invalidates_batch_and_reviewed_knowledge) ... ok
+test_merge_keeps_target_character_field_visibility_precedence (test_application_reconstruction_service.ReconstructionServiceTests.test_merge_keeps_target_character_field_visibility_precedence) ... ok
+test_reject_is_durable_and_never_enters_knowledge (test_application_reconstruction_service.ReconstructionServiceTests.test_reject_is_durable_and_never_enters_knowledge) ... ok
+test_reviewed_event_projects_timeline_links_and_audited_curation (test_application_reconstruction_service.ReconstructionServiceTests.test_reviewed_event_projects_timeline_links_and_audited_curation) ... ok
+test_reviewed_world_and_character_fields_generate_read_only_cards (test_application_reconstruction_service.ReconstructionServiceTests.test_reviewed_world_and_character_fields_generate_read_only_cards) ... ok
+
+----------------------------------------------------------------------
+Ran 9 tests in 1.165s
+
+OK
+
+[22/112] test_application_reconstruction_task_service.py
+test_background_task_emits_progress_and_completes (test_application_reconstruction_task_service.ReconstructionTaskServiceTests.test_background_task_emits_progress_and_completes) ... ok
+test_cancelled_scan_keeps_checkpoint_and_next_run_resumes (test_application_reconstruction_task_service.ReconstructionTaskServiceTests.test_cancelled_scan_keeps_checkpoint_and_next_run_resumes) ... ok
+test_dsh_mode_requires_per_run_consent (test_application_reconstruction_task_service.ReconstructionTaskServiceTests.test_dsh_mode_requires_per_run_consent) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.253s
+
+OK
+
+[23/112] test_application_relationship_graph_service.py
+test_golden_projection_is_directed_deterministic_and_read_only (test_application_relationship_graph_service.RelationshipGraphServiceTests.test_golden_projection_is_directed_deterministic_and_read_only) ... ok
+test_managed_card_relations_fill_pairs_missing_from_story_state (test_application_relationship_graph_service.RelationshipGraphServiceTests.test_managed_card_relations_fill_pairs_missing_from_story_state) ... ok
+test_revision_changes_when_graph_source_changes (test_application_relationship_graph_service.RelationshipGraphServiceTests.test_revision_changes_when_graph_source_changes) ... ok
+test_story_state_wins_and_card_alias_resolves_missing_pair (test_application_relationship_graph_service.RelationshipGraphServiceTests.test_story_state_wins_and_card_alias_resolves_missing_pair) ... ok
+test_verified_accepted_memory_adds_evidence_without_creating_edges (test_application_relationship_graph_service.RelationshipGraphServiceTests.test_verified_accepted_memory_adds_evidence_without_creating_edges) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.228s
+
+OK
+
+[24/112] test_application_structured_extraction_service.py
+test_remote_failure_falls_back_to_local_without_remote_partial_data (test_application_structured_extraction_service.ReconstructionEnhancedProducerTests.test_remote_failure_falls_back_to_local_without_remote_partial_data) ... ok
+test_remote_mode_requires_explicit_consent (test_application_structured_extraction_service.ReconstructionEnhancedProducerTests.test_remote_mode_requires_explicit_consent) ... ok
+test_remote_proposals_are_merged_but_still_pending_review (test_application_structured_extraction_service.ReconstructionEnhancedProducerTests.test_remote_proposals_are_merged_but_still_pending_review) ... ok
+test_unbounded_character_field_is_rejected (test_application_structured_extraction_service.StructuredExtractionServiceTests.test_unbounded_character_field_is_rejected) ... ok
+test_unknown_evidence_or_extra_fields_rejects_whole_remote_output (test_application_structured_extraction_service.StructuredExtractionServiceTests.test_unknown_evidence_or_extra_fields_rejects_whole_remote_output) ... ok
+test_valid_output_maps_only_known_evidence_and_cleans_workspace (test_application_structured_extraction_service.StructuredExtractionServiceTests.test_valid_output_maps_only_known_evidence_and_cleans_workspace) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.251s
+
+OK
+
+[25/112] test_book_style_service.py
+test_confirmed_save_and_disabled_samples_keep_requirements_effective (test_book_style_service.BookStyleServiceTests.test_confirmed_save_and_disabled_samples_keep_requirements_effective) ... ok
+test_external_changes_to_each_file_reject_entire_save (test_book_style_service.BookStyleServiceTests.test_external_changes_to_each_file_reject_entire_save) ... ok
+test_failed_exception_write_rolls_back_library (test_book_style_service.BookStyleServiceTests.test_failed_exception_write_rolls_back_library) ... ok
+test_invalid_exception_cannot_partially_save (test_book_style_service.BookStyleServiceTests.test_invalid_exception_cannot_partially_save) ... ok
+test_no_change_preserves_exact_bytes_and_creates_no_files (test_book_style_service.BookStyleServiceTests.test_no_change_preserves_exact_bytes_and_creates_no_files) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.030s
+
+OK
+
+[26/112] test_chapter_facts.py
+test_cancelled_workflow_makes_no_model_call (test_chapter_facts.ChapterFactLedgerWorkflowTests.test_cancelled_workflow_makes_no_model_call) ... ok
+test_workflow_extracts_every_chunk_then_reuses_validated_cache (test_chapter_facts.ChapterFactLedgerWorkflowTests.test_workflow_extracts_every_chunk_then_reuses_validated_cache) ... ok
+test_merge_deduplicates_overlap_facts (test_chapter_facts.ChunkFactProtocolTests.test_merge_deduplicates_overlap_facts) ... ok
+test_merge_keeps_strongest_certainty_for_duplicate_fact (test_chapter_facts.ChunkFactProtocolTests.test_merge_keeps_strongest_certainty_for_duplicate_fact) ... ok
+test_prompt_has_token_report_and_rejects_too_small_budget (test_chapter_facts.ChunkFactProtocolTests.test_prompt_has_token_report_and_rejects_too_small_budget) ... ok
+test_valid_result_is_normalized_and_fact_id_is_local (test_chapter_facts.ChunkFactProtocolTests.test_valid_result_is_normalized_and_fact_id_is_local) ... ok
+test_wrong_hash_anchor_or_certainty_is_rejected (test_chapter_facts.ChunkFactProtocolTests.test_wrong_hash_anchor_or_certainty_is_rejected) ... ok
+test_cache_round_trip_does_not_store_raw_chunk_text (test_chapter_facts.FactLedgerCacheTests.test_cache_round_trip_does_not_store_raw_chunk_text) ... ok
+test_changed_chunk_hash_cannot_reuse_stale_cache (test_chapter_facts.FactLedgerCacheTests.test_changed_chunk_hash_cannot_reuse_stale_cache) ... ok
+
+----------------------------------------------------------------------
+Ran 9 tests in 0.213s
+
+OK
+
+[27/112] test_chapter_memory.py
+test_blocking_proposal_cannot_commit (test_chapter_memory.ChapterMemoryCommitTests.test_blocking_proposal_cannot_commit) ... ok
+test_commit_is_atomic_entry_and_rejects_stale_state (test_chapter_memory.ChapterMemoryCommitTests.test_commit_is_atomic_entry_and_rejects_stale_state) ... ok
+test_anonymous_group_location_alone_cannot_support_character_location (test_chapter_memory.ChapterMemoryProtocolTests.test_anonymous_group_location_alone_cannot_support_character_location) ... ok
+test_colliding_patch_targets_create_blocker (test_chapter_memory.ChapterMemoryProtocolTests.test_colliding_patch_targets_create_blocker) ... ok
+test_conflicting_facts_at_same_anchor_create_blocker (test_chapter_memory.ChapterMemoryProtocolTests.test_conflicting_facts_at_same_anchor_create_blocker) ... ok
+test_group_location_and_named_presence_can_support_character_location (test_chapter_memory.ChapterMemoryProtocolTests.test_group_location_and_named_presence_can_support_character_location) ... ok
+test_inferred_patch_is_retained_with_warning (test_chapter_memory.ChapterMemoryProtocolTests.test_inferred_patch_is_retained_with_warning) ... ok
+test_memory_prompt_requests_only_one_authoritative_summary (test_chapter_memory.ChapterMemoryProtocolTests.test_memory_prompt_requests_only_one_authoritative_summary) ... ok
+test_memory_proposal_still_requires_one_summary (test_chapter_memory.ChapterMemoryProtocolTests.test_memory_proposal_still_requires_one_summary) ... ok
+test_model_precondition_is_ignored_and_local_value_is_authoritative (test_chapter_memory.ChapterMemoryProtocolTests.test_model_precondition_is_ignored_and_local_value_is_authoritative) ... ok
+test_old_response_type_is_rejected_even_with_v2_version (test_chapter_memory.ChapterMemoryProtocolTests.test_old_response_type_is_rejected_even_with_v2_version) ... ok
+test_unknown_fact_reference_is_rejected (test_chapter_memory.ChapterMemoryProtocolTests.test_unknown_fact_reference_is_rejected) ... ok
+test_unrelated_fact_cannot_authorize_character_patch (test_chapter_memory.ChapterMemoryProtocolTests.test_unrelated_fact_cannot_authorize_character_patch) ... ok
+test_v1_model_response_is_rejected (test_chapter_memory.ChapterMemoryProtocolTests.test_v1_model_response_is_rejected) ... ok
+test_v2_ignores_duplicate_summary_and_completion_extras (test_chapter_memory.ChapterMemoryProtocolTests.test_v2_ignores_duplicate_summary_and_completion_extras) ... ok
+test_v2_response_must_match_compact_request_id (test_chapter_memory.ChapterMemoryProtocolTests.test_v2_response_must_match_compact_request_id) ... ok
+test_valid_patch_is_applied_locally_and_protected_fields_survive (test_chapter_memory.ChapterMemoryProtocolTests.test_valid_patch_is_applied_locally_and_protected_fields_survive) ... ok
+test_oversized_ledger_uses_hierarchical_reduction (test_chapter_memory.ChapterMemoryWorkflowTests.test_oversized_ledger_uses_hierarchical_reduction) ... ok
+test_v2_workflow_reuses_fact_and_proposal_caches (test_chapter_memory.ChapterMemoryWorkflowTests.test_v2_workflow_reuses_fact_and_proposal_caches) ... ok
+
+----------------------------------------------------------------------
+Ran 19 tests in 0.385s
+
+OK
+
+[28/112] test_chapter_sections.py
+test_body_bounds_stop_before_custom_sections (test_chapter_sections.ChapterSectionTests.test_body_bounds_stop_before_custom_sections) ... ok
+test_unsectioned_import_is_treated_as_body_without_title (test_chapter_sections.ChapterSectionTests.test_unsectioned_import_is_treated_as_body_without_title) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.000s
+
+OK
+
+[29/112] test_chapter_templates.py
+test_initial_and_added_chapters_share_default_content (test_chapter_templates.ChapterTemplateTests.test_initial_and_added_chapters_share_default_content) ... ok
+test_initialization_preserves_existing_first_chapter (test_chapter_templates.ChapterTemplateTests.test_initialization_preserves_existing_first_chapter) ... ok
+test_opening_project_preserves_existing_chapter (test_chapter_templates.ChapterTemplateTests.test_opening_project_preserves_existing_chapter) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.130s
+
+OK
+
+[30/112] test_character_card_sync.py
+test_apply_only_changes_managed_block_and_creates_backup (test_character_card_sync.CharacterCardSyncTests.test_apply_only_changes_managed_block_and_creates_backup) ... ok
+test_builds_field_level_proposal_from_verified_range (test_character_card_sync.CharacterCardSyncTests.test_builds_field_level_proposal_from_verified_range) ... ok
+test_changed_dependency_blocks_endpoint_state (test_character_card_sync.CharacterCardSyncTests.test_changed_dependency_blocks_endpoint_state) ... ok
+test_legacy_card_gets_an_app_owned_block (test_character_card_sync.CharacterCardSyncTests.test_legacy_card_gets_an_app_owned_block) ... ok
+test_stale_card_is_not_overwritten (test_character_card_sync.CharacterCardSyncTests.test_stale_card_is_not_overwritten) ... ok
+test_unverified_chapter_is_rejected (test_character_card_sync.CharacterCardSyncTests.test_unverified_chapter_is_rejected) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.373s
+
+OK
+
+[31/112] test_character_cards.py
+test_create_cards_renders_state_and_never_overwrites (test_character_cards.CharacterCardSyncTests.test_create_cards_renders_state_and_never_overwrites) ... ok
+test_empty_details_still_produce_a_editable_draft (test_character_cards.CharacterCardSyncTests.test_empty_details_still_produce_a_editable_draft) ... ok
+test_missing_cards_only_returns_unmatched_tracked_characters (test_character_cards.CharacterCardSyncTests.test_missing_cards_only_returns_unmatched_tracked_characters) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.136s
+
+OK
+
+[32/112] test_character_identity.py
+test_alias_card_retrieval_and_duplicate_prevention (test_character_identity.CharacterIdentityTests.test_alias_card_retrieval_and_duplicate_prevention) ... ok
+test_alias_collision_is_blocked_but_unrelated_person_is_not_merged (test_character_identity.CharacterIdentityTests.test_alias_collision_is_blocked_but_unrelated_person_is_not_merged) ... ok
+test_associate_project_reopen_and_undo_preserve_bytes (test_character_identity.CharacterIdentityTests.test_associate_project_reopen_and_undo_preserve_bytes) ... ok
+test_card_sync_uses_new_identity_and_rejects_changed_mapping (test_character_identity.CharacterIdentityTests.test_card_sync_uses_new_identity_and_rejects_changed_mapping) ... ok
+test_conflicts_require_choice_and_revision_is_checked (test_character_identity.CharacterIdentityTests.test_conflicts_require_choice_and_revision_is_checked) ... ok
+test_earlier_chapter_does_not_receive_reveal (test_character_identity.CharacterIdentityTests.test_earlier_chapter_does_not_receive_reveal) ... ok
+test_graph_projects_names_with_stable_id (test_character_identity.CharacterIdentityTests.test_graph_projects_names_with_stable_id) ... ok
+test_identity_changes_invalidate_pending_memory_and_task_context (test_character_identity.CharacterIdentityTests.test_identity_changes_invalidate_pending_memory_and_task_context) ... ok
+test_item_removal_uses_combined_state_and_does_not_resurrect_items (test_character_identity.CharacterIdentityTests.test_item_removal_uses_combined_state_and_does_not_resurrect_items) ... ok
+test_multiple_identities_preserve_id_and_prevent_overlap (test_character_identity.CharacterIdentityTests.test_multiple_identities_preserve_id_and_prevent_overlap) ... ok
+test_new_identity_location_still_requires_its_own_evidence (test_character_identity.CharacterIdentityTests.test_new_identity_location_still_requires_its_own_evidence) ... ok
+test_new_identity_updates_old_identity_and_undo_keeps_provenance (test_character_identity.CharacterIdentityTests.test_new_identity_updates_old_identity_and_undo_keeps_provenance) ... ok
+test_old_identity_can_update_after_new_identity (test_character_identity.CharacterIdentityTests.test_old_identity_can_update_after_new_identity) ... ok
+test_registry_survives_reopen_and_original_context_recovers_after_undo (test_character_identity.CharacterIdentityTests.test_registry_survives_reopen_and_original_context_recovers_after_undo) ... ok
+
+----------------------------------------------------------------------
+Ran 14 tests in 0.888s
+
+OK
+
+[33/112] test_character_identity_ui.py
+test_cancel_does_not_write (test_character_identity_ui.CharacterIdentityUITests.test_cancel_does_not_write) ... ok
+test_preview_choice_save_and_invalidated_preview (test_character_identity_ui.CharacterIdentityUITests.test_preview_choice_save_and_invalidated_preview) ... ok
+test_small_window_both_themes_large_font (test_character_identity_ui.CharacterIdentityUITests.test_small_window_both_themes_large_font) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.288s
+
+OK
+
+[34/112] test_compact_workspace.py
+test_inspector_close_button_hides_panel_and_keeps_controls_in_sync (test_compact_workspace.CompactWorkspaceTests.test_inspector_close_button_hides_panel_and_keeps_controls_in_sync) ... ok
+test_narrow_editor_stacks_tools_without_losing_title (test_compact_workspace.CompactWorkspaceTests.test_narrow_editor_stacks_tools_without_losing_title) ... ok
+test_panel_buttons_restore_panels_and_track_shortcuts (test_compact_workspace.CompactWorkspaceTests.test_panel_buttons_restore_panels_and_track_shortcuts) ... ok
+test_save_failure_remains_visible_in_compact_header (test_compact_workspace.CompactWorkspaceTests.test_save_failure_remains_visible_in_compact_header) ... ok
+test_small_window_reserves_space_for_manuscript (test_compact_workspace.CompactWorkspaceTests.test_small_window_reserves_space_for_manuscript) ... ok
+test_task_menu_keeps_records_reachable_when_actions_disabled (test_compact_workspace.CompactWorkspaceTests.test_task_menu_keeps_records_reachable_when_actions_disabled) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 10.302s
+
+OK
+
+[35/112] test_config_paths.py
+test_linux_honors_xdg_directories (test_config_paths.ApplicationPathTests.test_linux_honors_xdg_directories) ... ok
+test_windows_uses_roaming_config_and_local_cache (test_config_paths.ApplicationPathTests.test_windows_uses_roaming_config_and_local_cache) ... ok
+test_chapter_target_accessor_is_the_only_runtime_fallback (test_config_paths.ConfigMigrationTests.test_chapter_target_accessor_is_the_only_runtime_fallback) ... ok
+test_config_schema_migration_is_idempotent (test_config_paths.ConfigMigrationTests.test_config_schema_migration_is_idempotent) ... ok
+test_future_config_schema_is_rejected (test_config_paths.ConfigMigrationTests.test_future_config_schema_is_rejected) ... ok
+test_legacy_install_config_is_not_consumed (test_config_paths.ConfigMigrationTests.test_legacy_install_config_is_not_consumed) ... ok
+test_retired_update_preferences_are_removed (test_config_paths.ConfigMigrationTests.test_retired_update_preferences_are_removed) ... ok
+test_save_config_creates_the_user_directory (test_config_paths.ConfigMigrationTests.test_save_config_creates_the_user_directory) ... ok
+test_schema_five_expansion_target_becomes_chapter_target (test_config_paths.ConfigMigrationTests.test_schema_five_expansion_target_becomes_chapter_target) ... ok
+
+----------------------------------------------------------------------
+Ran 9 tests in 0.021s
+
+OK
+
+[36/112] test_context_budget.py
+test_applies_per_section_cap_with_head_marker (test_context_budget.AllocateTests.test_applies_per_section_cap_with_head_marker) ... ok
+test_budget_pressure_drops_lowest_priority_first (test_context_budget.AllocateTests.test_budget_pressure_drops_lowest_priority_first) ... ok
+test_keeps_everything_when_under_budget (test_context_budget.AllocateTests.test_keeps_everything_when_under_budget) ... ok
+test_prompt_finalizer_uses_the_selected_transport_budget (test_context_budget.AllocateTests.test_prompt_finalizer_uses_the_selected_transport_budget) ... ok
+test_tail_trim_keeps_the_ending (test_context_budget.AllocateTests.test_tail_trim_keeps_the_ending) ... ok
+test_trim_result_never_exceeds_remaining_budget (test_context_budget.AllocateTests.test_trim_result_never_exceeds_remaining_budget) ... ok
+test_check_prompt_stays_under_hard_limit (test_context_budget.BudgetedPromptTests.test_check_prompt_stays_under_hard_limit) ... ok
+test_long_style_guide_is_bounded_and_prompt_stays_under_hard_limit (test_context_budget.BudgetedPromptTests.test_long_style_guide_is_bounded_and_prompt_stays_under_hard_limit) ... ok
+test_twenty_expansion_summaries_fit_and_keep_the_most_recent (test_context_budget.BudgetedPromptTests.test_twenty_expansion_summaries_fit_and_keep_the_most_recent) ... ok
+test_write_prompt_stays_under_hard_limit_and_keeps_tail (test_context_budget.BudgetedPromptTests.test_write_prompt_stays_under_hard_limit_and_keeps_tail) ... ok
+test_caps_long_values_and_keeps_structure (test_context_budget.CompactStoryStateTests.test_caps_long_values_and_keeps_structure) ... ok
+test_short_state_passes_through (test_context_budget.CompactStoryStateTests.test_short_state_passes_through) ... ok
+test_future_chapters_are_excluded (test_context_budget.PriorChapterSummariesTests.test_future_chapters_are_excluded) ... ok
+test_natural_order_places_2_before_10 (test_context_budget.PriorChapterSummariesTests.test_natural_order_places_2_before_10) ... ok
+
+----------------------------------------------------------------------
+Ran 14 tests in 0.393s
+
+OK
+
+[37/112] test_context_capacity.py
+test_common_presets_match_recommended_input_budgets (test_context_capacity.ContextCapacityTests.test_common_presets_match_recommended_input_budgets) ... ok
+test_custom_window_interpolates_and_respects_combined_ceiling (test_context_capacity.ContextCapacityTests.test_custom_window_interpolates_and_respects_combined_ceiling) ... ok
+test_unknown_model_keeps_safe_legacy_budget (test_context_capacity.ContextCapacityTests.test_unknown_model_keeps_safe_legacy_budget) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.000s
+
+OK
+
+[38/112] test_context_profiles.py
+test_profiles_declare_distinct_task_source_scopes (test_context_profiles.ContextProfileTests.test_profiles_declare_distinct_task_source_scopes) ... ok
+test_prompt_sections_follow_the_task_profile (test_context_profiles.ContextProfileTests.test_prompt_sections_follow_the_task_profile) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.099s
+
+OK
+
+[39/112] test_context_report.py
+test_allocation_reports_full_capped_trimmed_and_dropped (test_context_report.ContextAllocationReportTests.test_allocation_reports_full_capped_trimmed_and_dropped) ... ok
+test_prompt_report_contains_counts_but_not_source_text (test_context_report.ContextAllocationReportTests.test_prompt_report_contains_counts_but_not_source_text) ... ok
+test_rendering_shows_metrics_without_accepting_prompt_text (test_context_report.ContextReportRenderingTests.test_rendering_shows_metrics_without_accepting_prompt_text) ... ok
+test_rendering_shows_receipt_retry_reason (test_context_report.ContextReportRenderingTests.test_rendering_shows_receipt_retry_reason) ... ok
+test_rendering_shows_redacted_token_estimate (test_context_report.ContextReportRenderingTests.test_rendering_shows_redacted_token_estimate) ... ok
+test_file_report_confirms_task_file_cleanup (test_context_report.DSHInvocationReportTests.test_file_report_confirms_task_file_cleanup) ... ok
+test_report_records_recovered_receipt_without_response_text (test_context_report.DSHInvocationReportTests.test_report_records_recovered_receipt_without_response_text) ... ok
+test_success_report_contains_actual_argv_metrics (test_context_report.DSHInvocationReportTests.test_success_report_contains_actual_argv_metrics) ... ok
+test_timeout_and_cancellation_are_reported_after_file_cleanup (test_context_report.DSHInvocationReportTests.test_timeout_and_cancellation_are_reported_after_file_cleanup) ... ok
+test_unavailable_long_file_transport_fails_without_prompt_content (test_context_report.DSHInvocationReportTests.test_unavailable_long_file_transport_fails_without_prompt_content) ... ok
+test_probe_generation_retry_are_separate_and_redacted (test_context_report.InvocationTimingTests.test_probe_generation_retry_are_separate_and_redacted) ... ok
+test_timeout_records_attempt_duration_and_cleans_file (test_context_report.InvocationTimingTests.test_timeout_records_attempt_duration_and_cleans_file) ... ok
+test_expansion_report_tracks_history_and_budget (test_context_report.PromptConstructionReportTests.test_expansion_report_tracks_history_and_budget) ... ok
+
+----------------------------------------------------------------------
+Ran 13 tests in 0.131s
+
+OK
+
+[40/112] test_context_selection.py
+test_core_and_manually_selected_systems_are_required_and_reported (test_context_selection.ContextSelectionTests.test_core_and_manually_selected_systems_are_required_and_reported) ... ok
+test_explicit_title_heading_and_metadata_matches_are_explainable (test_context_selection.ContextSelectionTests.test_explicit_title_heading_and_metadata_matches_are_explainable) ... ok
+test_prompt_build_stops_if_multiple_required_systems_cannot_fit (test_context_selection.ContextSelectionTests.test_prompt_build_stops_if_multiple_required_systems_cannot_fit) ... ok
+test_repair_uses_issue_text_instead_of_unrelated_full_chapter_for_ranking (test_context_selection.ContextSelectionTests.test_repair_uses_issue_text_instead_of_unrelated_full_chapter_for_ranking) ... ok
+test_retired_context_mode_is_removed_from_config (test_context_selection.ContextSelectionTests.test_retired_context_mode_is_removed_from_config) ... ok
+test_safe_mode_places_relevant_world_before_unmatched_background (test_context_selection.ContextSelectionTests.test_safe_mode_places_relevant_world_before_unmatched_background) ... ok
+test_selection_is_deterministic_and_prompt_keeps_the_relevant_entry (test_context_selection.ContextSelectionTests.test_selection_is_deterministic_and_prompt_keeps_the_relevant_entry) ... ok
+test_matched_entry_wins_capacity_regardless_of_filename_order (test_context_selection.RankedDocumentUnitTests.test_matched_entry_wins_capacity_regardless_of_filename_order) ... ok
+
+----------------------------------------------------------------------
+Ran 8 tests in 0.787s
+
+OK
+
+[41/112] test_continuation.py
+test_empty_near_target_and_completed_chapters_are_rejected (test_continuation.ContinuationTargetTests.test_empty_near_target_and_completed_chapters_are_rejected) ... ok
+test_remaining_length_is_used_up_to_three_thousand (test_continuation.ContinuationTargetTests.test_remaining_length_is_used_up_to_three_thousand) ... ok
+test_protocol_failure_retries_once (test_continuation.ContinuationWorkflowTests.test_protocol_failure_retries_once) ... ok
+test_request_is_capped_at_three_thousand (test_continuation.ContinuationWorkflowTests.test_request_is_capped_at_three_thousand) ... ok
+test_severely_short_continuation_receives_full_length_retry (test_continuation.ContinuationWorkflowTests.test_severely_short_continuation_receives_full_length_retry) ... ok
+test_under_length_continuation_receives_safe_supplement (test_continuation.ContinuationWorkflowTests.test_under_length_continuation_receives_safe_supplement) ... ok
+test_valid_output_uses_remaining_length_and_one_context (test_continuation.ContinuationWorkflowTests.test_valid_output_uses_remaining_length_and_one_context) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 0.359s
+
+OK
+
+[42/112] test_dashboard_page.py
+test_chapter_preview_compacts_whitespace_and_limits_length (test_dashboard_page.DashboardPageHelperTests.test_chapter_preview_compacts_whitespace_and_limits_length) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.000s
+
+OK
+
+[43/112] test_deferred_ai_review.py
+test_blocked_memory_outputs_actionable_evidence_without_committing (test_deferred_ai_review.DeferredAIReviewTests.test_blocked_memory_outputs_actionable_evidence_without_committing) ... ok
+test_delayed_expansion_still_checks_context_before_replacing_text (test_deferred_ai_review.DeferredAIReviewTests.test_delayed_expansion_still_checks_context_before_replacing_text) ... ok
+test_discard_releases_without_invoking_result_handler (test_deferred_ai_review.DeferredAIReviewTests.test_discard_releases_without_invoking_result_handler) ... ok
+test_handler_failure_releases_snapshot_and_unlocks_actions (test_deferred_ai_review.DeferredAIReviewTests.test_handler_failure_releases_snapshot_and_unlocks_actions) ... ok
+test_nested_review_cannot_start_another_task (test_deferred_ai_review.DeferredAIReviewTests.test_nested_review_cannot_start_another_task) ... ok
+test_no_review_or_snapshot_release_before_explicit_request (test_deferred_ai_review.DeferredAIReviewTests.test_no_review_or_snapshot_release_before_explicit_request) ... ok
+test_partial_memory_requires_second_confirmation_and_shows_exclusions (test_deferred_ai_review.DeferredAIReviewTests.test_partial_memory_requires_second_confirmation_and_shows_exclusions) ... ok
+test_project_reset_releases_pending_snapshot (test_deferred_ai_review.DeferredAIReviewTests.test_project_reset_releases_pending_snapshot) ... ok
+test_retry_keeps_original_chapter_and_rechecks_sources (test_deferred_ai_review.DeferredAIReviewTests.test_retry_keeps_original_chapter_and_rechecks_sources) ... ok
+test_stale_delayed_check_does_not_publish_report (test_deferred_ai_review.DeferredAIReviewTests.test_stale_delayed_check_does_not_publish_report) ... ok
+
+----------------------------------------------------------------------
+Ran 10 tests in 0.024s
+
+OK
+
+[44/112] test_document_controller.py
+test_auto_save_reports_success_only_after_save (test_document_controller.DocumentControllerTests.test_auto_save_reports_success_only_after_save) ... ok
+test_create_and_import_documents_notify_session (test_document_controller.DocumentControllerTests.test_create_and_import_documents_notify_session) ... ok
+test_create_chapter_reports_suggestion_without_overwriting (test_document_controller.DocumentControllerTests.test_create_chapter_reports_suggestion_without_overwriting) ... ok
+test_create_power_entry_uses_canon_notification_flow (test_document_controller.DocumentControllerTests.test_create_power_entry_uses_canon_notification_flow) ... ok
+test_delete_current_chapter_clears_editor_and_notifies_session (test_document_controller.DocumentControllerTests.test_delete_current_chapter_clears_editor_and_notifies_session) ... ok
+test_delete_current_character_clears_editor_and_notifies_canon (test_document_controller.DocumentControllerTests.test_delete_current_character_clears_editor_and_notifies_canon) ... ok
+test_delete_current_dirty_chapter_requires_explicit_discard (test_document_controller.DocumentControllerTests.test_delete_current_dirty_chapter_requires_explicit_discard) ... ok
+test_delete_current_dirty_character_requires_explicit_discard (test_document_controller.DocumentControllerTests.test_delete_current_dirty_character_requires_explicit_discard) ... ok
+test_delete_current_dirty_timeline_requires_explicit_discard (test_document_controller.DocumentControllerTests.test_delete_current_dirty_timeline_requires_explicit_discard) ... ok
+test_delete_current_world_clears_editor_and_notifies_canon (test_document_controller.DocumentControllerTests.test_delete_current_world_clears_editor_and_notifies_canon) ... ok
+test_next_chapter_id_does_not_reuse_existing_number (test_document_controller.DocumentControllerTests.test_next_chapter_id_does_not_reuse_existing_number) ... ok
+test_open_saves_dirty_document_before_switching (test_document_controller.DocumentControllerTests.test_open_saves_dirty_document_before_switching) ... ok
+test_reload_current_file_clears_save_conflict (test_document_controller.DocumentControllerTests.test_reload_current_file_clears_save_conflict) ... ok
+test_save_blocks_external_overwrite_until_forced (test_document_controller.DocumentControllerTests.test_save_blocks_external_overwrite_until_forced) ... ok
+
+----------------------------------------------------------------------
+Ran 14 tests in 0.668s
+
+OK
+
+[45/112] test_dsh_client.py
+test_bare_command_resolves_windows_shim (test_dsh_client.DSHClientTests.test_bare_command_resolves_windows_shim) ... ok
+test_cleanup_keeps_explicitly_set_working_directory (test_dsh_client.DSHClientTests.test_cleanup_keeps_explicitly_set_working_directory) ... ok
+test_cleanup_retries_a_transient_windows_directory_error (test_dsh_client.DSHClientTests.test_cleanup_retries_a_transient_windows_directory_error) ... ok
+test_connection_check_rejects_empty_task_response (test_dsh_client.DSHClientTests.test_connection_check_rejects_empty_task_response) ... ok
+test_connection_check_reports_verified_file_transport (test_dsh_client.DSHClientTests.test_connection_check_reports_verified_file_transport) ... ok
+test_connection_check_runs_a_real_probe (test_dsh_client.DSHClientTests.test_connection_check_runs_a_real_probe) ... ok
+test_empty_task_onboarding_is_reported_before_protocol_retry (test_dsh_client.DSHClientTests.test_empty_task_onboarding_is_reported_before_protocol_retry) ... ok
+test_file_response_accepts_bom_outer_fence_and_short_preamble (test_dsh_client.DSHClientTests.test_file_response_accepts_bom_outer_fence_and_short_preamble) ... ok
+test_file_response_requires_exact_nonce_and_is_stripped (test_dsh_client.DSHClientTests.test_file_response_requires_exact_nonce_and_is_stripped) ... ok
+test_file_transport_moves_a_long_unicode_prompt_to_a_task_file (test_dsh_client.DSHClientTests.test_file_transport_moves_a_long_unicode_prompt_to_a_task_file) ... ok
+test_generate_runs_in_isolated_workspace (test_dsh_client.DSHClientTests.test_generate_runs_in_isolated_workspace) ... ok
+test_invalid_receipt_retries_same_task_file_once (test_dsh_client.DSHClientTests.test_invalid_receipt_retries_same_task_file_once) ... ok
+test_isolated_workspace_is_empty_reused_and_cleaned (test_dsh_client.DSHClientTests.test_isolated_workspace_is_empty_reused_and_cleaned) ... ok
+test_json_code_fence_is_supported (test_dsh_client.DSHClientTests.test_json_code_fence_is_supported) ... ok
+test_json_preamble_is_supported (test_dsh_client.DSHClientTests.test_json_preamble_is_supported) ... ok
+test_launcher_arguments_precede_dsh_arguments (test_dsh_client.DSHClientTests.test_launcher_arguments_precede_dsh_arguments) ... ok
+test_long_prompt_bypasses_standard_npm_cmd_shim (test_dsh_client.DSHClientTests.test_long_prompt_bypasses_standard_npm_cmd_shim) ... ok
+test_long_prompt_bypasses_windows_cmd_shim (test_dsh_client.DSHClientTests.test_long_prompt_bypasses_windows_cmd_shim) ... ok
+test_modern_npx_wrapper_uses_npx_cli_instead_of_prefix_helper (test_dsh_client.DSHClientTests.test_modern_npx_wrapper_uses_npx_cli_instead_of_prefix_helper) ... ok
+test_over_budget_business_prompt_stops_before_probe_or_file_write (test_dsh_client.DSHClientTests.test_over_budget_business_prompt_stops_before_probe_or_file_write) ... ok
+test_prompt_build_budget_does_not_probe_file_capability (test_dsh_client.DSHClientTests.test_prompt_build_budget_does_not_probe_file_capability) ... ok
+test_relative_cmd_command_is_resolved_before_shim_handling (test_dsh_client.DSHClientTests.test_relative_cmd_command_is_resolved_before_shim_handling) ... ok
+test_retry_still_fails_closed_and_cleans_task_file (test_dsh_client.DSHClientTests.test_retry_still_fails_closed_and_cleans_task_file) ... ok
+test_short_business_prompt_also_uses_file_bridge (test_dsh_client.DSHClientTests.test_short_business_prompt_also_uses_file_bridge) ... ok
+test_short_prompt_also_bypasses_readable_cmd_shim (test_dsh_client.DSHClientTests.test_short_prompt_also_bypasses_readable_cmd_shim) ... ok
+test_task_file_byte_limit_is_enforced_before_execution (test_dsh_client.DSHClientTests.test_task_file_byte_limit_is_enforced_before_execution) ... ok
+test_task_file_explains_ack_precedes_json_only_output (test_dsh_client.DSHClientTests.test_task_file_explains_ack_precedes_json_only_output) ... ok
+test_task_file_is_removed_after_failure_and_cancellation (test_dsh_client.DSHClientTests.test_task_file_is_removed_after_failure_and_cancellation) ... ok
+test_timeout_override_is_forwarded (test_dsh_client.DSHClientTests.test_timeout_override_is_forwarded) ... ok
+test_transient_negative_file_probe_is_retried (test_dsh_client.DSHClientTests.test_transient_negative_file_probe_is_retried) ... ok
+test_unavailable_file_bridge_fails_closed_at_generation_time (test_dsh_client.DSHClientTests.test_unavailable_file_bridge_fails_closed_at_generation_time) ... ok
+test_windows_prompt_newlines_stay_inside_one_process_argument (test_dsh_client.DSHClientTests.test_windows_prompt_newlines_stay_inside_one_process_argument) ... ok
+
+----------------------------------------------------------------------
+Ran 32 tests in 0.284s
+
+OK
+
+[46/112] test_dsh_transport_verifier.py
+test_diagnostic_trace_keeps_metrics_but_not_prompt_text (test_dsh_transport_verifier.DSHTransportVerifierTests.test_diagnostic_trace_keeps_metrics_but_not_prompt_text) ... ok
+test_final_report_does_not_contain_markers_or_prompt (test_dsh_transport_verifier.DSHTransportVerifierTests.test_final_report_does_not_contain_markers_or_prompt) ... ok
+test_simulated_timeout_removes_task_file_and_workspace (test_dsh_transport_verifier.DSHTransportVerifierTests.test_simulated_timeout_removes_task_file_and_workspace) ... ok
+test_synthetic_prompt_has_exact_length_and_ordered_unique_markers (test_dsh_transport_verifier.DSHTransportVerifierTests.test_synthetic_prompt_has_exact_length_and_ordered_unique_markers) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.027s
+
+OK
+
+[47/112] test_editor_continuation.py
+test_continuation_is_inserted_before_custom_section_and_is_undoable (test_editor_continuation.EditorContinuationTests.test_continuation_is_inserted_before_custom_section_and_is_undoable) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.033s
+
+OK
+
+[48/112] test_editor_performance.py
+test_find_highlights_are_limited_for_many_matches (test_editor_performance.EditorPerformanceTests.test_find_highlights_are_limited_for_many_matches) ... ok
+test_large_documents_skip_find_highlights (test_editor_performance.EditorPerformanceTests.test_large_documents_skip_find_highlights) ... ok
+test_stats_label_uses_the_ai_protocol_counting_rules (test_editor_performance.EditorPerformanceTests.test_stats_label_uses_the_ai_protocol_counting_rules) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.000s
+
+OK
+
+[49/112] test_editor_preview.py
+test_find_switches_preview_back_to_source (test_editor_preview.EditorPreviewTests.test_find_switches_preview_back_to_source) ... ok
+test_open_and_save_while_preview_is_active_use_source_text (test_editor_preview.EditorPreviewTests.test_open_and_save_while_preview_is_active_use_source_text) ... ok
+test_preview_blocks_remote_resources_and_refreshes_theme (test_editor_preview.EditorPreviewTests.test_preview_blocks_remote_resources_and_refreshes_theme) ... ok
+test_preview_filter_only_removes_novalist_comments (test_editor_preview.EditorPreviewTests.test_preview_filter_only_removes_novalist_comments) ... ok
+test_preview_renders_unsaved_source_without_mutating_it (test_editor_preview.EditorPreviewTests.test_preview_renders_unsaved_source_without_mutating_it) ... ok
+test_switching_views_preserves_cursor_and_undo_history (test_editor_preview.EditorPreviewTests.test_switching_views_preserves_cursor_and_undo_history) ... ok
+test_timeline_notes_title_and_empty_editor_survive_document_switches (test_editor_preview.EditorPreviewTests.test_timeline_notes_title_and_empty_editor_survive_document_switches) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 0.149s
+
+OK
+
+[50/112] test_expansion.py
+test_1800_char_regression_can_recover_with_numbered_supplement (test_expansion.ExpansionTests.test_1800_char_regression_can_recover_with_numbered_supplement) ... ok
+test_foreshadowing_review_failure_keeps_generated_prose (test_expansion.ExpansionTests.test_foreshadowing_review_failure_keeps_generated_prose) ... ok
+test_format_and_length_retries_share_the_automatic_budget (test_expansion.ExpansionTests.test_format_and_length_retries_share_the_automatic_budget) ... ok
+test_history_window_is_forwarded_to_prompt_and_retry (test_expansion.ExpansionTests.test_history_window_is_forwarded_to_prompt_and_retry) ... ok
+test_malformed_model_markers_are_cleaned_before_review_and_write (test_expansion.ExpansionTests.test_malformed_model_markers_are_cleaned_before_review_and_write) ... ok
+test_plain_text_fallback_is_counted_before_canonicalization (test_expansion.ExpansionTests.test_plain_text_fallback_is_counted_before_canonicalization) ... ok
+test_retry_keeps_full_timeout_budget (test_expansion.ExpansionTests.test_retry_keeps_full_timeout_budget) ... ok
+test_selected_foreshadowing_is_forwarded_to_prompt_and_retry (test_expansion.ExpansionTests.test_selected_foreshadowing_is_forwarded_to_prompt_and_retry) ... ok
+test_selected_foreshadowing_is_reviewed_after_generation (test_expansion.ExpansionTests.test_selected_foreshadowing_is_reviewed_after_generation) ... ok
+test_selected_power_is_forwarded_as_high_priority_context (test_expansion.ExpansionTests.test_selected_power_is_forwarded_as_high_priority_context) ... ok
+test_severely_short_draft_receives_full_length_retry_first (test_expansion.ExpansionTests.test_severely_short_draft_receives_full_length_retry_first) ... ok
+test_under_length_draft_receives_one_safe_difference_supplement (test_expansion.ExpansionTests.test_under_length_draft_receives_one_safe_difference_supplement) ... ok
+test_unsafe_supplement_keeps_original_draft_with_warning (test_expansion.ExpansionTests.test_unsafe_supplement_keeps_original_draft_with_warning) ... ok
+test_valid_first_output_returns_without_retry (test_expansion.ExpansionTests.test_valid_first_output_returns_without_retry) ... ok
+
+----------------------------------------------------------------------
+Ran 14 tests in 0.179s
+
+OK
+
+[51/112] test_export.py
+test_chapters_use_natural_order (test_export.ExportTests.test_chapters_use_natural_order) ... ok
+test_plain_text_export_omits_planning_sections (test_export.ExportTests.test_plain_text_export_omits_planning_sections) ... ok
+test_rendered_markdown_and_text_follow_options (test_export.ExportTests.test_rendered_markdown_and_text_follow_options) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.159s
+
+OK
+
+[52/112] test_export_controller.py
+test_export_controller_renders_and_writes_selected_chapters (test_export_controller.ExportControllerTests.test_export_controller_renders_and_writes_selected_chapters) ... ok
+test_export_requires_at_least_one_existing_chapter (test_export_controller.ExportControllerTests.test_export_requires_at_least_one_existing_chapter) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.093s
+
+OK
+
+[53/112] test_foreshadowing_selection_dialog.py
+test_sort_does_not_mutate_input_notes (test_foreshadowing_selection_dialog.ForeshadowingSelectionTests.test_sort_does_not_mutate_input_notes) ... ok
+test_sort_prioritizes_high_and_near_term_notes (test_foreshadowing_selection_dialog.ForeshadowingSelectionTests.test_sort_prioritizes_high_and_near_term_notes) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.000s
+
+OK
+
+[54/112] test_foreshadowing_workflow.py
+test_expansion_completion_uses_task_target_snapshot_not_live_setting (test_foreshadowing_workflow.ForeshadowingWorkflowTests.test_expansion_completion_uses_task_target_snapshot_not_live_setting) ... ok
+test_manual_continuation_supplement_reopens_preview_with_updated_counts (test_foreshadowing_workflow.ForeshadowingWorkflowTests.test_manual_continuation_supplement_reopens_preview_with_updated_counts) ... ok
+test_pending_resolution_is_applied_only_after_chapter_save_signal (test_foreshadowing_workflow.ForeshadowingWorkflowTests.test_pending_resolution_is_applied_only_after_chapter_save_signal) ... ok
+test_plain_text_fallback_diagnostic_reports_session_count (test_foreshadowing_workflow.ForeshadowingWorkflowTests.test_plain_text_fallback_diagnostic_reports_session_count) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.094s
+
+OK
+
+[55/112] test_history_context.py
+test_atomic_allocation_counts_entries_not_markdown_headings (test_history_context.HistoryContextTests.test_atomic_allocation_counts_entries_not_markdown_headings) ... ok
+test_config_migration_preserves_explicit_zero_even_with_merged_defaults (test_history_context.HistoryContextTests.test_config_migration_preserves_explicit_zero_even_with_merged_defaults) ... ok
+test_expansion_and_retry_use_same_resolved_policy_and_report_missing (test_history_context.HistoryContextTests.test_expansion_and_retry_use_same_resolved_policy_and_report_missing) ... ok
+test_missing_recent_summary_does_not_backfill_from_outside_range (test_history_context.HistoryContextTests.test_missing_recent_summary_does_not_backfill_from_outside_range) ... ok
+test_non_history_sections_are_reserved_and_entries_stay_whole (test_history_context.HistoryContextTests.test_non_history_sections_are_reserved_and_entries_stay_whole) ... ok
+test_policy_follows_strategy_and_preserves_custom_count (test_history_context.HistoryContextTests.test_policy_follows_strategy_and_preserves_custom_count) ... ok
+test_zero_never_includes_summaries (test_history_context.HistoryContextTests.test_zero_never_includes_summaries) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 0.174s
+
+OK
+
+[56/112] test_icon_assets.py
+test_all_runtime_fonts_are_bundled (test_icon_assets.IconAssetTests.test_all_runtime_fonts_are_bundled) ... ok
+test_material_symbol_fonts_are_part_of_runtime_bundle (test_icon_assets.IconAssetTests.test_material_symbol_fonts_are_part_of_runtime_bundle) ... ok
+test_runtime_font_directory_is_inside_public_assets (test_icon_assets.IconAssetTests.test_runtime_font_directory_is_inside_public_assets) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.001s
+
+OK
+
+[57/112] test_inspector.py
+test_characters_are_ranked_by_current_chapter_frequency (test_inspector.InspectorTests.test_characters_are_ranked_by_current_chapter_frequency) ... ok
+test_equal_frequency_keeps_existing_order (test_inspector.InspectorTests.test_equal_frequency_keeps_existing_order) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.000s
+
+OK
+
+[58/112] test_legacy_import_fixture.py
+test_fixture_bytes_match_locked_manifest (test_legacy_import_fixture.LegacyImportFixtureTests.test_fixture_bytes_match_locked_manifest) ... ok
+test_legacy_import_contract_is_minimal_and_self_contained (test_legacy_import_fixture.LegacyImportFixtureTests.test_legacy_import_contract_is_minimal_and_self_contained) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.005s
+
+OK
+
+[59/112] test_legacy_project_import_service.py
+test_import_copies_only_identity_and_ordered_chapter_markdown (test_legacy_project_import_service.LegacyProjectImportServiceTests.test_import_copies_only_identity_and_ordered_chapter_markdown) ... ok
+test_import_rechecks_source_before_writing_destination (test_legacy_project_import_service.LegacyProjectImportServiceTests.test_import_rechecks_source_before_writing_destination) ... ok
+test_import_rejects_destination_inside_source (test_legacy_project_import_service.LegacyProjectImportServiceTests.test_import_rejects_destination_inside_source) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.183s
+
+OK
+
+[60/112] test_length_policy.py
+test_every_length_band_is_classified (test_length_policy.LengthPolicyTests.test_every_length_band_is_classified) ... ok
+test_three_thousand_character_ranges_are_stable (test_length_policy.LengthPolicyTests.test_three_thousand_character_ranges_are_stable) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.000s
+
+OK
+
+[61/112] test_library_scopes.py
+test_default_chapters_and_separate_canon_controls (test_library_scopes.LibraryScopesTests.test_default_chapters_and_separate_canon_controls) ... ok
+test_explicit_reveal_switches_scope_and_clears_filter_without_opening (test_library_scopes.LibraryScopesTests.test_explicit_reveal_switches_scope_and_clears_filter_without_opening) ... ok
+test_flat_document_search_and_scope_aware_locate (test_library_scopes.LibraryScopesTests.test_flat_document_search_and_scope_aware_locate) ... ok
+test_flat_documents_and_fixed_style_shortcut (test_library_scopes.LibraryScopesTests.test_flat_documents_and_fixed_style_shortcut) ... ok
+test_group_click_keyboard_and_refresh_preserve_collapse (test_library_scopes.LibraryScopesTests.test_group_click_keyboard_and_refresh_preserve_collapse) ... ok
+test_keyboard_activation_opens_selected_document (test_library_scopes.LibraryScopesTests.test_keyboard_activation_opens_selected_document) ... ok
+test_narrow_themes_large_font_controls_fit (test_library_scopes.LibraryScopesTests.test_narrow_themes_large_font_controls_fit) ... ok
+test_project_switch_clears_old_search_and_selection (test_library_scopes.LibraryScopesTests.test_project_switch_clears_old_search_and_selection) ... ok
+test_search_and_scroll_survive_scope_switch_and_refresh (test_library_scopes.LibraryScopesTests.test_search_and_scroll_survive_scope_switch_and_refresh) ... ok
+test_system_badges_survive_narrow_width_and_refresh (test_library_scopes.LibraryScopesTests.test_system_badges_survive_narrow_width_and_refresh) ... ok
+
+----------------------------------------------------------------------
+Ran 10 tests in 1.367s
+
+OK
+
+[62/112] test_main_window.py
+test_current_delete_chooses_next_then_previous (test_main_window.MainWindowDeleteBehaviorTests.test_current_delete_chooses_next_then_previous) ... ok
+test_delete_shortcut_does_not_overlap_editor_word_delete (test_main_window.MainWindowDeleteBehaviorTests.test_delete_shortcut_does_not_overlap_editor_word_delete) ... ok
+test_non_current_delete_does_not_choose_a_fallback (test_main_window.MainWindowDeleteBehaviorTests.test_non_current_delete_does_not_choose_a_fallback) ... ok
+test_trash_is_a_navigation_action_not_a_workspace_route (test_main_window.MainWindowDeleteBehaviorTests.test_trash_is_a_navigation_action_not_a_workspace_route) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.000s
+
+OK
+
+[63/112] test_memory_budget_policy.py
+test_builder_and_sender_agree_at_exact_admission_boundary (test_memory_budget_policy.MemoryBudgetPolicyTests.test_builder_and_sender_agree_at_exact_admission_boundary) ... ok
+test_estimate_covers_actual_envelope_at_multiline_and_midword_boundaries (test_memory_budget_policy.MemoryBudgetPolicyTests.test_estimate_covers_actual_envelope_at_multiline_and_midword_boundaries) ... ok
+test_expired_late_fact_is_not_cached_and_run_summary_is_redacted (test_memory_budget_policy.MemoryBudgetPolicyTests.test_expired_late_fact_is_not_cached_and_run_summary_is_redacted) ... ok
+test_fixed_context_overflow_fails_before_any_reduction (test_memory_budget_policy.MemoryBudgetPolicyTests.test_fixed_context_overflow_fails_before_any_reduction) ... ok
+test_incomplete_reduction_cache_is_not_reused (test_memory_budget_policy.MemoryBudgetPolicyTests.test_incomplete_reduction_cache_is_not_reused) ... ok
+test_low_budget_splits_all_text_instead_of_late_sender_rejection (test_memory_budget_policy.MemoryBudgetPolicyTests.test_low_budget_splits_all_text_instead_of_late_sender_rejection) ... ok
+test_missing_reduction_evidence_is_rejected_before_proposal_or_cache (test_memory_budget_policy.MemoryBudgetPolicyTests.test_missing_reduction_evidence_is_rejected_before_proposal_or_cache) ... ok
+test_model_window_and_reserve_constrain_workflow_before_any_request (test_memory_budget_policy.MemoryBudgetPolicyTests.test_model_window_and_reserve_constrain_workflow_before_any_request) ... ok
+test_non_converging_round_stops_without_repeated_rounds (test_memory_budget_policy.MemoryBudgetPolicyTests.test_non_converging_round_stops_without_repeated_rounds) ... ok
+test_retry_reuses_completed_facts_after_task_timeout (test_memory_budget_policy.MemoryBudgetPolicyTests.test_retry_reuses_completed_facts_after_task_timeout) ... ok
+test_selected_canon_is_never_cut_to_twelve_thousand_characters (test_memory_budget_policy.MemoryBudgetPolicyTests.test_selected_canon_is_never_cut_to_twelve_thousand_characters) ... ok
+test_timeout_configuration_is_bounded_and_defaults_are_conservative (test_memory_budget_policy.MemoryBudgetPolicyTests.test_timeout_configuration_is_bounded_and_defaults_are_conservative) ... ok
+test_cancel_takes_precedence_over_expired_deadline (test_memory_budget_policy.MemoryTransportDeadlineTests.test_cancel_takes_precedence_over_expired_deadline) ... ok
+test_expiration_after_missing_receipt_does_not_launch_retry (test_memory_budget_policy.MemoryTransportDeadlineTests.test_expiration_after_missing_receipt_does_not_launch_retry) ... ok
+test_probe_expiration_stops_before_business_generation (test_memory_budget_policy.MemoryTransportDeadlineTests.test_probe_expiration_stops_before_business_generation) ... ok
+test_probe_generation_and_receipt_retry_share_remaining_time (test_memory_budget_policy.MemoryTransportDeadlineTests.test_probe_generation_and_receipt_retry_share_remaining_time) ... ok
+test_report_keeps_run_and_request_identity_without_task_text (test_memory_budget_policy.MemoryTransportDeadlineTests.test_report_keeps_run_and_request_identity_without_task_text) ... ok
+
+----------------------------------------------------------------------
+Ran 17 tests in 0.979s
+
+OK
+
+[64/112] test_memory_checkpoints.py
+test_all_completed_batches_can_rebuild_missing_aggregate_without_ai_reduction (test_memory_checkpoints.MemoryCheckpointTests.test_all_completed_batches_can_rebuild_missing_aggregate_without_ai_reduction) ... ok
+test_bad_wire_response_never_creates_a_checkpoint (test_memory_checkpoints.MemoryCheckpointTests.test_bad_wire_response_never_creates_a_checkpoint) ... ok
+test_batch_identity_binds_order_contents_protocol_and_model_configuration (test_memory_checkpoints.MemoryCheckpointTests.test_batch_identity_binds_order_contents_protocol_and_model_configuration) ... ok
+test_cancel_and_timeout_preserve_prior_batch_but_never_save_late_batch (test_memory_checkpoints.MemoryCheckpointTests.test_cancel_and_timeout_preserve_prior_batch_but_never_save_late_batch) ... ok
+test_corrupt_or_incomplete_checkpoint_is_recomputed (test_memory_checkpoints.MemoryCheckpointTests.test_corrupt_or_incomplete_checkpoint_is_recomputed) ... ok
+test_expiration_while_loading_proposal_cache_does_not_return_it_for_review (test_memory_checkpoints.MemoryCheckpointTests.test_expiration_while_loading_proposal_cache_does_not_return_it_for_review) ... ok
+test_failure_resume_calls_only_missing_batches_and_preserves_project (test_memory_checkpoints.MemoryCheckpointTests.test_failure_resume_calls_only_missing_batches_and_preserves_project) ... ok
+test_proposal_cache_invalidates_same_ids_with_changed_fact_semantics (test_memory_checkpoints.MemoryCheckpointTests.test_proposal_cache_invalidates_same_ids_with_changed_fact_semantics) ... ok
+test_refresh_bypasses_every_batch_checkpoint (test_memory_checkpoints.MemoryCheckpointTests.test_refresh_bypasses_every_batch_checkpoint) ... ok
+test_state_or_canon_change_reuses_context_independent_completed_batch (test_memory_checkpoints.MemoryCheckpointTests.test_state_or_canon_change_reuses_context_independent_completed_batch) ... ok
+test_unknown_final_reference_never_creates_proposal_cache (test_memory_checkpoints.MemoryCheckpointTests.test_unknown_final_reference_never_creates_proposal_cache) ... ok
+test_compact_prompt_uses_exact_full_transport_budget (test_memory_checkpoints.MemoryWireTests.test_compact_prompt_uses_exact_full_transport_budget) ... ok
+test_compact_rows_retain_every_fact_field_order_anchor_and_unknown (test_memory_checkpoints.MemoryWireTests.test_compact_rows_retain_every_fact_field_order_anchor_and_unknown) ... ok
+test_cross_request_unknown_full_id_and_malformed_references_are_rejected (test_memory_checkpoints.MemoryWireTests.test_cross_request_unknown_full_id_and_malformed_references_are_rejected) ... ok
+test_later_round_remaps_shared_evidence_without_rewriting_claim_text (test_memory_checkpoints.MemoryWireTests.test_later_round_remaps_shared_evidence_without_rewriting_claim_text) ... ok
+test_only_evidence_fields_are_decoded_even_when_text_looks_like_an_alias (test_memory_checkpoints.MemoryWireTests.test_only_evidence_fields_are_decoded_even_when_text_looks_like_an_alias) ... ok
+test_projection_reduces_estimated_payload_without_cropping_values (test_memory_checkpoints.MemoryWireTests.test_projection_reduces_estimated_payload_without_cropping_values) ... ok
+
+----------------------------------------------------------------------
+Ran 17 tests in 1.196s
+
+OK
+
+[65/112] test_memory_incremental.py
+test_cancel_during_cache_rebase_does_not_return_cached_ledger (test_memory_incremental.IncrementalFactsTests.test_cancel_during_cache_rebase_does_not_return_cached_ledger) ... ok
+test_cancelled_late_result_is_not_cached (test_memory_incremental.IncrementalFactsTests.test_cancelled_late_result_is_not_cached) ... ok
+test_changed_neighbor_invalidates_equal_chunk_and_preserves_distant_chunks (test_memory_incremental.IncrementalFactsTests.test_changed_neighbor_invalidates_equal_chunk_and_preserves_distant_chunks) ... ok
+test_head_insert_reuses_facts_rebases_ids_ranges_and_never_writes_project (test_memory_incremental.IncrementalFactsTests.test_head_insert_reuses_facts_rebases_ids_ranges_and_never_writes_project) ... ok
+test_incremental_workflow_never_reuses_old_proposal_or_accepts_stale_source (test_memory_incremental.IncrementalFactsTests.test_incremental_workflow_never_reuses_old_proposal_or_accepts_stale_source) ... ok
+test_local_edit_and_deletion_preserve_only_exact_evidence (test_memory_incremental.IncrementalFactsTests.test_local_edit_and_deletion_preserve_only_exact_evidence) ... ok
+test_serial_parallel_share_incremental_cache_and_order (test_memory_incremental.IncrementalFactsTests.test_serial_parallel_share_incremental_cache_and_order) ... ok
+test_title_configuration_and_force_refresh_invalidate_extraction (test_memory_incremental.IncrementalFactsTests.test_title_configuration_and_force_refresh_invalidate_extraction) ... ok
+test_cache_stores_relative_positions_without_fact_ids_or_source_text (test_memory_incremental.RelativeFactCacheTests.test_cache_stores_relative_positions_without_fact_ids_or_source_text) ... ok
+test_changed_pronoun_context_cannot_reuse_equal_evidence (test_memory_incremental.RelativeFactCacheTests.test_changed_pronoun_context_cannot_reuse_equal_evidence) ... ok
+test_corruption_wrong_identity_and_old_cache_are_misses (test_memory_incremental.RelativeFactCacheTests.test_corruption_wrong_identity_and_old_cache_are_misses) ... ok
+test_invalid_relative_offsets_are_rejected_even_with_consistent_checksum (test_memory_incremental.RelativeFactCacheTests.test_invalid_relative_offsets_are_rejected_even_with_consistent_checksum) ... ok
+test_position_sensitive_free_text_is_never_rewritten_or_moved (test_memory_incremental.RelativeFactCacheTests.test_position_sensitive_free_text_is_never_rewritten_or_moved) ... ok
+test_protocol_version_and_transport_context_changes_are_misses (test_memory_incremental.RelativeFactCacheTests.test_protocol_version_and_transport_context_changes_are_misses) ... ok
+test_repeated_paragraphs_cannot_move_cached_evidence (test_memory_incremental.RelativeFactCacheTests.test_repeated_paragraphs_cannot_move_cached_evidence) ... ok
+test_all_context_and_task_wrapping_are_budgeted_without_truncating (test_memory_incremental.StableMemoryChunkTests.test_all_context_and_task_wrapping_are_budgeted_without_truncating) ... ok
+test_context_excerpt_is_bounded_but_whole_neighbor_hash_is_bound (test_memory_incremental.StableMemoryChunkTests.test_context_excerpt_is_bounded_but_whole_neighbor_hash_is_bound) ... ok
+test_head_insertion_resynchronizes_most_boundaries (test_memory_incremental.StableMemoryChunkTests.test_head_insertion_resynchronizes_most_boundaries) ... ok
+test_split_paragraph_and_duplicate_context_remain_snapshot_bound (test_memory_incremental.StableMemoryChunkTests.test_split_paragraph_and_duplicate_context_remain_snapshot_bound) ... ok
+test_stable_chunks_cover_every_paragraph_with_bounded_overlap (test_memory_incremental.StableMemoryChunkTests.test_stable_chunks_cover_every_paragraph_with_bounded_overlap) ... ok
+
+----------------------------------------------------------------------
+Ran 20 tests in 2.875s
+
+OK
+
+[66/112] test_memory_location_evidence.py
+test_actor_adverbs_and_names_containing_conjunctions (test_memory_location_evidence.LocationEvidenceTests.test_actor_adverbs_and_names_containing_conjunctions) ... ok
+test_compact_destination_matches_deictic_location_description (test_memory_location_evidence.LocationEvidenceTests.test_compact_destination_matches_deictic_location_description) ... ok
+test_diagnostics_name_target_value_and_evidence (test_memory_location_evidence.LocationEvidenceTests.test_diagnostics_name_target_value_and_evidence) ... ok
+test_direct_and_split_location_values_use_same_normalization (test_memory_location_evidence.LocationEvidenceTests.test_direct_and_split_location_values_use_same_normalization) ... ok
+test_direct_arrivals_across_fact_categories (test_memory_location_evidence.LocationEvidenceTests.test_direct_arrivals_across_fact_categories) ... ok
+test_existing_first_chapter_named_group_arrival_remains_supported (test_memory_location_evidence.LocationEvidenceTests.test_existing_first_chapter_named_group_arrival_remains_supported) ... ok
+test_joint_named_subject_split_predicate_and_destination (test_memory_location_evidence.LocationEvidenceTests.test_joint_named_subject_split_predicate_and_destination) ... ok
+test_joint_subject_does_not_transfer_other_actors_or_unrealized_arrival (test_memory_location_evidence.LocationEvidenceTests.test_joint_subject_does_not_transfer_other_actors_or_unrealized_arrival) ... ok
+test_negative_planned_and_other_actor_arrivals_block (test_memory_location_evidence.LocationEvidenceTests.test_negative_planned_and_other_actor_arrivals_block) ... ok
+test_normalization_does_not_bypass_arrival_or_anchor_checks (test_memory_location_evidence.LocationEvidenceTests.test_normalization_does_not_bypass_arrival_or_anchor_checks) ... ok
+test_normalization_preserves_direction_and_qualifiers (test_memory_location_evidence.LocationEvidenceTests.test_normalization_preserves_direction_and_qualifiers) ... ok
+test_other_character_and_unrelated_place_block (test_memory_location_evidence.LocationEvidenceTests.test_other_character_and_unrelated_place_block) ... ok
+test_qualified_destination_and_non_negative_tunmo (test_memory_location_evidence.LocationEvidenceTests.test_qualified_destination_and_non_negative_tunmo) ... ok
+test_real_failed_proposals_support_local_empty_ground_reference (test_memory_location_evidence.LocationEvidenceTests.test_real_failed_proposals_support_local_empty_ground_reference) ... ok
+
+----------------------------------------------------------------------
+Ran 14 tests in 0.012s
+
+OK
+
+[67/112] test_memory_parallel.py
+test_cancel_terminates_two_real_process_trees_before_clients_are_released (test_memory_parallel.MemoryClientIsolationTests.test_cancel_terminates_two_real_process_trees_before_clients_are_released) ... ok
+test_fork_snapshots_options_and_never_copies_probe_or_workspace (test_memory_parallel.MemoryClientIsolationTests.test_fork_snapshots_options_and_never_copies_probe_or_workspace) ... ok
+test_real_client_transport_reports_are_distinct_and_workspace_cleanup_follows_join (test_memory_parallel.MemoryClientIsolationTests.test_real_client_transport_reports_are_distinct_and_workspace_cleanup_follows_join) ... ok
+test_fact_completion_order_does_not_change_ledger_and_warm_run_needs_no_pool (test_memory_parallel.MemoryParallelWorkflowTests.test_fact_completion_order_does_not_change_ledger_and_warm_run_needs_no_pool) ... ok
+test_parallel_failure_preserves_only_completed_fact_and_batch_checkpoints (test_memory_parallel.MemoryParallelWorkflowTests.test_parallel_failure_preserves_only_completed_fact_and_batch_checkpoints) ... ok
+test_parallel_reduction_uses_ordered_checkpoints_and_final_proposal_waits (test_memory_parallel.MemoryParallelWorkflowTests.test_parallel_reduction_uses_ordered_checkpoints_and_final_proposal_waits) ... ok
+test_workflow_finishes_all_facts_before_proposal_and_closes_owned_clients (test_memory_parallel.MemoryParallelWorkflowTests.test_workflow_finishes_all_facts_before_proposal_and_closes_owned_clients) ... ok
+test_cancel_and_deadline_join_both_lanes_and_ignore_late_success (test_memory_parallel.MemorySchedulerTests.test_cancel_and_deadline_join_both_lanes_and_ignore_late_success) ... ok
+test_capacity_rejection_retries_only_unfinished_jobs_once_serially (test_memory_parallel.MemorySchedulerTests.test_capacity_rejection_retries_only_unfinished_jobs_once_serially) ... ok
+test_client_creation_failure_cleans_partial_pool_and_falls_back (test_memory_parallel.MemorySchedulerTests.test_client_creation_failure_cleans_partial_pool_and_falls_back) ... ok
+test_concurrency_config_is_bounded_and_defaults_to_serial (test_memory_parallel.MemorySchedulerTests.test_concurrency_config_is_bounded_and_defaults_to_serial) ... ok
+test_failure_stops_queue_joins_peer_and_does_not_retry (test_memory_parallel.MemorySchedulerTests.test_failure_stops_queue_joins_peer_and_does_not_retry) ... ok
+test_second_capacity_rejection_stops_without_an_unbounded_retry (test_memory_parallel.MemorySchedulerTests.test_second_capacity_rejection_stops_without_an_unbounded_retry) ... ok
+test_serial_default_and_single_job_do_not_create_clients (test_memory_parallel.MemorySchedulerTests.test_serial_default_and_single_job_do_not_create_clients) ... ok
+test_shared_client_factory_is_rejected_without_cleaning_captured_client (test_memory_parallel.MemorySchedulerTests.test_shared_client_factory_is_rejected_without_cleaning_captured_client) ... ok
+test_two_independent_lanes_and_out_of_order_completion_are_bounded (test_memory_parallel.MemorySchedulerTests.test_two_independent_lanes_and_out_of_order_completion_are_bounded) ... ok
+
+----------------------------------------------------------------------
+Ran 16 tests in 1.407s
+
+OK
+
+[68/112] test_memory_performance.py
+test_cancel_during_extraction_does_not_cache_or_continue (test_memory_performance.MemoryPerformanceTests.test_cancel_during_extraction_does_not_cache_or_continue) ... ok
+test_custom_budget_low_input_and_long_chapters_keep_bounded_chunks (test_memory_performance.MemoryPerformanceTests.test_custom_budget_low_input_and_long_chapters_keep_bounded_chunks) ... ok
+test_exact_prompt_budget_can_reject_adaptive_candidate (test_memory_performance.MemoryPerformanceTests.test_exact_prompt_budget_can_reject_adaptive_candidate) ... ok
+test_medium_chapter_reduces_requests_without_losing_text_or_anchors (test_memory_performance.MemoryPerformanceTests.test_medium_chapter_reduces_requests_without_losing_text_or_anchors) ... ok
+test_phase_times_failure_and_ignores_display_failure (test_memory_performance.MemoryPerformanceTests.test_phase_times_failure_and_ignores_display_failure) ... ok
+test_progress_cache_reuse_and_no_project_write (test_memory_performance.MemoryPerformanceTests.test_progress_cache_reuse_and_no_project_write) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.264s
+
+OK
+
+[69/112] test_memory_recovery.py
+test_targeted_retry_feedback_and_full_refresh_do_not_write_project (test_memory_recovery.MemoryRetryTests.test_targeted_retry_feedback_and_full_refresh_do_not_write_project) ... ok
+test_global_conflicts_and_missing_independent_summary_cannot_be_bypassed (test_memory_recovery.PartialMemoryTests.test_global_conflicts_and_missing_independent_summary_cannot_be_bypassed) ... ok
+test_independent_subset_rebuilds_summary_and_keeps_original_immutable (test_memory_recovery.PartialMemoryTests.test_independent_subset_rebuilds_summary_and_keeps_original_immutable) ... ok
+test_partial_commit_retains_guards_and_excluded_state (test_memory_recovery.PartialMemoryTests.test_partial_commit_retains_guards_and_excluded_state) ... ok
+test_shared_evidence_excludes_dependent_updates (test_memory_recovery.PartialMemoryTests.test_shared_evidence_excludes_dependent_updates) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.196s
+
+OK
+
+[70/112] test_memory_recovery_ui.py
+test_narrow_recovery_and_partial_preview_in_both_themes (test_memory_recovery_ui.MemoryRecoveryLayoutTests.test_narrow_recovery_and_partial_preview_in_both_themes) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.110s
+
+OK
+
+[71/112] test_native_caption.py
+test_caption_pixels_change_without_resizing (test_native_caption.NativeCaptionIntegrationTests.test_caption_pixels_change_without_resizing) ... skipped 'Requires the native Windows Qt platform'
+test_real_dwm_state_for_main_window_and_quick_dialog (test_native_caption.NativeCaptionIntegrationTests.test_real_dwm_state_for_main_window_and_quick_dialog) ... skipped 'Requires the native Windows Qt platform'
+test_backend_dark_light_inactive_and_accessibility (test_native_caption.NativeCaptionTests.test_backend_dark_light_inactive_and_accessibility) ... ok
+test_backend_repaints_once_after_supported_attributes_including_high_contrast (test_native_caption.NativeCaptionTests.test_backend_repaints_once_after_supported_attributes_including_high_contrast) ... ok
+test_colorref_channel_order (test_native_caption.NativeCaptionTests.test_colorref_channel_order) ... ok
+test_destroyed_window_is_safe_with_pending_show_update (test_native_caption.NativeCaptionTests.test_destroyed_window_is_safe_with_pending_show_update) ... ok
+test_existing_and_future_dialogs_follow_theme_and_handle_changes (test_native_caption.NativeCaptionTests.test_existing_and_future_dialogs_follow_theme_and_handle_changes) ... ok
+test_frame_refresh_events_do_not_reenter_or_schedule_another_refresh (test_native_caption.NativeCaptionTests.test_frame_refresh_events_do_not_reenter_or_schedule_another_refresh) ... ok
+test_scheduled_refreshes_are_coalesced (test_native_caption.NativeCaptionTests.test_scheduled_refreshes_are_coalesced) ... ok
+
+----------------------------------------------------------------------
+Ran 9 tests in 0.076s
+
+OK (skipped=2)
+
+[72/112] test_navigation.py
+test_theme_reload_does_not_leave_settings_label_active (test_navigation.PrimaryNavigationStyleTests.test_theme_reload_does_not_leave_settings_label_active) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.045s
+
+OK
+
+[73/112] test_packaging_runtime.py
+test_entry_self_test_runs_outside_workspace_without_creating_profile (test_packaging_runtime.PackagedResourceTests.test_entry_self_test_runs_outside_workspace_without_creating_profile) ... ok
+test_frozen_resources_resolve_from_meipass (test_packaging_runtime.PackagedResourceTests.test_frozen_resources_resolve_from_meipass) ... ok
+test_required_runtime_resources_are_present_in_source_tree (test_packaging_runtime.PackagedResourceTests.test_required_runtime_resources_are_present_in_source_tree) ... ok
+test_source_resources_resolve_from_workspace_root (test_packaging_runtime.PackagedResourceTests.test_source_resources_resolve_from_workspace_root) ... ok
+test_third_party_license_texts_are_not_placeholders (test_packaging_runtime.PackagedResourceTests.test_third_party_license_texts_are_not_placeholders) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.378s
+
+OK
+
+[74/112] test_project_data.py
+test_canon_entry_factory_creates_all_supported_templates (test_project_data.ProjectDataStoreTests.test_canon_entry_factory_creates_all_supported_templates) ... ok
+test_canon_restore_rename_updates_power_registry_and_timeline_conflicts (test_project_data.ProjectDataStoreTests.test_canon_restore_rename_updates_power_registry_and_timeline_conflicts) ... ok
+test_canon_trash_permanent_delete_and_core_rule_protection (test_project_data.ProjectDataStoreTests.test_canon_trash_permanent_delete_and_core_rule_protection) ... ok
+test_canon_trash_round_trip_covers_world_power_and_timeline (test_project_data.ProjectDataStoreTests.test_canon_trash_round_trip_covers_world_power_and_timeline) ... ok
+test_chapter_id_conflict_is_case_insensitive (test_project_data.ProjectDataStoreTests.test_chapter_id_conflict_is_case_insensitive) ... ok
+test_character_restore_conflict_can_rename_and_trash_can_be_deleted_forever (test_project_data.ProjectDataStoreTests.test_character_restore_conflict_can_rename_and_trash_can_be_deleted_forever) ... ok
+test_common_reads_and_new_file_writes_use_one_facade (test_project_data.ProjectDataStoreTests.test_common_reads_and_new_file_writes_use_one_facade) ... ok
+test_delete_chapter_moves_file_and_summary_to_trash (test_project_data.ProjectDataStoreTests.test_delete_chapter_moves_file_and_summary_to_trash) ... ok
+test_delete_chapter_rejects_path_traversal_and_rolls_back_metadata_failure (test_project_data.ProjectDataStoreTests.test_delete_chapter_rejects_path_traversal_and_rolls_back_metadata_failure) ... ok
+test_delete_character_moves_card_to_trash_and_keeps_story_memory (test_project_data.ProjectDataStoreTests.test_delete_character_moves_card_to_trash_and_keeps_story_memory) ... ok
+test_delete_character_rejects_path_traversal (test_project_data.ProjectDataStoreTests.test_delete_character_rejects_path_traversal) ... ok
+test_deleted_canon_is_removed_from_related_context_and_restore_readds_it (test_project_data.ProjectDataStoreTests.test_deleted_canon_is_removed_from_related_context_and_restore_readds_it) ... ok
+test_foreshadowing_can_be_updated_and_recycled_independently (test_project_data.ProjectDataStoreTests.test_foreshadowing_can_be_updated_and_recycled_independently) ... ok
+test_foreshadowing_resolution_is_batched_idempotent_and_reversible (test_project_data.ProjectDataStoreTests.test_foreshadowing_resolution_is_batched_idempotent_and_reversible) ... ok
+test_legacy_foreshadowing_is_migrated_to_stable_notes (test_project_data.ProjectDataStoreTests.test_legacy_foreshadowing_is_migrated_to_stable_notes) ... ok
+test_memory_commit_rolls_back_when_second_file_write_fails (test_project_data.ProjectDataStoreTests.test_memory_commit_rolls_back_when_second_file_write_fails) ... ok
+test_new_project_seeds_system_templates_and_registry (test_project_data.ProjectDataStoreTests.test_new_project_seeds_system_templates_and_registry) ... ok
+test_next_chapter_id_uses_maximum_number_and_skips_conflicts (test_project_data.ProjectDataStoreTests.test_next_chapter_id_uses_maximum_number_and_skips_conflicts) ... ok
+test_project_style_guide_is_seeded_but_inactive_until_authored (test_project_data.ProjectDataStoreTests.test_project_style_guide_is_seeded_but_inactive_until_authored) ... ok
+test_related_canon_lookup_reuses_cache_until_a_source_changes (test_project_data.ProjectDataStoreTests.test_related_canon_lookup_reuses_cache_until_a_source_changes) ... ok
+test_related_canon_separates_core_selected_and_background_power (test_project_data.ProjectDataStoreTests.test_related_canon_separates_core_selected_and_background_power) ... ok
+test_replace_chapter_body_preserves_custom_sections_after正文 (test_project_data.ProjectDataStoreTests.test_replace_chapter_body_preserves_custom_sections_after正文) ... ok
+test_restore_can_rename_when_original_id_is_occupied (test_project_data.ProjectDataStoreTests.test_restore_can_rename_when_original_id_is_occupied) ... ok
+test_restore_rejects_existing_original_path_and_permanent_delete_removes_entry (test_project_data.ProjectDataStoreTests.test_restore_rejects_existing_original_path_and_permanent_delete_removes_entry) ... ok
+test_sanitize_filename_is_shared_and_stable (test_project_data.ProjectDataStoreTests.test_sanitize_filename_is_shared_and_stable) ... ok
+test_timeline_notes_start_empty_and_preserve_existing_content (test_project_data.ProjectDataStoreTests.test_timeline_notes_start_empty_and_preserve_existing_content) ... ok
+
+----------------------------------------------------------------------
+Ran 26 tests in 1.571s
+
+OK
+
+[75/112] test_project_lifecycle_controller.py
+test_load_rejects_running_task_and_unsaved_document (test_project_lifecycle_controller.ProjectLifecycleControllerTests.test_load_rejects_running_task_and_unsaved_document) ... ok
+test_load_saves_switch_and_remembers_project (test_project_lifecycle_controller.ProjectLifecycleControllerTests.test_load_saves_switch_and_remembers_project) ... ok
+test_recent_projects_are_deduplicated_and_cleaned (test_project_lifecycle_controller.ProjectLifecycleControllerTests.test_recent_projects_are_deduplicated_and_cleaned) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.143s
+
+OK
+
+[76/112] test_project_migrations.py
+test_current_schema_missing_required_file_is_not_silently_repaired (test_project_migrations.ProjectMigrationTests.test_current_schema_missing_required_file_is_not_silently_repaired) ... ok
+test_future_schema_is_rejected_without_writes (test_project_migrations.ProjectMigrationTests.test_future_schema_is_rejected_without_writes) ... ok
+test_interrupted_migration_is_recovered_before_retry (test_project_migrations.ProjectMigrationTests.test_interrupted_migration_is_recovered_before_retry) ... ok
+test_legacy_project_migrates_once_with_backup_and_preserves_prose (test_project_migrations.ProjectMigrationTests.test_legacy_project_migrates_once_with_backup_and_preserves_prose) ... ok
+test_new_project_is_current_and_needs_no_migration (test_project_migrations.ProjectMigrationTests.test_new_project_is_current_and_needs_no_migration) ... ok
+test_recovery_journal_cannot_target_author_chapters (test_project_migrations.ProjectMigrationTests.test_recovery_journal_cannot_target_author_chapters) ... ok
+test_write_failure_restores_all_existing_and_new_files (test_project_migrations.ProjectMigrationTests.test_write_failure_restores_all_existing_and_new_files) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 0.484s
+
+OK
+
+[77/112] test_project_session.py
+test_load_does_not_recreate_retired_style_guide (test_project_session.ProjectSessionTests.test_load_does_not_recreate_retired_style_guide) ... ok
+test_load_publishes_project_and_data_changes (test_project_session.ProjectSessionTests.test_load_publishes_project_and_data_changes) ... ok
+test_load_rejects_non_project_directory (test_project_session.ProjectSessionTests.test_load_rejects_non_project_directory) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.107s
+
+OK
+
+[78/112] test_prompt_builder.py
+test_blank_style_template_is_not_added_to_expansion_prompt (test_prompt_builder.PromptBuilderTests.test_blank_style_template_is_not_added_to_expansion_prompt) ... ok
+test_check_prompt_requires_structured_report (test_prompt_builder.PromptBuilderTests.test_check_prompt_requires_structured_report) ... ok
+test_expansion_prompt_can_omit_foreshadowing (test_prompt_builder.PromptBuilderTests.test_expansion_prompt_can_omit_foreshadowing) ... ok
+test_expansion_prompt_contains_only_selected_foreshadowing (test_prompt_builder.PromptBuilderTests.test_expansion_prompt_contains_only_selected_foreshadowing) ... ok
+test_expansion_prompt_uses_each_explicit_target (test_prompt_builder.PromptBuilderTests.test_expansion_prompt_uses_each_explicit_target) ... ok
+test_expansion_prompt_uses_outline_without_current_body (test_prompt_builder.PromptBuilderTests.test_expansion_prompt_uses_outline_without_current_body) ... ok
+test_expansion_prompt_uses_scoped_context_and_planning_characters (test_prompt_builder.PromptBuilderTests.test_expansion_prompt_uses_scoped_context_and_planning_characters) ... ok
+test_expansion_retry_prompt_explicitly_corrects_agent_preamble (test_prompt_builder.PromptBuilderTests.test_expansion_retry_prompt_explicitly_corrects_agent_preamble) ... ok
+test_prompt_history_window_is_configurable (test_prompt_builder.PromptBuilderTests.test_prompt_history_window_is_configurable) ... ok
+test_repair_prompt_is_minimal_and_anchored (test_prompt_builder.PromptBuilderTests.test_repair_prompt_is_minimal_and_anchored) ... ok
+test_style_guide_is_applied_only_to_novel_generation_prompts (test_prompt_builder.PromptBuilderTests.test_style_guide_is_applied_only_to_novel_generation_prompts) ... ok
+test_supplement_prompt_uses_application_anchor_ids (test_prompt_builder.PromptBuilderTests.test_supplement_prompt_uses_application_anchor_ids) ... ok
+test_write_prompt_contains_task_contract_and_context (test_prompt_builder.PromptBuilderTests.test_write_prompt_contains_task_contract_and_context) ... ok
+test_write_retry_prompt_explicitly_corrects_agent_preamble (test_prompt_builder.PromptBuilderTests.test_write_retry_prompt_explicitly_corrects_agent_preamble) ... ok
+
+----------------------------------------------------------------------
+Ran 14 tests in 0.373s
+
+OK
+
+[79/112] test_prose_review.py
+test_budget_failure_does_not_send_truncated_selection (test_prose_review.ProseReviewTests.test_budget_failure_does_not_send_truncated_selection) ... ok
+test_cancel_before_and_after_model_returns (test_prose_review.ProseReviewTests.test_cancel_before_and_after_model_returns) ... ok
+test_exception_roundtrip_and_malformed_file_fails_closed (test_prose_review.ProseReviewTests.test_exception_roundtrip_and_malformed_file_fails_closed) ... ok
+test_expansion_requires_entire_selection_and_growth (test_prose_review.ProseReviewTests.test_expansion_requires_entire_selection_and_growth) ... ok
+test_invalid_and_ambiguous_anchors_rejected (test_prose_review.ProseReviewTests.test_invalid_and_ambiguous_anchors_rejected) ... ok
+test_one_generation_call_style_and_request_injected_no_write (test_prose_review.ProseReviewTests.test_one_generation_call_style_and_request_injected_no_write) ... ok
+test_only_selected_range_changes_and_metadata_is_preserved (test_prose_review.ProseReviewTests.test_only_selected_range_changes_and_metadata_is_preserved) ... ok
+test_overlaps_rejected_before_any_change (test_prose_review.ProseReviewTests.test_overlaps_rejected_before_any_change) ... ok
+test_protocol_markup_rejected (test_prose_review.ProseReviewTests.test_protocol_markup_rejected) ... ok
+test_scope_rejects_metadata_and_oversized_text (test_prose_review.ProseReviewTests.test_scope_rejects_metadata_and_oversized_text) ... ok
+test_stale_source_and_malformed_patch_cannot_apply (test_prose_review.ProseReviewTests.test_stale_source_and_malformed_patch_cannot_apply) ... ok
+test_style_and_exception_changes_invalidate_task (test_prose_review.ProseReviewTests.test_style_and_exception_changes_invalidate_task) ... ok
+test_whitelist_suppresses_intersecting_patch_and_local_warning (test_prose_review.ProseReviewTests.test_whitelist_suppresses_intersecting_patch_and_local_warning) ... ok
+
+----------------------------------------------------------------------
+Ran 13 tests in 0.615s
+
+OK
+
+[80/112] test_prose_review_ui.py
+test_cancel_preserves_text_and_exceptions (test_prose_review_ui.ProseReviewUITests.test_cancel_preserves_text_and_exceptions) ... ok
+test_confirmed_unicode_patch_is_undoable (test_prose_review_ui.ProseReviewUITests.test_confirmed_unicode_patch_is_undoable) ... ok
+test_deferred_prose_review_retains_snapshot_until_user_opens (test_prose_review_ui.ProseReviewUITests.test_deferred_prose_review_retains_snapshot_until_user_opens) ... ok
+test_dialog_starts_unselected_and_exceptions_are_exclusive (test_prose_review_ui.ProseReviewUITests.test_dialog_starts_unselected_and_exceptions_are_exclusive) ... ok
+test_direct_unicode_range_replacement_preserves_surroundings (test_prose_review_ui.ProseReviewUITests.test_direct_unicode_range_replacement_preserves_surroundings) ... ok
+test_main_menu_selection_and_pending_result_availability (test_prose_review_ui.ProseReviewUITests.test_main_menu_selection_and_pending_result_availability) ... ok
+test_narrow_dialog_light_dark_and_large_font (test_prose_review_ui.ProseReviewUITests.test_narrow_dialog_light_dark_and_large_font) ... ok
+test_request_limit_keeps_dialog_open_with_error (test_prose_review_ui.ProseReviewUITests.test_request_limit_keeps_dialog_open_with_error) ... ok
+test_selected_task_captures_unicode_range_and_one_time_request (test_prose_review_ui.ProseReviewUITests.test_selected_task_captures_unicode_range_and_one_time_request) ... ok
+test_selection_outside_body_does_not_start (test_prose_review_ui.ProseReviewUITests.test_selection_outside_body_does_not_start) ... ok
+test_stale_after_dialog_preserves_text_and_exceptions (test_prose_review_ui.ProseReviewUITests.test_stale_after_dialog_preserves_text_and_exceptions) ... ok
+test_whitelist_requires_confirmation_and_preserves_original (test_prose_review_ui.ProseReviewUITests.test_whitelist_requires_confirmation_and_preserves_original) ... ok
+
+----------------------------------------------------------------------
+Ran 12 tests in 1.707s
+
+OK
+
+[81/112] test_prose_supplement.py
+test_insertion_points_are_paragraph_boundaries_with_stable_ids (test_prose_supplement.ProseSupplementTests.test_insertion_points_are_paragraph_boundaries_with_stable_ids) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.000s
+
+OK
+
+[82/112] test_pyside6_source_launcher.py
+test_launcher_targets_python_312 (test_pyside6_source_launcher.PySide6SourceLauncherTests.test_launcher_targets_python_312) ... ok
+test_root_launcher_uses_only_pyside6 (test_pyside6_source_launcher.PySide6SourceLauncherTests.test_root_launcher_uses_only_pyside6) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.000s
+
+OK
+
+[83/112] test_quick_access.py
+test_command_uses_existing_action_and_shortcut (test_quick_access.QuickAccessTests.test_command_uses_existing_action_and_shortcut) ... ok
+test_disabled_command_rechecks_live_availability (test_quick_access.QuickAccessTests.test_disabled_command_rechecks_live_availability) ... ok
+test_failed_save_prevents_quick_open (test_quick_access.QuickAccessTests.test_failed_save_prevents_quick_open) ... ok
+test_focus_directory_reopens_sidebar_and_selects_query (test_quick_access.QuickAccessTests.test_focus_directory_reopens_sidebar_and_selects_query) ... ok
+test_footer_opens_same_manager_and_flat_documents_are_searchable (test_quick_access.QuickAccessTests.test_footer_opens_same_manager_and_flat_documents_are_searchable) ... ok
+test_keyboard_selects_without_opening_until_enter (test_quick_access.QuickAccessTests.test_keyboard_selects_without_opening_until_enter) ... ok
+test_modal_escape_does_not_exit_focus_mode (test_quick_access.QuickAccessTests.test_modal_escape_does_not_exit_focus_mode) ... ok
+test_no_matches_and_large_inventory_are_bounded (test_quick_access.QuickAccessTests.test_no_matches_and_large_inventory_are_bounded) ... ok
+test_no_project_documents_explain_how_to_start (test_quick_access.QuickAccessTests.test_no_project_documents_explain_how_to_start) ... ok
+test_old_style_document_is_not_restored_as_startup_modal (test_quick_access.QuickAccessTests.test_old_style_document_is_not_restored_as_startup_modal) ... ok
+test_open_current_document_from_dashboard_returns_to_editor (test_quick_access.QuickAccessTests.test_open_current_document_from_dashboard_returns_to_editor) ... ok
+test_search_includes_hidden_canon_and_preserves_filter_until_activation (test_quick_access.QuickAccessTests.test_search_includes_hidden_canon_and_preserves_filter_until_activation) ... ok
+test_shortcut_opens_palette_and_can_switch_modes (test_quick_access.QuickAccessTests.test_shortcut_opens_palette_and_can_switch_modes) ... ok
+test_stale_deleted_and_outside_paths_cannot_open (test_quick_access.QuickAccessTests.test_stale_deleted_and_outside_paths_cannot_open) ... ok
+test_style_manager_cancel_leaves_all_style_files_unchanged (test_quick_access.QuickAccessTests.test_style_manager_cancel_leaves_all_style_files_unchanged) ... ok
+test_style_manager_confirmation_persists_requirements (test_quick_access.QuickAccessTests.test_style_manager_confirmation_persists_requirements) ... ok
+test_style_manager_conflict_keeps_draft_and_external_content (test_quick_access.QuickAccessTests.test_style_manager_conflict_keeps_draft_and_external_content) ... ok
+test_style_manager_preserves_draft_when_save_fails (test_quick_access.QuickAccessTests.test_style_manager_preserves_draft_when_save_fails) ... ok
+test_style_tree_and_quick_open_share_manager (test_quick_access.QuickAccessTests.test_style_tree_and_quick_open_share_manager) ... ok
+test_timeline_feature_is_searchable_without_a_file (test_quick_access.QuickAccessTests.test_timeline_feature_is_searchable_without_a_file) ... ok
+test_tokens_title_priority_and_literal_search (test_quick_access.QuickMatchingTests.test_tokens_title_priority_and_literal_search) ... ok
+
+----------------------------------------------------------------------
+Ran 21 tests in 13.268s
+
+OK
+
+[84/112] test_recent_projects.py
+test_missing_or_inaccessible_path_is_ignored (test_recent_projects.RecentProjectPathTests.test_missing_or_inaccessible_path_is_ignored) ... ok
+test_valid_project_path_is_accepted (test_recent_projects.RecentProjectPathTests.test_valid_project_path_is_accepted) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.045s
+
+OK
+
+[85/112] test_release_audit.py
+test_rejects_data_runtime_and_path_escape (test_release_audit.ReleaseAuditTests.test_rejects_data_runtime_and_path_escape) ... ok
+test_rejects_tampering_and_wrong_bundled_version (test_release_audit.ReleaseAuditTests.test_rejects_tampering_and_wrong_bundled_version) ... ok
+test_valid_bundle (test_release_audit.ReleaseAuditTests.test_valid_bundle) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.038s
+
+OK
+
+[86/112] test_settings_controller.py
+test_apply_normalizes_persists_and_updates_auto_save (test_settings_controller.SettingsControllerTests.test_apply_normalizes_persists_and_updates_auto_save) ... ok
+test_dsh_test_task_is_exposed_through_controller_signals (test_settings_controller.SettingsControllerTests.test_dsh_test_task_is_exposed_through_controller_signals) ... ok
+test_synchronize_discards_retired_update_metadata_without_saving (test_settings_controller.SettingsControllerTests.test_synchronize_discards_retired_update_metadata_without_saving) ... ok
+test_toggle_theme_emits_config_change (test_settings_controller.SettingsControllerTests.test_toggle_theme_emits_config_change) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.011s
+
+OK
+
+[87/112] test_settings_experience.py
+test_conditional_rows_and_custom_values_survive_tab_changes (test_settings_experience.SettingsExperienceTests.test_conditional_rows_and_custom_values_survive_tab_changes) ... ok
+test_draft_discard_and_staged_defaults (test_settings_experience.SettingsExperienceTests.test_draft_discard_and_staged_defaults) ... ok
+test_memory_concurrency_is_explicit_opt_in_and_survives_saved_config (test_settings_experience.SettingsExperienceTests.test_memory_concurrency_is_explicit_opt_in_and_survives_saved_config) ... ok
+test_memory_timeout_is_independent_and_survives_draft_and_discard (test_settings_experience.SettingsExperienceTests.test_memory_timeout_is_independent_and_survives_draft_and_discard) ... ok
+test_memory_timeout_remains_visible_at_narrow_width_and_large_type (test_settings_experience.SettingsExperienceTests.test_memory_timeout_remains_visible_at_narrow_width_and_large_type) ... ok
+test_save_error_survives_editing_and_clears_on_acknowledgement (test_settings_experience.SettingsExperienceTests.test_save_error_survives_editing_and_clears_on_acknowledgement) ... ok
+test_validation_reveals_advanced_field_and_blocks_save_and_test (test_settings_experience.SettingsExperienceTests.test_validation_reveals_advanced_field_and_blocks_save_and_test) ... ok
+test_discard_uses_latest_saved_theme_and_preserves_project_metadata (test_settings_experience.SettingsWindowTests.test_discard_uses_latest_saved_theme_and_preserves_project_metadata) ... ok
+test_disk_failure_preserves_runtime_configuration_and_draft (test_settings_experience.SettingsWindowTests.test_disk_failure_preserves_runtime_configuration_and_draft) ... ok
+test_draft_survives_route_change_and_external_theme_update (test_settings_experience.SettingsWindowTests.test_draft_survives_route_change_and_external_theme_update) ... ok
+test_exit_cancel_and_failed_save_do_not_close (test_settings_experience.SettingsWindowTests.test_exit_cancel_and_failed_save_do_not_close) ... ok
+test_exit_save_and_discard_respect_choice (test_settings_experience.SettingsWindowTests.test_exit_save_and_discard_respect_choice) ... ok
+
+----------------------------------------------------------------------
+Ran 12 tests in 23.717s
+
+OK
+
+[88/112] test_storage.py
+test_atomic_write_replaces_content_without_leaving_temp_files (test_storage.StorageTests.test_atomic_write_replaces_content_without_leaving_temp_files) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.010s
+
+OK
+
+[89/112] test_story_navigation_controller.py
+test_default_canon_selection_falls_back_to_character (test_story_navigation_controller.StoryNavigationControllerTests.test_default_canon_selection_falls_back_to_character) ... ok
+test_open_memory_chapter_routes_and_selects_file (test_story_navigation_controller.StoryNavigationControllerTests.test_open_memory_chapter_routes_and_selects_file) ... ok
+test_route_and_default_canon_selection (test_story_navigation_controller.StoryNavigationControllerTests.test_route_and_default_canon_selection) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.155s
+
+OK
+
+[90/112] test_story_plan.py
+test_ai_uses_only_enabled_plan_and_never_free_notes (test_story_plan.StoryPlanTests.test_ai_uses_only_enabled_plan_and_never_free_notes) ... ok
+test_budget_never_silently_truncates_enabled_direction (test_story_plan.StoryPlanTests.test_budget_never_silently_truncates_enabled_direction) ... ok
+test_context_snapshot_tracks_plan_changes_but_not_notes (test_story_plan.StoryPlanTests.test_context_snapshot_tracks_plan_changes_but_not_notes) ... ok
+test_invalid_or_externally_changed_plan_cannot_be_overwritten (test_story_plan.StoryPlanTests.test_invalid_or_externally_changed_plan_cannot_be_overwritten) ... ok
+test_new_project_only_creates_optional_blank_plan (test_story_plan.StoryPlanTests.test_new_project_only_creates_optional_blank_plan) ... ok
+test_form_save_reopen_switch_and_narrow_themes (test_story_plan.StoryPlanUITests.test_form_save_reopen_switch_and_narrow_themes) ... ok
+test_window_navigation_saves_form_and_restores_last_document (test_story_plan.StoryPlanUITests.test_window_navigation_saves_form_and_restores_last_document) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 2.364s
+
+OK
+
+[91/112] test_story_state.py
+test_chapter_number_only_trusts_canonical_ids (test_story_state.StoryStateTests.test_chapter_number_only_trusts_canonical_ids) ... ok
+test_chapter_sections_are_parsed_and_serialized_without_loss (test_story_state.StoryStateTests.test_chapter_sections_are_parsed_and_serialized_without_loss) ... ok
+test_unsectioned_markdown_is_available_as_content (test_story_state.StoryStateTests.test_unsectioned_markdown_is_available_as_content) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.053s
+
+OK
+
+[92/112] test_style_library.py
+test_dry_run_is_original_24_cases (test_style_library.EvaluationTests.test_dry_run_is_original_24_cases) ... ok
+test_fake_model_trial_produces_blind_review (test_style_library.EvaluationTests.test_fake_model_trial_produces_blind_review) ... ok
+test_disabled_and_no_partial_sample (test_style_library.StyleLibraryTests.test_disabled_and_no_partial_sample) ... ok
+test_generation_report_matches_actual_samples (test_style_library.StyleLibraryTests.test_generation_report_matches_actual_samples) ... ok
+test_guide_priority_and_limits (test_style_library.StyleLibraryTests.test_guide_priority_and_limits) ... ok
+test_reject_invalid_payload_without_write (test_style_library.StyleLibraryTests.test_reject_invalid_payload_without_write) ... ok
+test_retired_guide_does_not_change_writing_snapshot (test_style_library.StyleLibraryTests.test_retired_guide_does_not_change_writing_snapshot) ... ok
+test_scene_budget_provenance (test_style_library.StyleLibraryTests.test_scene_budget_provenance) ... ok
+test_seven_fields_apply_with_samples_disabled_and_blanks_omitted (test_style_library.StyleLibraryTests.test_seven_fields_apply_with_samples_disabled_and_blanks_omitted) ... ok
+test_task_snapshot_tracks_library (test_style_library.StyleLibraryTests.test_task_snapshot_tracks_library) ... ok
+test_version_history_and_stale (test_style_library.StyleLibraryTests.test_version_history_and_stale) ... ok
+
+----------------------------------------------------------------------
+Ran 11 tests in 0.376s
+
+OK
+
+[93/112] test_style_library_ui.py
+test_candidate_requires_save_and_does_not_mutate_input (test_style_library_ui.StyleLibraryUITests.test_candidate_requires_save_and_does_not_mutate_input) ... ok
+test_narrow_themes_large_fonts (test_style_library_ui.StyleLibraryUITests.test_narrow_themes_large_fonts) ... ok
+test_profile_validation_and_scene (test_style_library_ui.StyleLibraryUITests.test_profile_validation_and_scene) ... ok
+test_sample_requires_source_and_features (test_style_library_ui.StyleLibraryUITests.test_sample_requires_source_and_features) ... ok
+test_unified_requirements_status_and_cancel (test_style_library_ui.StyleLibraryUITests.test_unified_requirements_status_and_cancel) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.198s
+
+OK
+
+[94/112] test_system_importance_workflow.py
+test_signal_persists_importance_and_publishes_targeted_refresh (test_system_importance_workflow.SystemImportanceWorkflowTests.test_signal_persists_importance_and_publishes_targeted_refresh) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.072s
+
+OK
+
+[95/112] test_task_context.py
+test_capture_does_not_rebuild_full_ai_context (test_task_context.AIContextSnapshotTests.test_capture_does_not_rebuild_full_ai_context) ... ok
+test_expansion_snapshot_covers_world_and_power_files (test_task_context.AIContextSnapshotTests.test_expansion_snapshot_covers_world_and_power_files) ... ok
+test_only_generation_snapshot_tracks_style_guide_changes (test_task_context.AIContextSnapshotTests.test_only_generation_snapshot_tracks_style_guide_changes) ... ok
+test_snapshot_hash_covers_prompt_story_state (test_task_context.AIContextSnapshotTests.test_snapshot_hash_covers_prompt_story_state) ... ok
+test_snapshot_hash_covers_selected_task_context (test_task_context.AIContextSnapshotTests.test_snapshot_hash_covers_selected_task_context) ... ok
+test_snapshot_hash_covers_structured_foreshadowing (test_task_context.AIContextSnapshotTests.test_snapshot_hash_covers_structured_foreshadowing) ... ok
+test_snapshot_matches_unchanged_project_and_editor (test_task_context.AIContextSnapshotTests.test_snapshot_matches_unchanged_project_and_editor) ... ok
+test_snapshot_rejects_editor_and_context_file_changes (test_task_context.AIContextSnapshotTests.test_snapshot_rejects_editor_and_context_file_changes) ... ok
+
+----------------------------------------------------------------------
+Ran 8 tests in 0.536s
+
+OK
+
+[96/112] test_task_controller.py
+test_cancel_request_is_idempotently_rejected_after_finish (test_task_controller.AITaskControllerTests.test_cancel_request_is_idempotently_rejected_after_finish) ... ok
+test_only_one_running_task_is_allowed_and_finished_task_can_be_replaced (test_task_controller.AITaskControllerTests.test_only_one_running_task_is_allowed_and_finished_task_can_be_replaced) ... ok
+test_already_cancelled_task_does_not_start_a_process (test_task_controller.CancellableDSHTests.test_already_cancelled_task_does_not_start_a_process) ... ok
+test_cancelled_process_is_killed_and_not_reported_as_failure (test_task_controller.CancellableDSHTests.test_cancelled_process_is_killed_and_not_reported_as_failure) ... ok
+test_process_tree_reap_has_a_bounded_fallback (test_task_controller.CancellableDSHTests.test_process_tree_reap_has_a_bounded_fallback) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.022s
+
+OK
+
+[97/112] test_task_file_line_safety.py
+test_probe_detects_dsh_line_truncation_below_safe_width (test_task_file_line_safety.FileProbeLineDetectionTests.test_probe_detects_dsh_line_truncation_below_safe_width) ... ok
+test_probe_passes_with_default_dsh_truncation_limit (test_task_file_line_safety.FileProbeLineDetectionTests.test_probe_passes_with_default_dsh_truncation_limit) ... ok
+test_memory_prompt_payload_stays_line_safe (test_task_file_line_safety.GeneratedPromptLineSafetyTests.test_memory_prompt_payload_stays_line_safe) ... ok
+test_read_failed_reply_stops_without_retry (test_task_file_line_safety.ReadFailedFastFailTests.test_read_failed_reply_stops_without_retry) ... ok
+test_envelope_wraps_rendered_long_string_fields (test_task_file_line_safety.RenderWirePayloadTests.test_envelope_wraps_rendered_long_string_fields) ... ok
+test_nested_containers_explode_but_scalar_records_stay_compact (test_task_file_line_safety.RenderWirePayloadTests.test_nested_containers_explode_but_scalar_records_stay_compact) ... ok
+test_wire_payload_renders_valid_json_one_record_per_line (test_task_file_line_safety.RenderWirePayloadTests.test_wire_payload_renders_valid_json_one_record_per_line) ... ok
+test_envelope_keeps_every_line_below_dsh_truncation (test_task_file_line_safety.TaskFileEnvelopeTests.test_envelope_keeps_every_line_below_dsh_truncation) ... ok
+test_envelope_reports_real_max_line_for_short_payloads (test_task_file_line_safety.TaskFileEnvelopeTests.test_envelope_reports_real_max_line_for_short_payloads) ... ok
+test_limit_line_length_is_preserved_exactly (test_task_file_line_safety.WrapLongLinesTests.test_limit_line_length_is_preserved_exactly) ... ok
+test_long_lines_are_split_losslessly (test_task_file_line_safety.WrapLongLinesTests.test_long_lines_are_split_losslessly) ... ok
+test_short_lines_are_untouched (test_task_file_line_safety.WrapLongLinesTests.test_short_lines_are_untouched) ... ok
+
+----------------------------------------------------------------------
+Ran 12 tests in 0.040s
+
+OK
+
+[98/112] test_test_runner.py
+test_failures_crashes_and_false_success_do_not_stop_other_modules (test_test_runner.TestRunnerTests.test_failures_crashes_and_false_success_do_not_stop_other_modules) ... ok
+test_no_modules_is_a_failure (test_test_runner.TestRunnerTests.test_no_modules_is_a_failure) ... ok
+test_success_and_process_state_are_isolated (test_test_runner.TestRunnerTests.test_success_and_process_state_are_isolated) ... ok
+test_timeout_is_a_failure (test_test_runner.TestRunnerTests.test_timeout_is_a_failure) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 2.817s
+
+OK
+
+[99/112] test_text_anchor.py
+test_chapter_body_is_preferred_when_outline_repeats_quote (test_text_anchor.TextAnchorTests.test_chapter_body_is_preferred_when_outline_repeats_quote) ... ok
+test_duplicate_quote_is_ambiguous_without_position (test_text_anchor.TextAnchorTests.test_duplicate_quote_is_ambiguous_without_position) ... ok
+test_unique_quote_resolves_after_prefix_edit (test_text_anchor.TextAnchorTests.test_unique_quote_resolves_after_prefix_edit) ... ok
+test_whitespace_change_can_be_relocated (test_text_anchor.TextAnchorTests.test_whitespace_change_can_be_relocated) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.001s
+
+OK
+
+[100/112] test_text_chunking.py
+test_long_chapter_is_bounded_and_covers_all_paragraphs (test_text_chunking.ChapterChunkingTests.test_long_chapter_is_bounded_and_covers_all_paragraphs) ... ok
+test_normalized_content_hash_and_chunking_are_deterministic (test_text_chunking.ChapterChunkingTests.test_normalized_content_hash_and_chunking_are_deterministic) ... ok
+test_oversized_single_paragraph_is_split_on_safe_boundaries (test_text_chunking.ChapterChunkingTests.test_oversized_single_paragraph_is_split_on_safe_boundaries) ... ok
+test_short_chapter_stays_in_one_chunk (test_text_chunking.ChapterChunkingTests.test_short_chapter_stays_in_one_chunk) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.005s
+
+OK
+
+[101/112] test_theme_config.py
+test_dark_theme_qss_uses_dark_accent (test_theme_config.ThemeConfigTests.test_dark_theme_qss_uses_dark_accent) ... ok
+test_document_css_switches_browser_field_background (test_theme_config.ThemeConfigTests.test_document_css_switches_browser_field_background) ... ok
+test_expansion_length_migrates_from_legacy_setting (test_theme_config.ThemeConfigTests.test_expansion_length_migrates_from_legacy_setting) ... ok
+test_file_business_transport_limits_are_normalized (test_theme_config.ThemeConfigTests.test_file_business_transport_limits_are_normalized) ... ok
+test_foreshadowing_selection_list_uses_themed_indicator (test_theme_config.ThemeConfigTests.test_foreshadowing_selection_list_uses_themed_indicator) ... ok
+test_history_chapter_setting_is_bounded (test_theme_config.ThemeConfigTests.test_history_chapter_setting_is_bounded) ... ok
+test_light_theme_defaults_stay_in_sync (test_theme_config.ThemeConfigTests.test_light_theme_defaults_stay_in_sync) ... ok
+test_message_box_qss_uses_theme_colors (test_theme_config.ThemeConfigTests.test_message_box_qss_uses_theme_colors) ... ok
+test_target_chapter_length_defaults_to_three_thousand (test_theme_config.ThemeConfigTests.test_target_chapter_length_defaults_to_three_thousand) ... ok
+test_token_budget_settings_are_normalized (test_theme_config.ThemeConfigTests.test_token_budget_settings_are_normalized) ... ok
+test_trash_dialog_has_opaque_theme_surfaces (test_theme_config.ThemeConfigTests.test_trash_dialog_has_opaque_theme_surfaces) ... ok
+test_ui_language_defaults_to_chinese (test_theme_config.ThemeConfigTests.test_ui_language_defaults_to_chinese) ... ok
+
+----------------------------------------------------------------------
+Ran 12 tests in 0.004s
+
+OK
+
+[102/112] test_timeline_events.py
+test_background_and_selection_survive_restart (test_timeline_events.TimelineTests.test_background_and_selection_survive_restart) ... ok
+test_both_writing_prompts_include_selected_only (test_timeline_events.TimelineTests.test_both_writing_prompts_include_selected_only) ... ok
+test_budget_rejects_partial_event_material (test_timeline_events.TimelineTests.test_budget_rejects_partial_event_material) ... ok
+test_create_edit_restore_order_and_notes_preserved (test_timeline_events.TimelineTests.test_create_edit_restore_order_and_notes_preserved) ... ok
+test_deleted_and_abandoned_are_excluded (test_timeline_events.TimelineTests.test_deleted_and_abandoned_are_excluded) ... ok
+test_deleted_chapter_invalidates_background_without_rewriting (test_timeline_events.TimelineTests.test_deleted_chapter_invalidates_background_without_rewriting) ... ok
+test_edit_clears_usage_and_invalidates_ai_snapshot (test_timeline_events.TimelineTests.test_edit_clears_usage_and_invalidates_ai_snapshot) ... ok
+test_expansion_and_continuation_cancel_before_generation (test_timeline_events.TimelineTests.test_expansion_and_continuation_cancel_before_generation) ... ok
+test_failed_atomic_save_preserves_file_and_memory (test_timeline_events.TimelineTests.test_failed_atomic_save_preserves_file_and_memory) ... ok
+test_invalid_data_not_reinitialized (test_timeline_events.TimelineTests.test_invalid_data_not_reinitialized) ... ok
+test_material_respects_timeline_order_and_stales_previous_results (test_timeline_events.TimelineTests.test_material_respects_timeline_order_and_stales_previous_results) ... ok
+test_plans_and_future_facts_cannot_be_background (test_timeline_events.TimelineTests.test_plans_and_future_facts_cannot_be_background) ... ok
+test_selected_event_also_supplies_character_relevance (test_timeline_events.TimelineTests.test_selected_event_also_supplies_character_relevance) ... ok
+test_selection_limits_and_failed_write_preserves_selection (test_timeline_events.TimelineTests.test_selection_limits_and_failed_write_preserves_selection) ... ok
+test_stale_writer_cannot_overwrite (test_timeline_events.TimelineTests.test_stale_writer_cannot_overwrite) ... ok
+test_written_requires_existing_chapter (test_timeline_events.TimelineTests.test_written_requires_existing_chapter) ... ok
+
+----------------------------------------------------------------------
+Ran 16 tests in 1.117s
+
+OK
+
+[103/112] test_timeline_page.py
+test_all_active_events_include_abandoned_and_unknown_time (test_timeline_page.TimelinePageTests.test_all_active_events_include_abandoned_and_unknown_time) ... ok
+test_corrupt_data_is_not_replaced_by_empty_timeline (test_timeline_page.TimelinePageTests.test_corrupt_data_is_not_replaced_by_empty_timeline) ... ok
+test_delete_restore_and_move_keep_times_and_material (test_timeline_page.TimelinePageTests.test_delete_restore_and_move_keep_times_and_material) ... ok
+test_deleted_storyline_filter_restores_on_another_page (test_timeline_page.TimelinePageTests.test_deleted_storyline_filter_restores_on_another_page) ... ok
+test_filter_blocks_reordering_and_refresh_preserves_selection (test_timeline_page.TimelinePageTests.test_filter_blocks_reordering_and_refresh_preserves_selection) ... ok
+test_large_timeline_does_not_create_widgets_per_event (test_timeline_page.TimelinePageTests.test_large_timeline_does_not_create_widgets_per_event) ... ok
+test_material_requires_explicit_chapter_and_valid_use (test_timeline_page.TimelinePageTests.test_material_requires_explicit_chapter_and_valid_use) ... ok
+test_narrow_detail_back_retains_filter_and_selection (test_timeline_page.TimelinePageTests.test_narrow_detail_back_retains_filter_and_selection) ... ok
+test_failed_save_keeps_document_and_selection (test_timeline_page.TimelineWindowTests.test_failed_save_keeps_document_and_selection) ... ok
+test_jump_back_and_notes_do_not_overwrite_documents (test_timeline_page.TimelineWindowTests.test_jump_back_and_notes_do_not_overwrite_documents) ... ok
+test_switch_project_clears_timeline_state (test_timeline_page.TimelineWindowTests.test_switch_project_clears_timeline_state) ... ok
+test_virtual_entry_and_hidden_document_actions (test_timeline_page.TimelineWindowTests.test_virtual_entry_and_hidden_document_actions) ... ok
+
+----------------------------------------------------------------------
+Ran 12 tests in 7.025s
+
+OK
+
+[104/112] test_timeline_ui.py
+test_editor_validation_preserves_input_and_saves_chapter_link (test_timeline_ui.TimelineUITests.test_editor_validation_preserves_input_and_saves_chapter_link) ... ok
+test_narrow_layout_in_both_themes_and_large_font (test_timeline_ui.TimelineUITests.test_narrow_layout_in_both_themes_and_large_font) ... ok
+test_navigation_entry_enabled_only_with_project (test_timeline_ui.TimelineUITests.test_navigation_entry_enabled_only_with_project) ... ok
+test_picker_detects_external_changes (test_timeline_ui.TimelineUITests.test_picker_detects_external_changes) ... ok
+test_picker_remembers_explicit_use_and_filter_does_not_clear (test_timeline_ui.TimelineUITests.test_picker_remembers_explicit_use_and_filter_does_not_clear) ... ok
+test_search_filters_delete_restore_and_reorder (test_timeline_ui.TimelineUITests.test_search_filters_delete_restore_and_reorder) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 1.088s
+
+OK
+
+[105/112] test_token_budget.py
+test_chinese_and_json_punctuation_are_conservatively_counted (test_token_budget.ConservativeTokenEstimatorTests.test_chinese_and_json_punctuation_are_conservatively_counted) ... ok
+test_empty_text_is_zero_and_estimates_are_deterministic (test_token_budget.ConservativeTokenEstimatorTests.test_empty_text_is_zero_and_estimates_are_deterministic) ... ok
+test_pair_includes_message_framing_allowance (test_token_budget.ConservativeTokenEstimatorTests.test_pair_includes_message_framing_allowance) ... ok
+test_accepts_only_inputs_within_limit (test_token_budget.TokenBudgetTests.test_accepts_only_inputs_within_limit) ... ok
+test_declared_model_window_includes_runtime_and_output_reserves (test_token_budget.TokenBudgetTests.test_declared_model_window_includes_runtime_and_output_reserves) ... ok
+test_impossible_reserve_rejects_even_empty_input (test_token_budget.TokenBudgetTests.test_impossible_reserve_rejects_even_empty_input) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.000s
+
+OK
+
+[106/112] test_v2_ai_workflow_verifier.py
+test_remote_acknowledgement_is_mandatory (test_v2_ai_workflow_verifier.V2AIWorkflowVerifierTests.test_remote_acknowledgement_is_mandatory) ... usage: run_tests.py [-h] [--acknowledge-synthetic-remote]
+                    [--target-chars TARGET_CHARS]
+                    [--source-commit SOURCE_COMMIT] [--report REPORT]
+run_tests.py: error: 必须显式传入 --acknowledge-synthetic-remote。
+usage: run_tests.py [-h] [--acknowledge-synthetic-remote]
+                    [--target-chars TARGET_CHARS]
+                    [--source-commit SOURCE_COMMIT] [--report REPORT]
+run_tests.py: error: --source-commit 必须是完整的 Git 对象 ID。
+ok
+test_synthetic_fixture_has_two_v2_chapters_and_reviewed_knowledge (test_v2_ai_workflow_verifier.V2AIWorkflowVerifierTests.test_synthetic_fixture_has_two_v2_chapters_and_reviewed_knowledge) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.114s
+
+OK
+
+[107/112] test_version.py
+test_accepts_optional_v_prefix (test_version.AppVersionTests.test_accepts_optional_v_prefix) ... ok
+test_build_metadata_does_not_change_precedence (test_version.AppVersionTests.test_build_metadata_does_not_change_precedence) ... ok
+test_invalid_version_is_rejected (test_version.AppVersionTests.test_invalid_version_is_rejected) ... ok
+test_loads_version_from_file (test_version.AppVersionTests.test_loads_version_from_file) ... ok
+test_missing_version_file_has_actionable_error (test_version.AppVersionTests.test_missing_version_file_has_actionable_error) ... ok
+test_numeric_prerelease_identifier_is_lower_than_text (test_version.AppVersionTests.test_numeric_prerelease_identifier_is_lower_than_text) ... ok
+test_prerelease_identifiers_follow_semver_precedence (test_version.AppVersionTests.test_prerelease_identifiers_follow_semver_precedence) ... ok
+test_stable_release_is_newer_than_same_version_beta (test_version.AppVersionTests.test_stable_release_is_newer_than_same_version_beta) ... ok
+
+----------------------------------------------------------------------
+Ran 8 tests in 0.007s
+
+OK
+
+[108/112] test_view_refresh_controller.py
+test_current_context_uses_open_chapter_and_refreshes_preview (test_view_refresh_controller.ViewRefreshControllerTests.test_current_context_uses_open_chapter_and_refreshes_preview) ... ok
+test_project_switch_and_data_change_refresh_all_views (test_view_refresh_controller.ViewRefreshControllerTests.test_project_switch_and_data_change_refresh_all_views) ... ok
+test_saved_file_refreshes_radar_without_rebuilding_project_pages (test_view_refresh_controller.ViewRefreshControllerTests.test_saved_file_refreshes_radar_without_rebuilding_project_pages) ... ok
+test_system_importance_change_refreshes_badges_without_rebuilding_tree (test_view_refresh_controller.ViewRefreshControllerTests.test_system_importance_change_refreshes_badges_without_rebuilding_tree) ... ok
+test_targeted_canon_change_does_not_refresh_unrelated_pages (test_view_refresh_controller.ViewRefreshControllerTests.test_targeted_canon_change_does_not_refresh_unrelated_pages) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.200s
+
+OK
+
+[109/112] test_window_chrome.py
+test_eight_edges_at_multiple_display_scales (test_window_chrome.ResizeHitTests.test_eight_edges_at_multiple_display_scales) ... ok
+test_all_routes_and_focus_keep_controls_and_menu_actions (test_window_chrome.WorkbenchWindowTests.test_all_routes_and_focus_keep_controls_and_menu_actions) ... ok
+test_close_button_flushes_state_before_cleanup (test_window_chrome.WorkbenchWindowTests.test_close_button_flushes_state_before_cleanup) ... ok
+test_close_button_respects_pending_review (test_window_chrome.WorkbenchWindowTests.test_close_button_respects_pending_review) ... ok
+test_close_button_respects_running_ai (test_window_chrome.WorkbenchWindowTests.test_close_button_respects_running_ai) ... ok
+test_close_button_respects_save_failure (test_window_chrome.WorkbenchWindowTests.test_close_button_respects_save_failure) ... ok
+test_close_button_respects_unsaved_settings (test_window_chrome.WorkbenchWindowTests.test_close_button_respects_unsaved_settings) ... ok
+test_long_project_title_never_displaces_controls_or_drag_region (test_window_chrome.WorkbenchWindowTests.test_long_project_title_never_displaces_controls_or_drag_region) ... ok
+test_maximize_restore_minimize_and_geometry_persistence (test_window_chrome.WorkbenchWindowTests.test_maximize_restore_minimize_and_geometry_persistence) ... ok
+test_top_blank_double_click_toggles_maximize (test_window_chrome.WorkbenchWindowTests.test_top_blank_double_click_toggles_maximize) ... ok
+
+----------------------------------------------------------------------
+Ran 10 tests in 28.455s
+
+OK
+
+[110/112] test_window_chrome_native.py
+test_native_close_command_preserves_review_guard (test_window_chrome_native.NativeWindowChromeTests.test_native_close_command_preserves_review_guard) ... skipped 'Requires an explicit native Windows test surface'
+test_native_frame_keeps_capabilities_without_visible_caption (test_window_chrome_native.NativeWindowChromeTests.test_native_frame_keeps_capabilities_without_visible_caption) ... skipped 'Requires an explicit native Windows test surface'
+test_native_hit_testing_separates_drag_controls_and_resize (test_window_chrome_native.NativeWindowChromeTests.test_native_hit_testing_separates_drag_controls_and_resize) ... skipped 'Requires an explicit native Windows test surface'
+test_native_large_font_menus_fit_in_both_themes (test_window_chrome_native.NativeWindowChromeTests.test_native_large_font_menus_fit_in_both_themes) ... skipped 'Requires an explicit native Windows test surface'
+test_native_maximize_mouse_sequence_toggles_only_once (test_window_chrome_native.NativeWindowChromeTests.test_native_maximize_mouse_sequence_toggles_only_once) ... skipped 'Requires an explicit native Windows test surface'
+test_native_maximize_respects_work_area_and_restore_state (test_window_chrome_native.NativeWindowChromeTests.test_native_maximize_respects_work_area_and_restore_state) ... skipped 'Requires an explicit native Windows test surface'
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.000s
+
+OK (skipped=6)
+
+[111/112] test_window_state_controller.py
+test_focus_mode_hides_chrome_and_restores_editor (test_window_state_controller.WindowStateControllerTests.test_focus_mode_hides_chrome_and_restores_editor) ... ok
+test_focus_restores_open_assistant_output_and_widths (test_window_state_controller.WindowStateControllerTests.test_focus_restores_open_assistant_output_and_widths) ... ok
+test_hidden_panels_stay_hidden_across_routes_and_focus (test_window_state_controller.WindowStateControllerTests.test_hidden_panels_stay_hidden_across_routes_and_focus) ... ok
+test_route_activation_selects_page_and_scope (test_window_state_controller.WindowStateControllerTests.test_route_activation_selects_page_and_scope) ... ok
+test_task_output_does_not_interrupt_focus_mode (test_window_state_controller.WindowStateControllerTests.test_task_output_does_not_interrupt_focus_mode) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.006s
+
+OK
+
+[112/112] test_workspace_persistence.py
+test_ai_unavailable_menu_explains_and_offers_resolution (test_workspace_persistence.WorkspacePersistenceTests.test_ai_unavailable_menu_explains_and_offers_resolution) ... ok
+test_clear_search_and_locate_current_document (test_workspace_persistence.WorkspacePersistenceTests.test_clear_search_and_locate_current_document) ... ok
+test_corrupt_state_and_outside_project_path_are_ignored (test_workspace_persistence.WorkspacePersistenceTests.test_corrupt_state_and_outside_project_path_are_ignored) ... ok
+test_focus_mode_does_not_persist_hidden_navigation_as_preference (test_workspace_persistence.WorkspacePersistenceTests.test_focus_mode_does_not_persist_hidden_navigation_as_preference) ... ok
+test_main_window_save_uses_real_service_and_failure_survives_typing (test_workspace_persistence.WorkspacePersistenceTests.test_main_window_save_uses_real_service_and_failure_survives_typing) ... ok
+test_missing_last_chapter_falls_back_and_shorter_document_clamps_cursor (test_workspace_persistence.WorkspacePersistenceTests.test_missing_last_chapter_falls_back_and_shorter_document_clamps_cursor) ... ok
+test_project_switch_keeps_independent_bookmarks (test_workspace_persistence.WorkspacePersistenceTests.test_project_switch_keeps_independent_bookmarks) ... ok
+test_restart_restores_document_selection_scroll_and_panel_preferences (test_workspace_persistence.WorkspacePersistenceTests.test_restart_restores_document_selection_scroll_and_panel_preferences) ... ok
+test_saved_geometry_recovers_from_removed_monitor (test_workspace_persistence.WorkspacePersistenceTests.test_saved_geometry_recovers_from_removed_monitor) ... ok
+test_switch_document_restores_each_position_and_last_document (test_workspace_persistence.WorkspacePersistenceTests.test_switch_document_restores_each_position_and_last_document) ... ok
+test_timeline_page_restores_on_restart (test_workspace_persistence.WorkspacePersistenceTests.test_timeline_page_restores_on_restart) ... ok
+
+----------------------------------------------------------------------
+Ran 11 tests in 63.450s
+
+OK
+
+Modules: 112; tests: 807; skipped: 8; failed modules: 0

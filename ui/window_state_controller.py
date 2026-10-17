@@ -33,9 +33,11 @@ class WindowStateController(QObject):
         exit_focus_button,
         content_stack=None,
         timeline_page=None,
+        title_bar=None,
         parent=None,
     ) -> None:
         super().__init__(parent)
+        self.title_bar = title_bar
         self.content_stack = content_stack
         self.timeline_page = timeline_page
         self.primary_nav = primary_nav
@@ -145,11 +147,13 @@ class WindowStateController(QObject):
         self.primary_nav.setVisible(visible)
         self.app_header.setVisible(visible and self._current_route not in self.WRITING_ROUTES)
         self.menu_bar.setVisible(visible)
+        if self.title_bar is not None:
+            self.title_bar.set_focus_mode(self._focus_mode)
         self.status_bar.setVisible(visible)
         self._apply_action_bar_visibility(visible)
         self.left_panel.setVisible(visible and self.navigation_visible)
         self.inspector.setVisible(visible and self.inspector_visible and self._current_route != "timeline" and not self.editor.is_story_plan())
-        self.exit_focus_button.setVisible(not visible)
+        self.exit_focus_button.setVisible(not visible and self.title_bar is None)
         self.output_container.setVisible(visible and self._output_visible)
         if visible:
             QTimer.singleShot(0, self._restore_side_panel_sizes)

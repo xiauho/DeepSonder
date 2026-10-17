@@ -1,0 +1,95 @@
+﻿DeepSonder 简明使用指南
+适用于 Windows 10/11 64 位电脑
+
+一、下载并打开软件
+
+1. 用浏览器打开官方下载页面：
+https://github.com/xiauho/DeepSonder/releases/tag/pyside6-v0.1.0-beta
+
+2. 找到 Assets（下载文件），点击下载：
+DeepSonder-PySide6-v0.1.0-beta-windows-x64.zip
+不要选择 Source code。
+
+3. 下载完成后，右键压缩包，选择“全部解压”。
+
+4. 打开解压后的文件夹，双击 DeepSonder-PySide6.exe。
+不要在压缩包里直接运行，也不要单独移动 EXE 文件。
+
+只想手动写作，到这里就可以使用。需要 AI 功能，请继续下面的步骤。
+
+二、在电脑上安装 DSH
+
+1. 打开下面的网址，下载 Windows x64 的 LTS 安装程序（.msi）：
+https://nodejs.org/en/download
+双击安装，保留默认选项，按提示完成。
+
+2. 点击 Windows 开始菜单，搜索 PowerShell 并打开。
+如果之前已打开 PowerShell，请先关闭，再重新打开。
+
+3. 复制下面这一行，粘贴到 PowerShell，按回车：
+npm.cmd install -g @deepseek-ai/dsh
+
+4. 等待安装结束，直到窗口重新出现可以输入命令的位置。
+再复制下面这一行，粘贴后按回车：
+dsh.cmd web
+
+5. 浏览器通常会自动打开配置页面。没有自动打开时，在浏览器地址栏输入：
+http://127.0.0.1:3080
+如果 PowerShell 显示了其他地址，请打开它显示的地址。
+配置完成前不要关闭这个 PowerShell 窗口。
+
+三、配置 AI 模型（以 DeepSeek 为例）
+
+1. 打开 DeepSeek 开放平台并登录：
+https://platform.deepseek.com/
+在 API keys 页面创建并复制自己的 API 密钥。
+
+2. 回到刚才打开的 DSH 配置页面，点击：
+Settings → Models（设置 → 模型）
+
+3. 在 DeepSeek 的 API key 输入框中粘贴密钥，点击保存。
+
+4. 在模型选择器中选择已配置的 DeepSeek 模型。
+密钥只填在 DSH 中，不要填到 DeepSonder 的命令框里。
+
+四、在 DeepSonder 中连接 DSH
+
+1. 关闭并重新打开 DeepSonder，进入“设置 → AI 与连接”。
+
+2. 按下面填写：
+命令：dsh
+模型上下文窗口：自动 / 未确认（安全预算）
+上下文使用策略：均衡 · 日常创作
+最长等待：600 秒
+
+3. 展开“高级启动参数”：
+启动参数：留空
+附加参数：留空
+其他项目保持默认。
+
+4. 点击“测试 dsh”，等待显示“dsh 可用，任务传递正常”。
+
+5. 点击“保存设置”。测试成功后，也一定要保存。
+
+6. 配置完成后，可以关闭 DSH 网页。在运行 DSH 网页的 PowerShell 窗口中按 Ctrl+C，即可停止网页服务。
+
+五、开始写作
+
+1. 新建项目，选择专门的文件夹保存小说。
+2. 新建章节，输入正文或剧情简写并保存。
+3. 点击续写或扩写，等待 AI 生成。
+4. 检查生成内容，满意后再采用。
+5. 定期复制整个小说项目文件夹，作为备份。
+
+六、遇到问题怎么办
+
+提示“找不到 dsh”：
+重新打开 PowerShell，输入下面这一行并按回车：
+where.exe dsh.cmd
+将显示的完整路径复制到软件的“命令”框中，不加引号，再测试并保存。
+
+提示密钥错误或余额不足：
+到 DeepSeek 开放平台检查密钥和账户余额，再回 DSH 页面修改并保存。
+
+连接测试失败：
+先检查网络和密钥，再试一次。仍然失败时，复制错误提示反馈给软件提供者，不要发送自己的 API 密钥。

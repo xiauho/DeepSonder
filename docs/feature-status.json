@@ -57,6 +57,12 @@
       "status": "basic"
     },
     {
+      "id": "workspace.integrated_window_controls",
+      "requirement": "required",
+      "status": "supported",
+      "notes": "工作台采用无系统标题栏主窗口，顶部统一菜单、拖动区域和最小化/最大化还原/关闭按钮；菜单按自然高度垂直居中，与品牌和项目名对齐，适配大字体；页面切换及专注模式保留窗口控制。窗口按钮鼠标操作不夺取编辑区焦点；焦点框仅用于键盘操作，窗口失活时隐藏，原生最大化按钮路径保持一致。Windows 原生边缘缩放、系统菜单、任务栏与最大化工作区适配，支持最大化按钮分屏命中；可用分屏区域仍受现有最小窗口尺寸约束。关闭复用正文保存、AI 审阅/运行中任务及未保存设置保护。"
+    },
+    {
       "id": "workspace.compact_navigation_and_panel_state",
       "requirement": "required",
       "status": "supported"
