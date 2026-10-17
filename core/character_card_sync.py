@@ -119,7 +119,7 @@ def build_character_card_sync_proposal(
     """Build a conservative proposal from verified, author-adopted memories."""
     path = _validated_card_path(project, card_path)
     ordered = _validated_chapter_range(project, chapter_ids)
-    card_text = path.read_text(encoding="utf-8")
+    card_text = path.read_bytes().decode("utf-8")
     summaries = project.load_chapter_summaries()
     view = AcceptedMemoryView(project, summaries)
     invalid = [(chapter_id, view.status(chapter_id)) for chapter_id in ordered if view.status(chapter_id) != "verified"]
@@ -220,7 +220,7 @@ def apply_character_card_sync(
     from .character_identity import fingerprint, load_registry
     if proposal.identity_revision and proposal.identity_revision != fingerprint(load_registry(project)):
         raise CharacterCardSyncError("人物身份在预览后已变化，请重新生成同步预览。")
-    original = path.read_text(encoding="utf-8")
+    original = path.read_bytes().decode("utf-8")
     if text_hash(original) != proposal.expected_card_hash:
         raise CharacterCardSyncError("角色卡在预览生成后已发生变化，请重新生成同步预览。")
 
@@ -244,13 +244,16 @@ def apply_character_card_sync(
 
 def replace_managed_state(card_text: str, state: dict[str, Any]) -> str:
     """Replace or append the app-owned state block without touching prose."""
-    block = _render_managed_block(state)
     bounds = _managed_bounds(card_text)
+    source = card_text[bounds[0]:bounds[1]] if bounds else card_text
+    match = re.search(r"\r\n|\r|\n", source)
+    newline = match.group(0) if match else "\n"
+    block = _render_managed_block(state).replace("\n", newline)
     if bounds is not None:
         start, end = bounds
         return card_text[:start] + block + card_text[end:]
-    base = card_text.rstrip()
-    return f"{base}\n\n{MANAGED_STATE_HEADING}\n\n{block}\n"
+    separator = "" if card_text.endswith(newline * 2) else newline if card_text.endswith(newline) else newline * 2
+    return f"{card_text}{separator}{MANAGED_STATE_HEADING}{newline}{newline}{block}{newline}"
 
 
 def display_value(value: Any) -> str:

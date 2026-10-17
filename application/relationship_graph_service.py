@@ -222,11 +222,14 @@ class RelationshipGraphService:
         name = heading.group(1).strip() if heading else path.stem
         aliases_match = re.search(r"(?m)^-\s*别名[：:]\s*(.+?)\s*$", text)
         aliases = _split_aliases(aliases_match.group(1)) if aliases_match else ()
-        section = re.search(r"(?ms)^##\s+关键关系\s*$\n(.*?)(?=^##\s|\Z)", text)
+        from core.canon_schema import parse_canon_entry
+        entry = parse_canon_entry("character", text)
+        relation_sections = [section for section in entry.sections
+                             if section.schema_key == "关键关系" and section.role == "text"]
         relations: dict[str, str] = {}
-        if section:
+        if len(relation_sections) == 1:
             for target, label in re.findall(
-                r"(?m)^-\s*([^：:\n]+)[：:]\s*(.+?)\s*$", section.group(1)
+                r"(?m)^-\s*([^：:\n]+)[：:]\s*(.+?)\s*$", relation_sections[0].text
             ):
                 clean_target, clean_label = target.strip(), label.strip().rstrip("。")
                 if clean_target and clean_label and clean_target != "无":

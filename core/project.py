@@ -460,6 +460,10 @@ class NovelProject:
     ) -> RelatedCanon:
         """Load task-relevant canon with deterministic, bounded selection."""
         from .character_identity import bind_state, fingerprint, identity_names, load_registry
+        from .canon_schema import visible_canon_text
+
+        def read_canon(path):
+            return visible_canon_text(self.read_file(path))
         identity_state = bind_state(self, {}, chapter_number_from_id(chapter_id) or -1)
         cache_key = (
             fingerprint(load_registry(self)),
@@ -494,7 +498,7 @@ class NovelProject:
         for path in character_paths:
             name = path.stem
             if name and any(alias in haystack for alias in identity_names(identity_state, name)):
-                characters_parts.append(f"### {name}\n{self.read_file(path).strip()}")
+                characters_parts.append(f"### {name}\n{read_canon(path).strip()}")
         selection_stats.append(
             CanonSelectionStat(
                 category="characters",
@@ -513,7 +517,7 @@ class NovelProject:
                 self.list_world(),
                 query=relevance_query,
                 category="world",
-                reader=self.read_file,
+                reader=read_canon,
                 total_chars=WORLD_SELECTION_CHARS,
                 entry_chars=WORLD_ENTRY_CHARS,
                 add_heading=True,
@@ -527,20 +531,20 @@ class NovelProject:
         if include_power:
             core_path = self.core_power_path
             if core_path.exists():
-                core_power = self.read_file(core_path).strip()
+                core_power = read_canon(core_path).strip()
             selected_paths = self._selected_power_paths(selected_power)
             core_paths = self._selected_power_paths(core_power_paths)
             selected_keys = {str(path).casefold() for path in selected_paths}
             core_keys = {str(path).casefold() for path in core_paths}
             for path in core_paths:
                 core_system_parts.append(
-                    f"### {path.stem}\n{self.read_file(path).strip()}"
+                    f"### {path.stem}\n{read_canon(path).strip()}"
                 )
             for path in selected_paths:
                 if str(path).casefold() in core_keys:
                     continue
                 selected_power_parts.append(
-                    f"### {path.stem}\n{self.read_file(path).strip()}"
+                    f"### {path.stem}\n{read_canon(path).strip()}"
                 )
             other_power_paths = []
             for path in self.list_power():
@@ -555,7 +559,7 @@ class NovelProject:
                 other_power_paths,
                 query=relevance_query,
                 category="power",
-                reader=self.read_file,
+                reader=read_canon,
                 total_chars=POWER_SELECTION_CHARS,
                 entry_chars=POWER_ENTRY_CHARS,
             )

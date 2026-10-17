@@ -5,6 +5,7 @@
 系统区块（基础档案与 DeepSonder 同步区）的结构保护、受管区块位置固定。
 """
 import os
+import re
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 import tempfile
 import unittest
@@ -160,7 +161,8 @@ class ModuleMutationTests(unittest.TestCase):
         entry = parse_canon_entry("character", text)
         rename_module(entry, "作者注", "创作札记")
         rendered = render_canon_entry(entry)
-        self.assertEqual(rendered, text.replace("## 作者注", "## 创作札记"))
+        self.assertEqual(re.sub(r"^<!-- deepsonder:module:v1 .* -->\n", "", rendered, flags=re.M),
+                         text.replace("## 作者注", "## 创作札记"))
         reparsed = parse_canon_entry("character", rendered)
         self.assertEqual(reparsed.section("创作札记").text, "纯文本备注。")
         self.assertIsNone(reparsed.section("作者注"))
@@ -170,7 +172,8 @@ class ModuleMutationTests(unittest.TestCase):
         entry = parse_canon_entry("character", text)
         rename_module(entry, "对照表", "旧版对照")
         rendered = render_canon_entry(entry)
-        self.assertEqual(rendered, text.replace("## 对照表", "## 旧版对照"))
+        self.assertEqual(re.sub(r"^<!-- deepsonder:module:v1 .* -->\n", "", rendered, flags=re.M),
+                         text.replace("## 对照表", "## 旧版对照"))
         self.assertEqual(parse_canon_entry("character", rendered).section("旧版对照").role, ROLE_RAW)
 
     def test_rename_group_section_becomes_detected_group(self):
@@ -232,7 +235,7 @@ class ModuleMutationTests(unittest.TestCase):
         rendered = render_canon_entry(entry)
         self.assertNotIn("novalist:section:v1", rendered)
         self.assertIn("## 性格、动机与核心欲望\n\n谨慎。\n\n## 外貌与辨识特征\n\n左手腕有旧疤。\n\n",
-                      rendered)
+                      re.sub(r"^<!-- deepsonder:module:v1 .* -->\n", "", rendered, flags=re.M))
         reparsed = parse_canon_entry("character", rendered)
         self.assertEqual(reparsed.section("外貌与辨识特征").text, "左手腕有旧疤。")
 

@@ -250,7 +250,7 @@ class RawSectionAndExtrasTests(unittest.TestCase):
         entry = parse_canon_entry("character", text)
         set_raw_section_text(entry, "作者自由备注", "窗口外有雾。")
         rendered = render_canon_entry(entry)
-        self.assertIn("## 作者自由备注\r\n\r\n窗口外有雾。\r\n\r\n", rendered)
+        self.assertIn("## 作者自由备注\r\n\r\n窗口外有雾。\r\n", rendered)
         reparsed = parse_canon_entry("character", rendered)
         set_raw_section_text(reparsed, "作者自由备注", "窗口外有雾。")
         self.assertEqual(render_canon_entry(reparsed), rendered)

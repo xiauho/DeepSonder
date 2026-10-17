@@ -498,7 +498,7 @@ class CanonFormTests(unittest.TestCase):
         self.assertTrue(viewer.isReadOnly())
         self.assertNotEqual(managed.heading, "")
 
-    def test_relation_module_keeps_picker_until_renamed(self):
+    def test_relation_module_keeps_picker_after_rename(self):
         project = self.fake_project()
         widget = CanonFormWidget()
         widget.load_entry(self.baiou, "character", project)
@@ -506,7 +506,7 @@ class CanonFormTests(unittest.TestCase):
         with patch("ui.canon_form_widget.QInputDialog.getText",
                    return_value=("人物关系", True)):
             self.op_button(widget, "关键关系", "重命名").click()
-        self.assertFalse(widget._relation_rows)  # 重命名后按普通文本模块渲染
+        self.assertTrue(widget._relation_rows)  # 展示标题变化不改变关联语义
         self.assertIsNotNone(widget.entry.section("人物关系"))
         self.assertEqual(widget.entry.section("人物关系").role, "text")
 

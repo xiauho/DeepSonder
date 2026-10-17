@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (QApplication, QButtonGroup, QDialog, QFormLayout,
 
 from core.canon_schema import (
     CanonEntry, CanonSection, add_module, delete_module, is_system_section,
+    preamble_blocks, set_preamble_text, set_section_suffix,
     move_module, parse_canon_entry, raw_section_body, render_canon_entry,
     rename_module, schema_for, section_spec, set_group_extras,
     set_group_field, set_raw_section_text, set_section_extras,
@@ -132,6 +133,8 @@ class CanonFormWidget(QWidget):
         self.save_error = ""
         self._baseline_text = ""
         self.entry: CanonEntry | None = None  # 由 load_entry 载入
+        self._preamble_widgets: list[tuple[int, QPlainTextEdit]] = []
+        self._suffix_widgets: list[tuple[CanonSection, QPlainTextEdit]] = []
         self._field_widgets: list[tuple[CanonSection, str, QLineEdit]] = []
         self._group_widgets: list[tuple[CanonSection, str, str, QLineEdit]] = []
         self._text_widgets: list[tuple[CanonSection, QPlainTextEdit]] = []
@@ -215,6 +218,8 @@ class CanonFormWidget(QWidget):
         self.save_error = ""
         self._baseline_text = ""
         self._alias_map = {}
+        self._preamble_widgets.clear()
+        self._suffix_widgets.clear()
         self._field_widgets.clear()
         self._group_widgets.clear()
         self._text_widgets.clear()
@@ -235,8 +240,7 @@ class CanonFormWidget(QWidget):
         path = Path(path)
         schema_for(kind)  # 打开即校验类型
         original = path.read_bytes()
-        # 与 Path.read_text 的通用换行语义一致：CRLF/CR 归一为 LF 后再解析
-        text = original.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+        text = original.decode("utf-8")
         entry = parse_canon_entry(kind, text)
         self.project = project
         self._alias_map = self._load_alias_map() if project is not None else {}
@@ -321,6 +325,8 @@ class CanonFormWidget(QWidget):
 
     def _commit_saved(self, draft: CanonEntry, data: bytes) -> None:
         # Keep widget section references alive; only replace their collected data.
+        self.entry.preamble = draft.preamble
+        self.entry.title = draft.title
         for section, saved in zip(self.entry.sections, draft.sections):
             if saved.dirty:
                 saved.raw = render_canon_entry(CanonEntry(
@@ -351,7 +357,7 @@ class CanonFormWidget(QWidget):
         try:
             draft = self._collected_entry()
             text = render_canon_entry(draft)
-            unchanged = text.replace("\r\n", "\n") == current.decode("utf-8").replace("\r\n", "\n")
+            unchanged = text.encode("utf-8") == current
             if not unchanged:
                 atomic_write_text(self.path, text, encoding="utf-8")
         except (ValueError, OSError) as exc:
@@ -370,6 +376,8 @@ class CanonFormWidget(QWidget):
             callback()
 
     def _editor_bindings(self):
+        yield from ((None, ("intro", i), e) for i, e in self._preamble_widgets)
+        yield from ((s, ("suffix",), e) for s, e in self._suffix_widgets)
         yield from ((s, ("field", k), e) for s, k, e in self._field_widgets)
         yield from ((s, ("group", g, k), e) for s, g, k, e in self._group_widgets)
         yield from ((s, ("text",), e) for s, e in self._text_widgets)
@@ -424,6 +432,8 @@ class CanonFormWidget(QWidget):
 
     def _build_form(self) -> None:
         self._last_editor = None
+        self._preamble_widgets.clear()
+        self._suffix_widgets.clear()
         self._field_widgets.clear()
         self._group_widgets.clear()
         self._text_widgets.clear()
@@ -435,12 +445,50 @@ class CanonFormWidget(QWidget):
         body = QVBoxLayout(content)
         body.setSpacing(12)
         if self.entry is not None:
+            body.addWidget(self._preamble_panel())
             for section in self.entry.sections:
                 widget = self._section_widget(section)
                 if widget is not None:
                     body.addWidget(widget)
+                if section.suffix.strip():
+                    body.addWidget(self._suffix_panel(section))
         body.addStretch()
         self.form_scroll.setWidget(content)
+
+    def _preamble_panel(self) -> QWidget:
+        box = QGroupBox()
+        layout = QVBoxLayout(box)
+        label = QLabel("资料导语")
+        label.setObjectName("sectionTitle")
+        layout.addWidget(label)
+        blocks = preamble_blocks(self.entry)
+        visible = [i for i, (_start, _end, text) in enumerate(blocks) if text.strip()]
+        if not visible:
+            visible = [len(blocks) - 1]
+        for index in visible:
+            editor = QPlainTextEdit()
+            editor.setObjectName("canonIntroEditor")
+            editor.setPlaceholderText("资料概述，可留空。")
+            editor.setPlainText(blocks[index][2])
+            editor.setMaximumHeight(90)
+            editor.textChanged.connect(self._mark_modified)
+            layout.addWidget(editor)
+            self._preamble_widgets.append((index, editor))
+        return box
+
+    def _suffix_panel(self, section: CanonSection) -> QWidget:
+        box = QGroupBox()
+        layout = QVBoxLayout(box)
+        label = QLabel("区块间备注")
+        label.setObjectName("sectionTitle")
+        layout.addWidget(label)
+        editor = QPlainTextEdit()
+        editor.setPlainText(section.suffix.replace("\r\n", "\n").replace("\r", "\n").strip("\n"))
+        editor.setMaximumHeight(100)
+        editor.textChanged.connect(self._mark_modified)
+        layout.addWidget(editor)
+        self._suffix_widgets.append((section, editor))
+        return box
 
     def _section_widget(self, section: CanonSection):
         if section.role == ROLE_MANAGED:
@@ -493,6 +541,7 @@ class CanonFormWidget(QWidget):
             button = QPushButton(text)
             button.setObjectName(name)
             button.setProperty("moduleHeading", section.heading)
+            button.setProperty("moduleId", section.module_id)
             button.clicked.connect(handler)
             row.addWidget(button)
         return ops
@@ -502,7 +551,7 @@ class CanonFormWidget(QWidget):
             body = QWidget()
             form = QFormLayout(body)
             form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
-            spec = section_spec(self.kind, section.heading)
+            spec = section_spec(self.kind, section)
             declared = list(spec.get("keys", [])) if spec else []
             extra = [k for k in section.fields if k not in declared]
             for key in [*declared, *extra]:
@@ -518,7 +567,7 @@ class CanonFormWidget(QWidget):
             vbox = QVBoxLayout(body)
             if section.extras:
                 vbox.addWidget(self._extras_panel(section, None))
-            spec = section_spec(self.kind, section.heading)
+            spec = section_spec(self.kind, section)
             declared = list(spec.get("keys", [])) if spec else []
             for group in section.groups:
                 group_box = QGroupBox(group.name)
@@ -540,7 +589,7 @@ class CanonFormWidget(QWidget):
             return body
         if section.role == ROLE_TEXT:
             if (self.project is not None and self.kind == "character"
-                    and section.heading == "关键关系"):
+                    and section.schema_key == "关键关系"):
                 return self._relation_body(section)
             editor = QPlainTextEdit()
             editor.setPlainText(section.text)
@@ -558,7 +607,7 @@ class CanonFormWidget(QWidget):
         editor.textChanged.connect(lambda: self._mark_modified())
         self._raw_widgets.append((section, editor))
         vbox.addWidget(editor)
-        caption = QLabel("该区块保留原文格式，修改后原样写入文档。")
+        caption = QLabel(section.warning or "该区块保留原文格式，修改后原样写入文档。")
         caption.setWordWrap(True)
         vbox.addWidget(caption)
         return body
@@ -591,7 +640,7 @@ class CanonFormWidget(QWidget):
         title.setObjectName("sectionTitle")
         title.setWordWrap(True)
         vbox.addWidget(title)
-        body = section.raw.split("\n", 1)[-1].strip("\n")
+        body = raw_section_body(section)
         viewer = QPlainTextEdit()
         viewer.setPlainText(body)
         viewer.setReadOnly(True)
@@ -670,11 +719,11 @@ class CanonFormWidget(QWidget):
         if any(g.name == name for g in section.groups):
             self.feedback.setText(f"条目「{name}」已存在。")
             return
-        spec = section_spec(self.kind, section.heading)
+        spec = section_spec(self.kind, section)
         declared = list(spec.get("keys", [])) if spec else []
         try:
             self._change_structure(lambda draft: set_group_field(
-                draft, section.heading, name, declared[0] if declared else "备注", ""))
+                draft, section.module_id, name, declared[0] if declared else "备注", ""))
         except ValueError as exc:
             self.feedback.setText(str(exc))
 
@@ -694,7 +743,7 @@ class CanonFormWidget(QWidget):
         if not ok:
             return
         try:
-            self._change_structure(lambda draft: rename_module(draft, section.heading, text))
+            self._change_structure(lambda draft: rename_module(draft, section.module_id, text))
         except ValueError as exc:
             self.feedback.setText(str(exc))
             return
@@ -702,7 +751,7 @@ class CanonFormWidget(QWidget):
 
     def _move_module(self, section: CanonSection, offset: int) -> None:
         try:
-            self._change_structure(lambda draft: move_module(draft, section.heading, offset))
+            self._change_structure(lambda draft: move_module(draft, section.module_id, offset))
         except ValueError as exc:
             self.feedback.setText(str(exc))
             return
@@ -717,7 +766,7 @@ class CanonFormWidget(QWidget):
         if answer != QMessageBox.StandardButton.Yes:
             return
         try:
-            self._change_structure(lambda draft: delete_module(draft, section.heading))
+            self._change_structure(lambda draft: delete_module(draft, section.module_id))
         except ValueError as exc:
             self.feedback.setText(str(exc))
             return
@@ -729,20 +778,24 @@ class CanonFormWidget(QWidget):
         draft = deepcopy(self.entry)
         targets = {id(original): CanonEntry(kind=draft.kind, title="", preamble="", sections=[copy])
                    for original, copy in zip(self.entry.sections, draft.sections)}
+        for index, editor in reversed(self._preamble_widgets):
+            set_preamble_text(draft, index, editor.toPlainText())
+        for section, editor in self._suffix_widgets:
+            set_section_suffix(targets[id(section)], section.module_id, editor.toPlainText())
         for section, key, editor in self._field_widgets:
             if editor.text() != section.fields.get(key, ""):
-                set_section_field(targets[id(section)], section.heading, key, editor.text())
+                set_section_field(targets[id(section)], section.module_id, key, editor.text())
         for section, group_name, key, editor in self._group_widgets:
             group = next(g for g in section.groups if g.name == group_name)
             if editor.text() != group.fields.get(key, ""):
-                set_group_field(targets[id(section)], section.heading, group_name, key, editor.text())
+                set_group_field(targets[id(section)], section.module_id, group_name, key, editor.text())
         for section, editor in self._text_widgets:
             if editor.toPlainText().strip("\n") != section.text:
-                set_section_text(targets[id(section)], section.heading, editor.toPlainText())
+                set_section_text(targets[id(section)], section.module_id, editor.toPlainText())
         # 原文区块：正文整块逐字写回（未修改的区块保持原字节）
         for section, editor in self._raw_widgets:
             if editor.toPlainText() != raw_section_body(section):
-                set_raw_section_text(targets[id(section)], section.heading, editor.toPlainText())
+                set_raw_section_text(targets[id(section)], section.module_id, editor.toPlainText())
         # 模块内手写行：按行逐字写回
         for section, group_name, rows in self._extras_rows:
             if group_name is None:
@@ -752,15 +805,15 @@ class CanonFormWidget(QWidget):
             lines = [editor.text() for editor in rows]
             if lines != current:
                 if group_name is None:
-                    set_section_extras(targets[id(section)], section.heading, lines)
+                    set_section_extras(targets[id(section)], section.module_id, lines)
                 else:
-                    set_group_extras(targets[id(section)], section.heading, group_name, lines)
+                    set_group_extras(targets[id(section)], section.module_id, group_name, lines)
         # 关键关系选择器：按行拼接后写回
         for section in self._relation_sections:
             lines = [e.text() for s, e in self._relation_rows if s is section]
             original = [line for line in section.text.split("\n") if line.strip()]
             if lines != original:
-                set_section_text(targets[id(section)], section.heading, "\n".join(lines))
+                set_section_text(targets[id(section)], section.module_id, "\n".join(lines))
 
         return draft
 
@@ -773,12 +826,12 @@ class CanonFormWidget(QWidget):
         old_sections = list(self.entry.sections)
         for section, key, editor in self._editor_bindings():
             if editor is focus:
-                index = next(i for i, item in enumerate(old_sections) if item is section)
+                index = next((i for i, item in enumerate(old_sections) if item is section), None)
                 if isinstance(editor, QLineEdit):
                     cursor = (editor.cursorPosition(), editor.selectionStart(), len(editor.selectedText()))
                 else:
                     cursor = (editor.textCursor().position(), editor.textCursor().anchor())
-                focused = (draft.sections[index], key, cursor)
+                focused = (draft.sections[index] if index is not None else None, key, cursor)
                 break
         scroll = self.form_scroll.verticalScrollBar().value()
         operation(draft)
