@@ -143,9 +143,8 @@ class CanonFormTests(unittest.TestCase):
 
     def test_widget_exposes_no_mode_buttons(self):
         widget = self.widget()
-        self.assertEqual(widget.findChildren(QToolButton), [])
         mode_texts = {"表单", "源码", "预览"}
-        for button in widget.findChildren(QPushButton):
+        for button in [*widget.findChildren(QPushButton), *widget.findChildren(QToolButton)]:
             self.assertNotIn(button.text(), mode_texts)
 
     def test_raw_block_edit_saves_verbatim_and_keeps_other_sections(self):
@@ -488,7 +487,7 @@ class CanonFormTests(unittest.TestCase):
                 self.assertEqual(matches, [], f"{heading} 不应有「{text}」按钮")
         badges = [l for l in widget.findChildren(QLabel)
                   if l.objectName() == "systemModuleBadge"]
-        self.assertEqual([b.text() for b in badges], ["系统区块"])  # 仅基础档案
+        self.assertEqual([b.text() for b in badges], ["系统区块", "系统区块"])  # 基础档案与只读同步区
         # 系统区块内容仍可编辑，受管区保持只读
         self.field(widget, "姓名").setText("白羽")
         self.assertTrue(widget.is_modified())

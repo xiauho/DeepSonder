@@ -426,7 +426,7 @@ QLabel#canonKindBadge {
     font-weight: 700;
 }
 QFrame#canonPageHeader { border: none; }
-QPushButton#moduleOpButton {
+QToolButton#canonManageButton, QPushButton#moduleOpButton {
     background: transparent;
     color: __MUTED__;
     border: 1px solid __BORDER__;
@@ -434,7 +434,7 @@ QPushButton#moduleOpButton {
     padding: 2px 8px;
     font-size: __SMALL_FONT_SIZE__px;
 }
-QPushButton#moduleOpButton:hover { background: __HOVER__; color: __TEXT__; border-color: __ACCENT__; }
+QToolButton#canonManageButton:hover, QPushButton#moduleOpButton:hover { background: __HOVER__; color: __TEXT__; border-color: __ACCENT__; }
 QPushButton#moduleDeleteButton {
     background: transparent;
     color: __DANGER__;
@@ -444,6 +444,15 @@ QPushButton#moduleDeleteButton {
     font-size: __SMALL_FONT_SIZE__px;
 }
 QPushButton#moduleDeleteButton:hover { background: __HOVER__; color: __DANGER__; border-color: __DANGER__; }
+QGroupBox#canonModuleFrame, QGroupBox#canonGroupFrame {
+    margin-top: 0px; padding: 0px;
+}
+QToolButton#canonModuleToggle {
+    min-width: 28px; min-height: 28px; padding: 2px;
+    background: transparent; border-color: transparent;
+}
+QToolButton#canonModuleToggle:hover { background: __HOVER__; }
+QToolButton#canonModuleToggle:focus { border-color: __ACCENT__; }
 QLabel#systemModuleBadge, QLabel#rawModuleBadge {
     color: __MUTED__;
     background: __FIELD__;

@@ -21,6 +21,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from core.canon_schema import load_canon_entry, entry_status
+from core.character_identity import load_registry
 from core.project import NovelProject
 from core.project_data import ProjectDataStore
 from ui.icons import IconTextButton, material_icon, set_button_icon
@@ -51,6 +53,7 @@ class LeftPanel(QWidget):
     GROUP_NUMBER_ROLE = PATH_ROLE + 4
     TITLE_ROLE = PATH_ROLE + 5
     FEATURE_ROLE = PATH_ROLE + 6
+    CANON_STATUS_ROLE = PATH_ROLE + 7
     STATUS_COLUMN_WIDTH = 64
     COMPACT_TREE_WIDTH = 300
     IMPORTANCE_LABELS = {
@@ -88,6 +91,9 @@ class LeftPanel(QWidget):
         self._muted_color = "#63748A"
         self._compact_mode = False
         self._style_available = True
+        self._canon_status_cache = {}
+        self._alias_map = {}
+        self._primary_names = set()
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 16, 10, 12)
@@ -195,6 +201,7 @@ class LeftPanel(QWidget):
         self.tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
         self.tree.setColumnWidth(1, self.STATUS_COLUMN_WIDTH)
         self.tree.viewport().installEventFilter(self)
+        self.tree.installEventFilter(self)
         self.tree.setIndentation(16)
         self.tree.setRootIsDecorated(False)
         self.tree.setExpandsOnDoubleClick(False)
@@ -241,7 +248,10 @@ class LeftPanel(QWidget):
         self._update_tree_layout()
 
     def eventFilter(self, watched, event):
-        if hasattr(self, "tree") and watched is self.tree.viewport() and event.type() == QEvent.Type.Resize:
+        if hasattr(self, "tree") and (
+            (watched is self.tree.viewport() and event.type() == QEvent.Type.Resize)
+            or (watched is self.tree and event.type() in {QEvent.Type.FontChange, QEvent.Type.StyleChange})
+        ):
             self._update_tree_layout()
         return super().eventFilter(watched, event)
 
@@ -251,18 +261,19 @@ class LeftPanel(QWidget):
             return
         self._updating_tree_layout = True
         try:
+            self.tree.ensurePolished()
             width = self.tree.viewport().width()
             compact = width < self.COMPACT_TREE_WIDTH
             changed = compact != self._compact_mode
             self._compact_mode = compact
             self.tree.setColumnHidden(1, compact)
-            status_width = max(self.STATUS_COLUMN_WIDTH, self.tree.fontMetrics().horizontalAdvance("常驻") + 24)
+            status_width = max(self.STATUS_COLUMN_WIDTH, self.tree.fontMetrics().horizontalAdvance("读取失败") + 36)
             self.tree.setColumnWidth(1, status_width)
             self.tree.setColumnWidth(0, max(20, width - (0 if compact else status_width)))
             if changed:
                 for item in self.document_items():
-                    if item.data(0, self.IMPORTANCE_ROLE):
-                        self._apply_importance_appearance(item)
+                    if item.data(0, self.IMPORTANCE_ROLE) or item.data(0, self.CANON_STATUS_ROLE):
+                        self._apply_document_appearance(item)
         finally:
             self._updating_tree_layout = False
 
@@ -355,8 +366,8 @@ class LeftPanel(QWidget):
             for child_index in range(group.childCount()):
                 child = group.child(child_index)
                 child.setIcon(0, material_icon("description", self._icon_color, 18))
-                if child.data(0, self.CATEGORY_ROLE) == "体系设定":
-                    self._apply_importance_appearance(child)
+                if child.data(0, self.IMPORTANCE_ROLE) or child.data(0, self.CANON_STATUS_ROLE):
+                    self._apply_document_appearance(child)
 
     def set_project(self, project: NovelProject | None) -> None:
         same_project = bool(
@@ -369,6 +380,7 @@ class LeftPanel(QWidget):
         else:
             self._selected_feature = None
             self._scope_states.clear()
+            self._canon_status_cache.clear()
             self.search.clear()
         selected_path = self._selected_path if same_project else None
         self._project = project
@@ -382,6 +394,13 @@ class LeftPanel(QWidget):
             self._filter_tree(self.search.text())
             return
 
+        try:
+            registry = load_registry(project)
+            self._alias_map = {name: group["primary"] for group in registry["groups"]
+                               for name in group["names"] if name != group["primary"]}
+            self._primary_names = {group["primary"] for group in registry["groups"]}
+        except (ValueError, OSError):
+            self._alias_map, self._primary_names = {}, set()
         store = ProjectDataStore(project)
         groups: list[tuple[str, str, list[Path]]] = [
             (
@@ -458,7 +477,11 @@ class LeftPanel(QWidget):
                     child.setFirstColumnSpanned(True)
                 else:
                     group.addChild(child)
-                if importance:
+                kind = {"角色": "character", "世界观": "world", "体系设定": "power"}.get(label)
+                if kind:
+                    child.setData(0, self.CANON_STATUS_ROLE, self._canon_status(path, kind))
+                    self._apply_document_appearance(child)
+                elif importance:
                     self._apply_importance_appearance(child)
             expanded = self._scope_states.get(self._scope, {}).get("expanded", {})
             group.setExpanded(expanded.get(label, True))
@@ -681,20 +704,71 @@ class LeftPanel(QWidget):
     def _update_system_group_label(self, group: QTreeWidgetItem) -> None:
         group.setText(0, f"体系设定 · {group.childCount()}")
 
+    def _canon_status(self, path: Path, kind: str) -> dict:
+        key = str(path.resolve())
+        try:
+            stat = path.stat()
+            signature = (stat.st_mtime_ns, stat.st_size)
+            cached = self._canon_status_cache.get(key)
+            if cached is not None and cached[0] == signature:
+                result = dict(cached[1])
+            else:
+                entry = load_canon_entry(path, kind)
+                result = {**entry_status(entry), "warnings": sum(bool(s.warning) for s in entry.sections)}
+                self._canon_status_cache[key] = (signature, dict(result))
+        except (OSError, ValueError):
+            result = {"error": True}
+        if kind == "character":
+            if path.stem in self._alias_map:
+                result.update(identity="alias", primary=self._alias_map[path.stem])
+            elif path.stem in self._primary_names:
+                result["identity"] = "primary"
+        return result
+
+    @staticmethod
+    def _status_text(status: dict) -> tuple[str, str]:
+        if status.get("error"):
+            return "读取失败", "资料无法读取，原文件未被修改。"
+        details = []
+        if "missing_fields" in status:
+            missing = status["missing_fields"]
+            short = f"缺{missing}项" if missing else "已同步" if status.get("synced") else "待同步"
+            details.append(f"基础档案：尚缺{missing}项预设字段" if missing else "基础档案：已填写")
+            details.append("剧情状态：已同步" if status.get("synced") else "剧情状态：待同步")
+        else:
+            missing = status.get("missing_sections", 0)
+            short = f"缺{missing}节" if missing else "已填写"
+            details.append(f"资料内容：尚缺{missing}个模板分区" if missing else "模板分区：已填写")
+        if status.get("identity") == "alias":
+            details.append(f"身份：别名，归属「{status['primary']}」")
+        elif status.get("identity") == "primary":
+            details.append("身份：主身份")
+        if status.get("warnings"):
+            short = "待核对"
+            details.append(f"{status['warnings']}个原文区块存在结构歧义，请打开核对。")
+        return short, "\n".join(details)
+
     def _apply_importance_appearance(self, item: QTreeWidgetItem) -> None:
-        importance = item.data(0, self.IMPORTANCE_ROLE) or "non_core"
+        self._apply_document_appearance(item)
+
+    def _apply_document_appearance(self, item: QTreeWidgetItem) -> None:
+        importance = item.data(0, self.IMPORTANCE_ROLE)
+        status = item.data(0, self.CANON_STATUS_ROLE) or {}
         title = item.data(0, self.TITLE_ROLE) or item.text(0)
-        status = self.IMPORTANCE_LABELS.get(importance, "")
-        item.setText(0, f"{title} · {status}" if self._compact_mode and status else title)
-        item.setText(1, status)
-        item.setToolTip(0, f"{title}\n{item.data(0, self.PATH_ROLE)}\n{self.IMPORTANCE_TOOLTIPS.get(importance, '')}")
-        is_emphasized = importance in {"core", "always"}
-        color = self._accent_color if is_emphasized else self._muted_color
-        item.setForeground(1, QBrush(QColor(color)))
-        item.setToolTip(1, self.IMPORTANCE_TOOLTIPS.get(importance, ""))
-        # Keep status metrics identical to the title column.  A bold status
-        # changes the font ascent and makes the right column appear to float
-        # above the document title, especially in compact rows.
+        short, details = self._status_text(status) if status else ("", "")
+        # Loading policy remains the visible system badge; completeness is in its tooltip.
+        badge = self.IMPORTANCE_LABELS.get(importance, "") if importance else short
+        compact = f"{title} · {badge}" if self._compact_mode and badge else title
+        if status.get("identity"):
+            compact += " · 别名" if status["identity"] == "alias" else " · 主身份"
+        item.setText(0, compact)
+        item.setText(1, badge)
+        policy = self.IMPORTANCE_TOOLTIPS.get(importance, "")
+        detail = "\n".join(part for part in (details, policy) if part)
+        item.setToolTip(0, f"{title}\n{item.data(0, self.PATH_ROLE)}\n{detail}".rstrip())
+        item.setToolTip(1, detail)
+        emphasized = importance in {"core", "always"} or status.get("warnings") or status.get("error")
+        item.setForeground(1, QBrush(QColor(self._accent_color if emphasized else self._muted_color)))
         font = item.font(0)
         font.setWeight(QFont.Weight.Normal)
         item.setFont(1, font)

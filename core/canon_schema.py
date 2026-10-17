@@ -984,7 +984,7 @@ _PLACEHOLDER_VALUES = {"", "无", "未记录"}
 
 def _managed_section_synced(section: CanonSection) -> bool:
     """受管同步区块内是否至少有一行非占位的 `- key：value`（忽略标记注释行）。"""
-    for line in section.raw.split("\n"):
+    for line in raw_section_body(section).splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("<!--"):
             continue

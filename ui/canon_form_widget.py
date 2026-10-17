@@ -20,10 +20,10 @@ import hashlib
 from copy import deepcopy
 from pathlib import Path
 
-from PySide6.QtCore import QFileSystemWatcher, QTimer, Signal
-from PySide6.QtWidgets import (QApplication, QButtonGroup, QDialog, QFormLayout, QGroupBox,
-    QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMessageBox, QPlainTextEdit,
-    QPushButton, QRadioButton, QScrollArea, QVBoxLayout, QWidget)
+from PySide6.QtCore import QFileSystemWatcher, QTimer, Signal, Qt
+from PySide6.QtWidgets import (QApplication, QButtonGroup, QDialog, QGroupBox,
+    QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMenu, QMessageBox, QPlainTextEdit,
+    QPushButton, QRadioButton, QScrollArea, QSizePolicy, QToolButton, QVBoxLayout, QWidget)
 
 from core.canon_schema import (
     CanonEntry, CanonSection, add_module, delete_module, is_system_section,
@@ -34,8 +34,11 @@ from core.canon_schema import (
     set_section_field, set_section_text, ROLE_FIELDS, ROLE_FREE, ROLE_GROUP,
     ROLE_MANAGED, ROLE_RAW, ROLE_TEXT,
 )
+from core.canon_fields import (add_field, rename_field, delete_field, move_field,
+    add_group, rename_group, delete_group, move_group)
 from core.character_identity import load_registry
 from core.storage import atomic_write_text
+from ui.wrapping_label import WrappingLabel
 
 
 class NewModuleDialog(QDialog):
@@ -144,6 +147,9 @@ class CanonFormWidget(QWidget):
         self._relation_sections: list[CanonSection] = []
         self._alias_map: dict[str, str] = {}
         self._theme_config: dict = {"theme": "light"}
+        self._collapse_by_path: dict[str, set[str]] = {}
+        self._module_bodies: dict[str, QWidget] = {}
+        self._module_toggles: dict[str, QToolButton] = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 10, 18, 12)
@@ -209,6 +215,7 @@ class CanonFormWidget(QWidget):
         watched = self._watcher.files() + self._watcher.directories()
         if watched:
             self._watcher.removePaths(watched)
+        self._collapse_by_path.clear()
         self.project = None
         self.path = None
         self.kind = None
@@ -399,6 +406,7 @@ class CanonFormWidget(QWidget):
         if editor is None:
             editor = next(iter(editors), None)
         if editor is not None:
+            self._reveal_editor(editor)
             editor.setFocus()
         return editor
 
@@ -407,8 +415,16 @@ class CanonFormWidget(QWidget):
         # target was removed. F6 may choose a first field; undo/redo may not.
         editor = next((e for e in self._editable_widgets() if e is self._last_editor), None)
         if editor is not None:
+            self._reveal_editor(editor)
             editor.setFocus()
             getattr(editor, command)()
+
+    def _reveal_editor(self, editor) -> None:
+        for identity, body in self._module_bodies.items():
+            if body is editor or body.isAncestorOf(editor):
+                self._module_toggles[identity].setChecked(True)
+                self.form_scroll.ensureWidgetVisible(editor)
+                break
 
     def _set_modified(self, value: bool) -> None:
         value = bool(value)
@@ -441,10 +457,20 @@ class CanonFormWidget(QWidget):
         self._extras_rows.clear()
         self._relation_rows.clear()
         self._relation_sections.clear()
+        self._module_bodies.clear()
+        self._module_toggles.clear()
         content = QWidget()
         body = QVBoxLayout(content)
         body.setSpacing(12)
         if self.entry is not None:
+            controls = QHBoxLayout()
+            controls.addStretch()
+            for text, expanded in (("全部展开", True), ("全部折叠", False)):
+                button = QPushButton(text)
+                button.setObjectName("moduleOpButton")
+                button.clicked.connect(lambda _=False, value=expanded: self.set_modules_expanded(value))
+                controls.addWidget(button)
+            body.addLayout(controls)
             body.addWidget(self._preamble_panel())
             for section in self.entry.sections:
                 widget = self._section_widget(section)
@@ -498,33 +524,71 @@ class CanonFormWidget(QWidget):
             return None
         return self._wrap_module(section, body)
 
-    def _wrap_module(self, section: CanonSection, body: QWidget) -> QGroupBox:
-        """模块区块：标题行 + 系统徽章或操作按钮（重命名/上移/下移/删除）。
+    def _collapsed_modules(self) -> set[str]:
+        key = str(self.path.resolve()) if self.path else ""
+        return self._collapse_by_path.setdefault(key, set())
 
-        不用 QGroupBox 标题承载长标题：长标题会撑大最小宽度，窄窗口溢出。
-        """
+    def set_modules_expanded(self, expanded: bool) -> None:
+        for toggle in self._module_toggles.values():
+            toggle.setChecked(expanded)
+
+    def _wrap_module(self, section: CanonSection, body: QWidget) -> QGroupBox:
         box = QGroupBox()
+        box.setObjectName("canonModuleFrame")
         vbox = QVBoxLayout(box)
-        header = QWidget()
-        row = QHBoxLayout(header)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(6)
-        title = QLabel(section.heading or "未识别章节")
+        vbox.setContentsMargins(10, 10, 10, 10)
+        vbox.setSpacing(6)
+        header = QHBoxLayout()
+        header.setSpacing(6)
+        toggle = QToolButton()
+        toggle.setObjectName("canonModuleToggle")
+        toggle.setCheckable(True)
+        toggle.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        toggle.setProperty("moduleId", section.module_id)
+        header.addWidget(toggle)
+        title = WrappingLabel(section.heading or "未识别章节")
         title.setObjectName("sectionTitle")
+        title.setTextFormat(Qt.TextFormat.PlainText)
         title.setWordWrap(True)
-        row.addWidget(title, 1)
+        title.setMinimumWidth(0)
+        policy = title.sizePolicy()
+        policy.setHorizontalPolicy(QSizePolicy.Policy.Ignored)
+        title.setSizePolicy(policy)
+        header.addWidget(title, 1)
         if section.role in (ROLE_RAW, ROLE_FREE):
             badge = QLabel("原文区块")
             badge.setObjectName("rawModuleBadge")
-            row.addWidget(badge)
+            header.addWidget(badge)
         if is_system_section(self.entry, section):
             badge = QLabel("系统区块")
             badge.setObjectName("systemModuleBadge")
-            row.addWidget(badge)
-        else:
-            row.addWidget(self._module_op_buttons(section))
-        vbox.addWidget(header)
+            header.addWidget(badge)
+        vbox.addLayout(header)
+        operations = None
+        if not is_system_section(self.entry, section):
+            operations = self._module_op_buttons(section)
+            vbox.addWidget(operations, alignment=Qt.AlignmentFlag.AlignRight)
         vbox.addWidget(body)
+        self._module_bodies[section.module_id] = body
+        self._module_toggles[section.module_id] = toggle
+
+        def set_expanded(expanded):
+            if not expanded and body.isAncestorOf(QApplication.focusWidget()):
+                toggle.setFocus()
+            body.setVisible(expanded)
+            if operations is not None:
+                operations.setVisible(expanded)
+            toggle.setArrowType(Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow)
+            action = "折叠" if expanded else "展开"
+            toggle.setAccessibleName(f"{action}模块：{section.heading}")
+            toggle.setToolTip(f"{action}模块（不影响保存）")
+            collapsed = self._collapsed_modules()
+            collapsed.discard(section.module_id) if expanded else collapsed.add(section.module_id)
+
+        toggle.toggled.connect(set_expanded)
+        expanded = section.module_id not in self._collapsed_modules()
+        toggle.setChecked(expanded)
+        set_expanded(expanded)
         return box
 
     def _module_op_buttons(self, section: CanonSection) -> QWidget:
@@ -549,38 +613,32 @@ class CanonFormWidget(QWidget):
     def _section_body(self, section: CanonSection):
         if section.role == ROLE_FIELDS:
             body = QWidget()
-            form = QFormLayout(body)
-            form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
-            spec = section_spec(self.kind, section)
-            declared = list(spec.get("keys", [])) if spec else []
-            extra = [k for k in section.fields if k not in declared]
-            for key in [*declared, *extra]:
-                editor = QLineEdit(section.fields.get(key, ""))
-                editor.textChanged.connect(lambda _text: self._mark_modified())
-                self._field_widgets.append((section, key, editor))
-                form.addRow(key, editor)
-            if section.extras:
-                form.addRow(self._extras_panel(section, None))
+            self._fields_form(body, section)
             return body
         if section.role == ROLE_GROUP:
             body = QWidget()
             vbox = QVBoxLayout(body)
             if section.extras:
                 vbox.addWidget(self._extras_panel(section, None))
-            spec = section_spec(self.kind, section)
-            declared = list(spec.get("keys", [])) if spec else []
             for group in section.groups:
-                group_box = QGroupBox(group.name)
-                form = QFormLayout(group_box)
-                form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
-                extra = [k for k in group.fields if k not in declared]
-                for key in [*declared, *extra]:
-                    editor = QLineEdit(group.fields.get(key, ""))
-                    editor.textChanged.connect(lambda _text: self._mark_modified())
-                    self._group_widgets.append((section, group.name, key, editor))
-                    form.addRow(key, editor)
-                if group.extras:
-                    form.addRow(self._extras_panel(section, group.name))
+                group_box = QGroupBox()
+                group_box.setObjectName("canonGroupFrame")
+                layout = QVBoxLayout(group_box)
+                row = QHBoxLayout()
+                title = WrappingLabel(group.name)
+                title.setObjectName("sectionTitle")
+                title.setTextFormat(Qt.TextFormat.PlainText)
+                title.setWordWrap(True)
+                title.setMinimumWidth(0)
+                policy = title.sizePolicy()
+                policy.setHorizontalPolicy(QSizePolicy.Policy.Ignored)
+                title.setSizePolicy(policy)
+                row.addWidget(title, 1)
+                row.addWidget(self._group_menu(section, group.name))
+                layout.addLayout(row)
+                fields = QWidget()
+                self._fields_form(fields, section, group.name)
+                layout.addWidget(fields)
                 vbox.addWidget(group_box)
             add_button = QPushButton("＋ 添加条目")
             add_button.setProperty("moduleHeading", section.heading)
@@ -633,23 +691,149 @@ class CanonFormWidget(QWidget):
         return panel
 
     def _managed_widget(self, section: CanonSection) -> QGroupBox:
-        # 受管区不用 QGroupBox 标题：长标题会撑大最小宽度，窄窗口下溢出
-        box = QGroupBox()
-        vbox = QVBoxLayout(box)
-        title = QLabel(section.heading)
-        title.setObjectName("sectionTitle")
-        title.setWordWrap(True)
-        vbox.addWidget(title)
-        body = raw_section_body(section)
+        body = QWidget()
+        layout = QVBoxLayout(body)
         viewer = QPlainTextEdit()
-        viewer.setPlainText(body)
+        viewer.setPlainText(raw_section_body(section))
         viewer.setReadOnly(True)
         viewer.setMaximumHeight(140)
         caption = QLabel("由 DeepSonder 自动同步，此处只读；请通过“同步角色档案”更新。")
         caption.setWordWrap(True)
-        vbox.addWidget(viewer)
-        vbox.addWidget(caption)
-        return box
+        layout.addWidget(viewer)
+        layout.addWidget(caption)
+        return self._wrap_module(section, body)
+
+    def _fields_form(self, body, section, group_name=None):
+        form = QVBoxLayout(body)
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setSpacing(8)
+        group = next((g for g in section.groups if g.name == group_name), None)
+        fields = section.fields if group_name is None else group.fields
+        extras = section.extras if group_name is None else group.extras
+        declared = list((section_spec(self.kind, section) or {}).get("keys", []))
+        for key in [*declared, *(k for k in fields if k not in declared)]:
+            label = WrappingLabel(key)
+            label.setTextFormat(Qt.TextFormat.PlainText)
+            label.setAccessibleName(key)
+            label.setWordWrap(True)
+            policy = label.sizePolicy()
+            policy.setHorizontalPolicy(QSizePolicy.Policy.Ignored)
+            label.setSizePolicy(policy)
+            label.setObjectName("canonFieldLabel")
+            field = QWidget()
+            column = QVBoxLayout(field)
+            column.setContentsMargins(0, 0, 0, 0)
+            column.setSpacing(3)
+            column.addWidget(label)
+            form.addWidget(field)
+            editor = QLineEdit(fields.get(key, ""))
+            editor.setAccessibleName(f"{group_name + ' / ' if group_name else ''}{key}")
+            label.setBuddy(editor)
+            editor.textChanged.connect(lambda _text: self._mark_modified())
+            if group_name is None:
+                self._field_widgets.append((section, key, editor))
+            else:
+                self._group_widgets.append((section, group_name, key, editor))
+            if key in declared:
+                editor.setToolTip("模板预设字段：可编辑内容，名称与位置受保护。")
+                column.addWidget(editor)
+            else:
+                row = QWidget()
+                layout = QHBoxLayout(row)
+                layout.setContentsMargins(0, 0, 0, 0)
+                layout.addWidget(editor, 1)
+                layout.addWidget(self._field_menu(section, key, group_name))
+                column.addWidget(row)
+        if extras:
+            form.addWidget(self._extras_panel(section, group_name))
+        add = QPushButton("＋ 添加字段")
+        add.setProperty("moduleId", section.module_id)
+        add.setProperty("groupName", group_name)
+        add.clicked.connect(lambda _=False: self._add_field(section, group_name))
+        form.addWidget(add)
+
+    def _management_menu(self, label, section, group=None, key=None):
+        button = QToolButton()
+        button.setText(label)
+        button.setObjectName("canonManageButton")
+        button.setAccessibleName(f"{label}：{group or section.heading}{' / ' + key if key else ''}")
+        button.setToolTip(button.accessibleName())
+        button.setProperty("moduleId", section.module_id)
+        button.setProperty("groupName", group)
+        button.setProperty("fieldName", key)
+        button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        menu = QMenu(button)
+        button.setMenu(menu)
+        return button, menu
+
+    def _field_menu(self, section, key, group):
+        button, menu = self._management_menu("更多", section, group, key)
+        menu.addAction("重命名字段…", lambda: self._rename_field(section, key, group))
+        fields = section.fields if group is None else next(g.fields for g in section.groups if g.name == group)
+        declared = (section_spec(self.kind, section) or {}).get("keys", [])
+        keys = [k for k in fields if k not in declared]
+        for label, offset in (("上移字段", -1), ("下移字段", 1)):
+            action = menu.addAction(label, lambda _checked=False, step=offset: self._perform_structure(
+                lambda draft: move_field(draft, section.module_id, key, step, group)))
+            action.setEnabled(0 <= keys.index(key) + offset < len(keys))
+        menu.addSeparator()
+        menu.addAction("删除字段…", lambda: self._delete_field(section, key, group))
+        return button
+
+    def _group_menu(self, section, name):
+        button, menu = self._management_menu("管理条目", section, name)
+        menu.addAction("重命名条目…", lambda: self._rename_group(section, name))
+        index = next(i for i, g in enumerate(section.groups) if g.name == name)
+        for label, offset in (("上移条目", -1), ("下移条目", 1)):
+            action = menu.addAction(label, lambda _checked=False, step=offset: self._perform_structure(
+                lambda draft: move_group(draft, section.module_id, name, step)))
+            action.setEnabled(0 <= index + offset < len(section.groups))
+        menu.addSeparator()
+        menu.addAction("删除条目…", lambda: self._delete_group(section, name))
+        return button
+
+    def _perform_structure(self, operation, remap_focus=None):
+        try:
+            self._change_structure(operation, remap_focus=remap_focus)
+        except ValueError as exc:
+            self.feedback.setText(str(exc))
+
+    def _add_field(self, section, group=None):
+        name, ok = QInputDialog.getText(self, "添加字段", "字段名称：")
+        if ok:
+            self._perform_structure(lambda draft: add_field(draft, section.module_id, name, group))
+
+    def _rename_field(self, section, key, group=None):
+        name, ok = QInputDialog.getText(self, "重命名字段", "新名称：", text=key)
+        if not ok:
+            return
+        old_key = ("field", key) if group is None else ("group", group, key)
+        new_key = ("field", name.strip()) if group is None else ("group", group, name.strip())
+        self._perform_structure(lambda draft: rename_field(draft, section.module_id, key, name, group),
+            lambda item, value: new_key if item is not None and item.module_id == section.module_id and value == old_key else value)
+
+    def _delete_field(self, section, key, group=None):
+        if self._confirm_remove("删除字段", f"删除字段「{key}」及其内容？保存后生效。"):
+            self._perform_structure(lambda draft: delete_field(draft, section.module_id, key, group))
+
+    def _rename_group(self, section, name):
+        new, ok = QInputDialog.getText(self, "重命名条目", "新名称：", text=name)
+        if not ok:
+            return
+        def remap(item, key):
+            if item is not None and item.module_id == section.module_id and key[0] in {"group", "extras"} and key[1] == name:
+                return (key[0], new.strip(), *key[2:])
+            return key
+        self._perform_structure(lambda draft: rename_group(draft, section.module_id, name, new), remap)
+
+    def _delete_group(self, section, name):
+        if self._confirm_remove("删除条目", f"删除条目「{name}」及其全部字段和手写内容？保存后生效。"):
+            self._perform_structure(lambda draft: delete_group(draft, section.module_id, name))
+
+    def _confirm_remove(self, title, text):
+        return QMessageBox.question(self, title, text,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes
 
     # ---------- 关键关系选择器（角色卡 + 传入 project 时） ----------
 
@@ -713,19 +897,8 @@ class CanonFormWidget(QWidget):
 
     def _add_group(self, section: CanonSection) -> None:
         name, ok = QInputDialog.getText(self, f"添加{section.heading}条目", "条目名称：")
-        name = name.strip()
-        if not ok or not name:
-            return
-        if any(g.name == name for g in section.groups):
-            self.feedback.setText(f"条目「{name}」已存在。")
-            return
-        spec = section_spec(self.kind, section)
-        declared = list(spec.get("keys", [])) if spec else []
-        try:
-            self._change_structure(lambda draft: set_group_field(
-                draft, section.module_id, name, declared[0] if declared else "备注", ""))
-        except ValueError as exc:
-            self.feedback.setText(str(exc))
+        if ok:
+            self._perform_structure(lambda draft: add_group(draft, section.module_id, name))
 
     # ---------- 用户模块操作（新建/重命名/上移/下移/删除） ----------
 
@@ -817,7 +990,7 @@ class CanonFormWidget(QWidget):
 
         return draft
 
-    def _change_structure(self, operation) -> None:
+    def _change_structure(self, operation, remap_focus=None) -> None:
         draft = self._collected_entry()
         # Remember the field before a dialog/menu took focus. Track the copied
         # section object so renames and moves do not invalidate its identity.
@@ -835,6 +1008,10 @@ class CanonFormWidget(QWidget):
                 break
         scroll = self.form_scroll.verticalScrollBar().value()
         operation(draft)
+        render_canon_entry(draft)  # Validate the whole collected draft before replacing any widgets.
+        if focused is not None and remap_focus is not None:
+            section, key, cursor = focused
+            focused = (section, remap_focus(section, key), cursor)
         self.entry = draft
         self._build_form()
         self.feedback.setText(self.save_error)
@@ -848,7 +1025,8 @@ class CanonFormWidget(QWidget):
                 for item, item_key, editor in self._editor_bindings():
                     if item is section and item_key == key:
                         self._last_editor = editor
-                        editor.setFocus()
+                        if editor.isVisibleTo(self.form_scroll.widget()):
+                            editor.setFocus()
                         if isinstance(editor, QLineEdit):
                             if cursor[1] >= 0:
                                 editor.setSelection(cursor[1], cursor[2])
