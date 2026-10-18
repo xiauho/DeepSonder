@@ -211,7 +211,7 @@ class StructuredCanonPage(QWidget):
         if self.current_path() is None:
             return
         try:
-            disk = self.current_path().read_text(encoding="utf-8")
+            disk = self.current_path().read_bytes().decode("utf-8")
             draft = self.form._effective_text()
         except (OSError, ValueError) as exc:
             QMessageBox.warning(self, "无法查看差异", str(exc))

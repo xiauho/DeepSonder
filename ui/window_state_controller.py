@@ -67,6 +67,9 @@ class WindowStateController(QObject):
         self.inspector_visible = False
         self._output_visible = False
         self.inspector.hide()
+        self._restore_timer = QTimer(self)
+        self._restore_timer.setSingleShot(True)
+        self._restore_timer.timeout.connect(self._restore_side_panel_sizes)
 
     @property
     def current_route(self) -> str:
@@ -90,7 +93,7 @@ class WindowStateController(QObject):
             self.content_stack.setCurrentWidget(self.timeline_page if route == "timeline" else self.editor)
         self._set_focus_chrome(True)
         self.primary_nav.set_active("canon" if route == "timeline" else route)
-        QTimer.singleShot(0, self._restore_side_panel_sizes)
+        self._restore_timer.start(0)
 
     def toggle_focus_mode(self) -> None:
         self._focus_mode = not self._focus_mode
@@ -160,7 +163,7 @@ class WindowStateController(QObject):
         self.exit_focus_button.setVisible(not visible and self.title_bar is None)
         self.output_container.setVisible(visible and self._output_visible)
         if visible:
-            QTimer.singleShot(0, self._restore_side_panel_sizes)
+            self._restore_timer.start(0)
 
     def _apply_action_bar_visibility(self, shell_visible: bool | None = None) -> None:
         if shell_visible is None:
@@ -176,7 +179,7 @@ class WindowStateController(QObject):
                 setattr(self, width_attribute, sizes[index])
         panel.setVisible(shown and not self._focus_mode)
         self.panels_changed.emit()
-        QTimer.singleShot(0, self._restore_side_panel_sizes)
+        self._restore_timer.start(0)
 
     def _restore_side_panel_sizes(self) -> None:
         if self.main_splitter.width() <= 0:

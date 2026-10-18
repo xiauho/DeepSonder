@@ -219,7 +219,7 @@ class IconTextButton(QPushButton):
     def showEvent(self, event) -> None:  # noqa: N802 - Qt API
         super().showEvent(event)
         # QSS font metrics are finalised during polish/show, not construction.
-        QTimer.singleShot(0, self.sync_geometry)
+        QTimer.singleShot(0, self, self.sync_geometry)
 
 
 def set_button_icon(button: QAbstractButton, name: str, color: str = "#63748A", size: int = 18) -> None:

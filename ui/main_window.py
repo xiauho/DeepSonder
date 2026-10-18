@@ -272,7 +272,7 @@ class MainWindow(QMainWindow):
         self.editor.document_loaded.connect(lambda: self.left_panel.set_current_document(self.editor.current_path()))
         self.editor.document_about_to_change.connect(lambda: self.left_panel.set_current_document(None))
         self._refresh_auto_save_timer()
-        QTimer.singleShot(80, self._restore_last_project)
+        QTimer.singleShot(80, self, self._restore_last_project)
 
     @property
     def project(self) -> NovelProject | None:

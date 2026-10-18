@@ -150,7 +150,7 @@ class WorkspaceStateController(QObject):
             editor.text_edit.horizontalScrollBar().setValue(number("horizontal"))
             self._restoring = False
             self.schedule()
-        QTimer.singleShot(0, scroll)
+        QTimer.singleShot(0, self, scroll)
 
     def timeline_state(self, project):
         record = self.data["projects"].get(str(project.root.resolve()), {})
