@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QSize, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QFont
+from PySide6.QtGui import QBrush, QColor, QFont, QPalette
 from PySide6.QtWidgets import (
     QButtonGroup,
     QFrame,
@@ -13,6 +13,9 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMenu,
     QPushButton,
+    QStyle,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
     QTreeWidget,
     QTreeWidgetItem,
     QToolButton,
@@ -27,6 +30,28 @@ from core.project import NovelProject
 from core.project_data import ProjectDataStore
 from ui.icons import IconTextButton, material_icon, set_button_icon
 from ui.theme import colors_for
+
+
+class StatusDotDelegate(QStyledItemDelegate):
+    """状态列只画圆点，底色固定为资料栏背景，不随整行选中或悬停变色。"""
+
+    def paint(self, painter, option, index):
+        if index.column() != 1:
+            super().paint(painter, option, index)
+            return
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        # 名称列仍是完整的状态卡片；状态列若跟随行状态，会变成第二块圆角卡片。
+        opt.state &= ~(
+            QStyle.StateFlag.State_Selected
+            | QStyle.StateFlag.State_MouseOver
+            | QStyle.StateFlag.State_Sunken
+            | QStyle.StateFlag.State_HasFocus
+        )
+        # 样式表会按行状态先铺一层底色且不读取 backgroundBrush，必须直接覆盖。
+        painter.fillRect(opt.rect, opt.palette.color(QPalette.ColorRole.Window))
+        opt.backgroundBrush = QBrush(Qt.BrushStyle.NoBrush)
+        super().paint(painter, opt, index)
 
 
 class LeftPanel(QWidget):
@@ -56,6 +81,8 @@ class LeftPanel(QWidget):
     CANON_STATUS_ROLE = PATH_ROLE + 7
     STATUS_COLUMN_WIDTH = 64
     COMPACT_TREE_WIDTH = 300
+    COMPACT_STATUS_WIDTH = 28
+    STATUS_DOT = "●"
     IMPORTANCE_LABELS = {
         "core": "核心",
         "non_core": "",
@@ -196,9 +223,12 @@ class LeftPanel(QWidget):
         self.tree.setObjectName("projectTree")
         self.tree.setHeaderHidden(True)
         self.tree.setColumnCount(2)
+        self.tree.setItemDelegateForColumn(1, StatusDotDelegate(self.tree))
         self.tree.header().setStretchLastSection(False)
         self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
         self.tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        # 默认最小节宽会随字号抬高，会挤掉窄侧栏的圆点列，这里明确放开到圆点宽度。
+        self.tree.header().setMinimumSectionSize(self.COMPACT_STATUS_WIDTH)
         self.tree.setColumnWidth(1, self.STATUS_COLUMN_WIDTH)
         self.tree.viewport().installEventFilter(self)
         self.tree.installEventFilter(self)
@@ -224,7 +254,7 @@ class LeftPanel(QWidget):
         self.clear_search_button.hide()
         layout.addWidget(self.clear_search_button)
 
-        self._nav_hint = QLabel("单击打开 · 点击体系状态可设置加载策略")
+        self._nav_hint = QLabel("单击打开 · 点击状态列或右键查看资料状态")
         self._nav_hint.setObjectName("navHint")
         self._nav_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self._nav_hint)
@@ -266,10 +296,15 @@ class LeftPanel(QWidget):
             compact = width < self.COMPACT_TREE_WIDTH
             changed = compact != self._compact_mode
             self._compact_mode = compact
-            self.tree.setColumnHidden(1, compact)
-            status_width = max(self.STATUS_COLUMN_WIDTH, self.tree.fontMetrics().horizontalAdvance("读取失败") + 36)
+            # 窄侧栏保留状态列作为统一状态入口，只是压缩成圆点宽度；点它仍打开资料状态浮层。
+            status_width = (
+                self.COMPACT_STATUS_WIDTH if compact
+                else max(self.STATUS_COLUMN_WIDTH, self.tree.fontMetrics().horizontalAdvance("读取失败") + 36)
+            )
+            self.tree.setColumnHidden(1, False)
             self.tree.setColumnWidth(1, status_width)
-            self.tree.setColumnWidth(0, max(20, width - (0 if compact else status_width)))
+            # 以实际生效的状态列宽反推名称列，避免两列之和超出视口而产生横向滚动。
+            self.tree.setColumnWidth(0, max(20, width - self.tree.columnWidth(1)))
             if changed:
                 for item in self.document_items():
                     if item.data(0, self.IMPORTANCE_ROLE) or item.data(0, self.CANON_STATUS_ROLE):
@@ -294,7 +329,7 @@ class LeftPanel(QWidget):
         self.add_canon_button.setVisible(not chapters)
         self.search.setPlaceholderText("搜索章节…" if chapters else "搜索资料…")
         self.search.setAccessibleName(self.search.placeholderText())
-        self._nav_hint.setText("单击打开 · 右键管理章节" if chapters else "单击打开 · 右键管理资料与加载策略")
+        self._nav_hint.setText("单击打开 · 右键管理章节" if chapters else "单击打开 · 点击状态列或右键查看资料状态")
         self._nav_hint.setWordWrap(True)
         self.style_footer.setVisible(not chapters)
         self._update_locate_button()
@@ -566,16 +601,14 @@ class LeftPanel(QWidget):
             self._selected_path = str(path_str)
             category = item.data(0, self.CATEGORY_ROLE) or ""
             if (
-                category == "体系设定"
-                and column == 1
-                and not self._compact_mode
+                column == 1
+                and (item.data(0, self.CANON_STATUS_ROLE) or item.data(0, self.IMPORTANCE_ROLE))
             ):
-                if item.data(0, self.IMPORTANCE_ROLE) == "always":
-                    return
+                # 状态列是统一的资料状态入口，宽侧栏显示文字、窄侧栏显示圆点，行为一致。
                 position = self.tree.viewport().mapToGlobal(
                     self.tree.visualItemRect(item).bottomRight()
                 )
-                self._show_importance_menu(item, position)
+                self._show_status_menu(item, position)
                 return
             self.file_selected.emit(category, path_str)
 
@@ -605,75 +638,81 @@ class LeftPanel(QWidget):
             )
             menu.exec(self.tree.viewport().mapToGlobal(position))
             return
-        if path_str and category == "体系设定":
-            self._show_importance_menu(
-                item, self.tree.viewport().mapToGlobal(position)
-            )
+        if not path_str:
             return
-        if not path_str or category not in {"章节", "角色", "世界观", "时间线"}:
+        if item.data(0, self.CANON_STATUS_ROLE) or item.data(0, self.IMPORTANCE_ROLE):
+            # 与左键点击状态列一致：资料行只保留一个统一的状态浮层。
+            self._show_status_menu(item, self.tree.viewport().mapToGlobal(position))
+            return
+        if category != "章节":
             return
         menu = QMenu(self.tree)
-        if category == "角色":
-            sync_action = menu.addAction("同步角色档案…")
-            sync_action.triggered.connect(
-                lambda _checked=False, path=str(path_str): self.sync_character_requested.emit(path)
-            )
-            menu.addSeparator()
         delete_action = menu.addAction("移入回收站")
-        if category == "章节":
-            delete_action.triggered.connect(
-                lambda _checked=False, path=str(path_str): self.delete_chapter_requested.emit(path)
-            )
-        else:
-            if category == "角色":
-                delete_action.triggered.connect(
-                    lambda _checked=False, path=str(path_str): self.delete_character_requested.emit(path)
-                )
-            else:
-                delete_action.triggered.connect(
-                    lambda _checked=False, path=str(path_str), value=category: self.delete_canon_requested.emit(
-                        value, path
-                    )
-                )
+        delete_action.triggered.connect(
+            lambda _checked=False, path=str(path_str): self.delete_chapter_requested.emit(path)
+        )
         menu.exec(self.tree.viewport().mapToGlobal(position))
 
-    def _show_importance_menu(self, item: QTreeWidgetItem, global_position) -> None:
-        """Show explicit loading choices instead of silently flipping state."""
+    def _show_status_menu(self, item: QTreeWidgetItem, global_position) -> None:
+        """统一的资料浮层：状态明细 + 角色同步 / 体系加载策略 + 移入回收站。
+
+        左键点击状态列与右键菜单都走这里，行为不再随资料分类变化。
+        """
         path_str = item.data(0, self.PATH_ROLE)
         if not path_str:
             return
+        path = str(path_str)
+        category = item.data(0, self.CATEGORY_ROLE) or ""
+        status = item.data(0, self.CANON_STATUS_ROLE) or {}
+        importance = item.data(0, self.IMPORTANCE_ROLE)
         menu = QMenu(self.tree)
-        current = item.data(0, self.IMPORTANCE_ROLE) or "non_core"
-        if current == "always":
-            fixed = menu.addAction("常驻规则 · 始终加载")
-            fixed.setEnabled(False)
-            menu.exec(global_position)
-            return
-
-        title = menu.addAction("AI 加载策略")
+        title = menu.addAction(item.data(0, self.TITLE_ROLE) or item.text(0))
         title.setEnabled(False)
+        short, details = self._status_text(status)
+        for line in filter(None, (details or short).split("\n")):
+            action = menu.addAction(line)
+            action.setEnabled(False)
+        if category == "体系设定":
+            menu.addSeparator()
+            headline = menu.addAction("AI 加载策略")
+            headline.setEnabled(False)
+            if importance == "always":
+                fixed = menu.addAction("常驻规则 · 始终加载")
+                fixed.setEnabled(False)
+            else:
+                for label, value in (
+                    ("核心 · 自动作为重点上下文加载", "core"),
+                    ("非核心 · 扩写时手动选择", "non_core"),
+                ):
+                    action = menu.addAction(label)
+                    action.setCheckable(True)
+                    action.setChecked((importance or "non_core") == value)
+                    action.triggered.connect(
+                        lambda _checked=False, target=path, choice=value:
+                        self._emit_system_importance(target, choice)
+                    )
         menu.addSeparator()
-        core_action = menu.addAction("核心 · 自动作为重点上下文加载")
-        optional_action = menu.addAction("非核心 · 扩写时手动选择")
-        for action, importance in (
-            (core_action, "core"),
-            (optional_action, "non_core"),
-        ):
-            action.setCheckable(True)
-            action.setChecked(current == importance)
-            action.triggered.connect(
-                lambda _checked=False, path=str(path_str), value=importance: self._emit_system_importance(
-                    path, value
-                )
+        if category == "角色":
+            sync_action = menu.addAction("同步角色档案…")
+            sync_action.triggered.connect(
+                lambda _checked=False, target=path:
+                self.sync_character_requested.emit(target)
             )
-        menu.addSeparator()
+            menu.addSeparator()
         delete_action = menu.addAction("移入回收站")
         delete_action.triggered.connect(
-            lambda _checked=False, path=str(path_str): self.delete_canon_requested.emit(
-                "体系设定", path
-            )
+            lambda _checked=False, target=path, kind=category:
+            self._emit_delete(kind, target)
         )
         menu.exec(global_position)
+
+    def _emit_delete(self, category: str, path: str) -> None:
+        if category == "章节":
+            self.delete_chapter_requested.emit(path)
+        elif category == "角色":
+            self.delete_character_requested.emit(path)
+        else:
+            self.delete_canon_requested.emit(category, path)
 
     def refresh_system_importance(self) -> None:
         """Refresh only system badges and counts while preserving tree state."""
@@ -758,11 +797,18 @@ class LeftPanel(QWidget):
         short, details = self._status_text(status) if status else ("", "")
         # Loading policy remains the visible system badge; completeness is in its tooltip.
         badge = self.IMPORTANCE_LABELS.get(importance, "") if importance else short
-        compact = f"{title} · {badge}" if self._compact_mode and badge else title
+        # 窄侧栏把状态压缩成着色圆点：颜色沿用宽侧栏的强调/静默规则，文字移入提示，
+        # 名称列因此只承载名称与身份提示。
+        name = title
         if status.get("identity"):
-            compact += " · 别名" if status["identity"] == "alias" else " · 主身份"
-        item.setText(0, compact)
-        item.setText(1, badge)
+            name += " · 别名" if status["identity"] == "alias" else " · 主身份"
+        item.setText(0, name)
+        item.setText(1, self.STATUS_DOT if self._compact_mode and badge else badge)
+        item.setTextAlignment(
+            1,
+            Qt.AlignmentFlag.AlignCenter if self._compact_mode
+            else Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+        )
         policy = self.IMPORTANCE_TOOLTIPS.get(importance, "")
         detail = "\n".join(part for part in (details, policy) if part)
         item.setToolTip(0, f"{title}\n{item.data(0, self.PATH_ROLE)}\n{detail}".rstrip())

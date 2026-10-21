@@ -1,0 +1,295 @@
+
+[1/14] test_canon_acceptance.py
+test_edit_structure_collapse_global_save_navigation_and_restart (test_canon_acceptance.CanonAcceptanceTests.test_edit_structure_collapse_global_save_navigation_and_restart) ... ok
+test_external_conflict_diff_copy_cancel_reload_and_resume (test_canon_acceptance.CanonAcceptanceTests.test_external_conflict_diff_copy_cancel_reload_and_resume) ... ok
+test_pending_ai_result_stales_after_saved_canon_edit_and_blocks_delete (test_canon_acceptance.CanonAcceptanceTests.test_pending_ai_result_stales_after_saved_canon_edit_and_blocks_delete) ... ok
+test_queued_navigation_and_startup_callbacks_end_with_window (test_canon_acceptance.CanonAcceptanceTests.test_queued_navigation_and_startup_callbacks_end_with_window) ... ok
+test_sync_review_cancel_confirm_refresh_and_stale_proposal (test_canon_acceptance.CanonAcceptanceTests.test_sync_review_cancel_confirm_refresh_and_stale_proposal) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 8.176s
+
+OK
+
+[2/14] test_canon_document_context.py
+test_cancel_delete_keeps_draft (test_canon_document_context.CanonDocumentContextTests.test_cancel_delete_keeps_draft) ... ok
+test_cancel_switch_restores_tree_selection (test_canon_document_context.CanonDocumentContextTests.test_cancel_switch_restores_tree_selection) ... ok
+test_failed_save_or_delete_keeps_draft (test_canon_document_context.CanonDocumentContextTests.test_failed_save_or_delete_keeps_draft) ... ok
+test_global_delete_and_undo_target_visible_card (test_canon_document_context.CanonDocumentContextTests.test_global_delete_and_undo_target_visible_card) ... ok
+test_hidden_editor_also_saves_while_virtual_timeline_is_visible (test_canon_document_context.CanonDocumentContextTests.test_hidden_editor_also_saves_while_virtual_timeline_is_visible) ... ok
+test_hidden_editor_is_saved_by_its_owner (test_canon_document_context.CanonDocumentContextTests.test_hidden_editor_is_saved_by_its_owner) ... ok
+test_locate_and_quick_open_keep_canon_document (test_canon_document_context.CanonDocumentContextTests.test_locate_and_quick_open_keep_canon_document) ... ok
+test_project_change_refreshes_clean_card_and_preserves_dirty_conflict (test_canon_document_context.CanonDocumentContextTests.test_project_change_refreshes_clean_card_and_preserves_dirty_conflict) ... ok
+test_save_then_delete_stores_latest_card_in_trash (test_canon_document_context.CanonDocumentContextTests.test_save_then_delete_stores_latest_card_in_trash) ... ok
+test_undo_after_removing_its_field_does_not_edit_another_field (test_canon_document_context.CanonDocumentContextTests.test_undo_after_removing_its_field_does_not_edit_another_field) ... ok
+test_world_delete_and_pending_ai_review_protection (test_canon_document_context.CanonDocumentContextTests.test_world_delete_and_pending_ai_review_protection) ... ok
+
+----------------------------------------------------------------------
+Ran 11 tests in 10.128s
+
+OK
+
+[3/14] test_canon_document_mapping.py
+test_appending_module_to_no_newline_document_is_parseable (test_canon_document_mapping.CanonDocumentMappingTests.test_appending_module_to_no_newline_document_is_parseable) ... ok
+test_character_sync_keeps_metadata_and_outside_bytes (test_canon_document_mapping.CanonDocumentMappingTests.test_character_sync_keeps_metadata_and_outside_bytes) ... ok
+test_code_fences_and_comments_do_not_create_fake_modules (test_canon_document_mapping.CanonDocumentMappingTests.test_code_fences_and_comments_do_not_create_fake_modules) ... ok
+test_context_ignores_real_metadata_but_retains_fenced_examples (test_canon_document_mapping.CanonDocumentMappingTests.test_context_ignores_real_metadata_but_retains_fenced_examples) ... ok
+test_duplicate_fields_and_groups_fall_back_without_losing_lines (test_canon_document_mapping.CanonDocumentMappingTests.test_duplicate_fields_and_groups_fall_back_without_losing_lines) ... ok
+test_duplicate_headings_are_independently_addressable (test_canon_document_mapping.CanonDocumentMappingTests.test_duplicate_headings_are_independently_addressable) ... ok
+test_duplicate_ids_are_isolated_and_repaired_only_when_edited (test_canon_document_mapping.CanonDocumentMappingTests.test_duplicate_ids_are_isolated_and_repaired_only_when_edited) ... ok
+test_edit_keeps_other_spans_bytes_including_mixed_newlines (test_canon_document_mapping.CanonDocumentMappingTests.test_edit_keeps_other_spans_bytes_including_mixed_newlines) ... ok
+test_empty_custom_types_and_identity_survive_reopen (test_canon_document_mapping.CanonDocumentMappingTests.test_empty_custom_types_and_identity_survive_reopen) ... ok
+test_frontmatter_and_fenced_preamble_keep_headers_opaque (test_canon_document_mapping.CanonDocumentMappingTests.test_frontmatter_and_fenced_preamble_keep_headers_opaque) ... ok
+test_gap_still_has_its_own_span_after_move_and_reload (test_canon_document_mapping.CanonDocumentMappingTests.test_gap_still_has_its_own_span_after_move_and_reload) ... ok
+test_handwritten_edits_cannot_insert_document_control_syntax (test_canon_document_mapping.CanonDocumentMappingTests.test_handwritten_edits_cannot_insert_document_control_syntax) ... ok
+test_incomplete_new_syntax_is_rejected_without_touching_source (test_canon_document_mapping.CanonDocumentMappingTests.test_incomplete_new_syntax_is_rejected_without_touching_source) ... ok
+test_invalid_metadata_types_do_not_crash_or_unlock_managed_state (test_canon_document_mapping.CanonDocumentMappingTests.test_invalid_metadata_types_do_not_crash_or_unlock_managed_state) ... ok
+test_marked_suffix_survives_edit_and_delete (test_canon_document_mapping.CanonDocumentMappingTests.test_marked_suffix_survives_edit_and_delete) ... ok
+test_moving_module_leaves_between_module_notes_in_place (test_canon_document_mapping.CanonDocumentMappingTests.test_moving_module_leaves_between_module_notes_in_place) ... ok
+test_opaque_source_and_outside_note_have_separate_edit_spans (test_canon_document_mapping.CanonDocumentMappingTests.test_opaque_source_and_outside_note_have_separate_edit_spans) ... ok
+test_relationship_graph_uses_semantic_section_after_rename (test_canon_document_mapping.CanonDocumentMappingTests.test_relationship_graph_uses_semantic_section_after_rename) ... ok
+test_renamed_schema_module_keeps_schema_and_identity (test_canon_document_mapping.CanonDocumentMappingTests.test_renamed_schema_module_keeps_schema_and_identity) ... ok
+test_status_uses_original_schema_after_module_rename (test_canon_document_mapping.CanonDocumentMappingTests.test_status_uses_original_schema_after_module_rename) ... ok
+test_text_and_raw_edits_keep_nested_headings_inside_module (test_canon_document_mapping.CanonDocumentMappingTests.test_text_and_raw_edits_keep_nested_headings_inside_module) ... ok
+test_unknown_metadata_is_preserved_as_opaque_source (test_canon_document_mapping.CanonDocumentMappingTests.test_unknown_metadata_is_preserved_as_opaque_source) ... ok
+
+----------------------------------------------------------------------
+Ran 22 tests in 0.095s
+
+OK
+
+[4/14] test_canon_edit_safety.py
+test_added_group_marks_dirty_and_failed_save_keeps_inputs (test_canon_edit_safety.CanonDraftSafetyTests.test_added_group_marks_dirty_and_failed_save_keeps_inputs) ... ok
+test_failed_structure_validation_preserves_draft_and_view (test_canon_edit_safety.CanonDraftSafetyTests.test_failed_structure_validation_preserves_draft_and_view) ... ok
+test_file_watcher_refreshes_clean_and_retains_dirty_document (test_canon_edit_safety.CanonDraftSafetyTests.test_file_watcher_refreshes_clean_and_retains_dirty_document) ... ok
+test_remove_last_relation_is_persisted (test_canon_edit_safety.CanonDraftSafetyTests.test_remove_last_relation_is_persisted) ... ok
+test_repeated_save_then_external_conflict_preserves_draft (test_canon_edit_safety.CanonDraftSafetyTests.test_repeated_save_then_external_conflict_preserves_draft) ... ok
+test_same_path_refreshes_clean_document_but_preserves_dirty_draft (test_canon_edit_safety.CanonDraftSafetyTests.test_same_path_refreshes_clean_document_but_preserves_dirty_draft) ... ok
+test_save_then_edit_handwritten_line_keeps_section_boundaries (test_canon_edit_safety.CanonDraftSafetyTests.test_save_then_edit_handwritten_line_keeps_section_boundaries) ... ok
+test_structure_operations_preserve_all_pending_inputs (test_canon_edit_safety.CanonDraftSafetyTests.test_structure_operations_preserve_all_pending_inputs) ... ok
+
+----------------------------------------------------------------------
+Ran 8 tests in 1.228s
+
+OK
+
+[5/14] test_canon_field_management.py
+test_custom_empty_group_and_last_group_deletion_keep_group_type (test_canon_field_management.CanonFieldManagementTests.test_custom_empty_group_and_last_group_deletion_keep_group_type) ... ok
+test_empty_custom_fields_crud_and_order_survive_reopen (test_canon_field_management.CanonFieldManagementTests.test_empty_custom_fields_crud_and_order_survive_reopen) ... ok
+test_group_crud_retains_fields_extras_and_template_schema_after_rename (test_canon_field_management.CanonFieldManagementTests.test_group_crud_retains_fields_extras_and_template_schema_after_rename) ... ok
+test_group_field_order_rename_and_delete_do_not_touch_another_group (test_canon_field_management.CanonFieldManagementTests.test_group_field_order_rename_and_delete_do_not_touch_another_group) ... ok
+test_invalid_names_duplicates_and_boundaries_leave_source_unchanged (test_canon_field_management.CanonFieldManagementTests.test_invalid_names_duplicates_and_boundaries_leave_source_unchanged) ... ok
+test_readonly_and_raw_modules_reject_management (test_canon_field_management.CanonFieldManagementTests.test_readonly_and_raw_modules_reject_management) ... ok
+test_template_fields_are_protected_but_custom_fields_are_managed (test_canon_field_management.CanonFieldManagementTests.test_template_fields_are_protected_but_custom_fields_are_managed) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 0.005s
+
+OK
+
+[6/14] test_canon_form.py
+test_add_group_via_dialog_appends_and_saves (test_canon_form.CanonFormTests.test_add_group_via_dialog_appends_and_saves) ... ok
+test_confirm_cancel_keeps_modifications (test_canon_form.CanonFormTests.test_confirm_cancel_keeps_modifications) ... ok
+test_confirm_discard_reloads_from_disk_without_write (test_canon_form.CanonFormTests.test_confirm_discard_reloads_from_disk_without_write) ... ok
+test_confirm_save_writes_and_resets_modified (test_canon_form.CanonFormTests.test_confirm_save_writes_and_resets_modified) ... ok
+test_confirm_without_modifications_allows_without_prompt (test_canon_form.CanonFormTests.test_confirm_without_modifications_allows_without_prompt) ... ok
+test_delete_module_requires_confirm_then_removes (test_canon_form.CanonFormTests.test_delete_module_requires_confirm_then_removes) ... ok
+test_deleted_file_save_reports_error_without_crash (test_canon_form.CanonFormTests.test_deleted_file_save_reports_error_without_crash) ... ok
+test_extras_rows_edit_round_trip (test_canon_form.CanonFormTests.test_extras_rows_edit_round_trip) ... ok
+test_form_edit_marks_section_and_preserves_rest_bytes (test_canon_form.CanonFormTests.test_form_edit_marks_section_and_preserves_rest_bytes) ... ok
+test_form_renders_all_module_types (test_canon_form.CanonFormTests.test_form_renders_all_module_types) ... ok
+test_group_extras_rows_edit_round_trip (test_canon_form.CanonFormTests.test_group_extras_rows_edit_round_trip) ... ok
+test_group_field_edit_persists (test_canon_form.CanonFormTests.test_group_field_edit_persists) ... ok
+test_managed_section_is_readonly_without_field_widgets (test_canon_form.CanonFormTests.test_managed_section_is_readonly_without_field_widgets) ... ok
+test_move_button_boundary_shows_feedback (test_canon_form.CanonFormTests.test_move_button_boundary_shows_feedback) ... ok
+test_move_buttons_reorder_modules (test_canon_form.CanonFormTests.test_move_buttons_reorder_modules) ... ok
+test_narrow_page_both_themes_large_font_no_horizontal_overflow (test_canon_form.CanonFormTests.test_narrow_page_both_themes_large_font_no_horizontal_overflow) ... ok
+test_narrow_page_project_mode_both_themes_large_font_no_horizontal_overflow (test_canon_form.CanonFormTests.test_narrow_page_project_mode_both_themes_large_font_no_horizontal_overflow) ... ok
+test_narrow_world_page_with_module_ops_no_overflow (test_canon_form.CanonFormTests.test_narrow_world_page_with_module_ops_no_overflow) ... ok
+test_new_module_dialog_confirm_creates_module (test_canon_form.CanonFormTests.test_new_module_dialog_confirm_creates_module) ... ok
+test_new_module_dialog_duplicate_shows_error_inside (test_canon_form.CanonFormTests.test_new_module_dialog_duplicate_shows_error_inside) ... ok
+test_new_module_dialog_empty_name_shows_error (test_canon_form.CanonFormTests.test_new_module_dialog_empty_name_shows_error) ... ok
+test_new_module_dialog_group_and_fields_types (test_canon_form.CanonFormTests.test_new_module_dialog_group_and_fields_types) ... ok
+test_open_path_load_failure_keeps_old_entry (test_canon_form.CanonFormTests.test_open_path_load_failure_keeps_old_entry) ... ok
+test_open_same_path_short_circuits_without_prompt (test_canon_form.CanonFormTests.test_open_same_path_short_circuits_without_prompt) ... ok
+test_page_header_shows_title_kind_badge_and_modified_state (test_canon_form.CanonFormTests.test_page_header_shows_title_kind_badge_and_modified_state) ... ok
+test_page_new_module_button_full_flow (test_canon_form.CanonFormTests.test_page_new_module_button_full_flow) ... ok
+test_page_save_button_writes_and_emits_saved_signal (test_canon_form.CanonFormTests.test_page_save_button_writes_and_emits_saved_signal) ... ok
+test_raw_block_edit_saves_verbatim_and_keeps_other_sections (test_canon_form.CanonFormTests.test_raw_block_edit_saves_verbatim_and_keeps_other_sections) ... ok
+test_raw_module_block_editable_with_badge (test_canon_form.CanonFormTests.test_raw_module_block_editable_with_badge) ... ok
+test_relation_module_keeps_picker_after_rename (test_canon_form.CanonFormTests.test_relation_module_keeps_picker_after_rename) ... ok
+test_relation_picker_add_and_save (test_canon_form.CanonFormTests.test_relation_picker_add_and_save) ... ok
+test_rename_module_cancel_keeps_entry (test_canon_form.CanonFormTests.test_rename_module_cancel_keeps_entry) ... ok
+test_rename_module_duplicate_shows_feedback (test_canon_form.CanonFormTests.test_rename_module_duplicate_shows_feedback) ... ok
+test_rename_module_via_button_saves_new_heading (test_canon_form.CanonFormTests.test_rename_module_via_button_saves_new_heading) ... ok
+test_reset_clears_page_state (test_canon_form.CanonFormTests.test_reset_clears_page_state) ... ok
+test_revision_lock_rejects_external_modification (test_canon_form.CanonFormTests.test_revision_lock_rejects_external_modification) ... ok
+test_save_triggers_on_saved_callback (test_canon_form.CanonFormTests.test_save_triggers_on_saved_callback) ... ok
+test_save_without_change_does_not_call_on_saved (test_canon_form.CanonFormTests.test_save_without_change_does_not_call_on_saved) ... ok
+test_save_without_change_writes_nothing (test_canon_form.CanonFormTests.test_save_without_change_writes_nothing) ... ok
+test_switch_entry_cancel_keeps_old_entry (test_canon_form.CanonFormTests.test_switch_entry_cancel_keeps_old_entry) ... ok
+test_switch_entry_discard_flow (test_canon_form.CanonFormTests.test_switch_entry_discard_flow) ... ok
+test_switch_entry_save_flow_writes_old_entry (test_canon_form.CanonFormTests.test_switch_entry_save_flow_writes_old_entry) ... ok
+test_system_modules_show_badge_without_op_buttons (test_canon_form.CanonFormTests.test_system_modules_show_badge_without_op_buttons) ... ok
+test_unknown_kind_rejected (test_canon_form.CanonFormTests.test_unknown_kind_rejected) ... ok
+test_unknown_kind_rejected_via_page (test_canon_form.CanonFormTests.test_unknown_kind_rejected_via_page) ... ok
+test_widget_exposes_no_mode_buttons (test_canon_form.CanonFormTests.test_widget_exposes_no_mode_buttons) ... ok
+
+----------------------------------------------------------------------
+Ran 46 tests in 4.456s
+
+OK
+
+[7/14] test_canon_index.py
+test_collect_canon_index_badges_and_identity (test_canon_index.CanonIndexTests.test_collect_canon_index_badges_and_identity) ... ok
+test_collect_canon_index_skips_unreadable_files (test_canon_index.CanonIndexTests.test_collect_canon_index_skips_unreadable_files) ... ok
+test_entry_status_missing_fields (test_canon_index.CanonIndexTests.test_entry_status_missing_fields) ... ok
+test_entry_status_synced (test_canon_index.CanonIndexTests.test_entry_status_synced) ... ok
+test_world_missing_sections (test_canon_index.CanonIndexTests.test_world_missing_sections) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.030s
+
+OK
+
+[8/14] test_canon_layout.py
+test_cards_have_opaque_theme_surfaces (test_canon_layout.CanonLayoutTests.test_cards_have_opaque_theme_surfaces) ... ok
+test_collapse_keeps_draft_and_restores_editor_on_undo (test_canon_layout.CanonLayoutTests.test_collapse_keeps_draft_and_restores_editor_on_undo) ... ok
+test_header_actions_reflow_without_overlap_in_both_themes (test_canon_layout.CanonLayoutTests.test_header_actions_reflow_without_overlap_in_both_themes) ... ok
+test_long_module_titles_wrap_above_actions_without_clipping (test_canon_layout.CanonLayoutTests.test_long_module_titles_wrap_above_actions_without_clipping) ... ok
+test_page_title_stays_visible_above_actions_at_narrow_large_font (test_canon_layout.CanonLayoutTests.test_page_title_stays_visible_above_actions_at_narrow_large_font) ... ok
+test_short_cards_do_not_stretch_with_tall_window (test_canon_layout.CanonLayoutTests.test_short_cards_do_not_stretch_with_tall_window) ... ok
+test_text_grows_shrinks_and_scrolls_at_its_limit (test_canon_layout.CanonLayoutTests.test_text_grows_shrinks_and_scrolls_at_its_limit) ... ok
+test_wrapping_and_font_changes_refit_without_edits (test_canon_layout.CanonLayoutTests.test_wrapping_and_font_changes_refit_without_edits) ... ok
+
+----------------------------------------------------------------------
+Ran 8 tests in 2.316s
+
+OK
+
+[9/14] test_canon_management_ui.py
+test_collapse_keyboard_saves_hidden_input_without_dirtying_view_state (test_canon_management_ui.CanonManagementUITests.test_collapse_keyboard_saves_hidden_input_without_dirtying_view_state) ... ok
+test_collapse_state_is_per_document_and_survives_structure_changes (test_canon_management_ui.CanonManagementUITests.test_collapse_state_is_per_document_and_survives_structure_changes) ... ok
+test_custom_fields_can_be_added_renamed_sorted_deleted_and_reopened (test_canon_management_ui.CanonManagementUITests.test_custom_fields_can_be_added_renamed_sorted_deleted_and_reopened) ... ok
+test_group_menu_reorders_renames_and_deletes_with_unsaved_input (test_canon_management_ui.CanonManagementUITests.test_group_menu_reorders_renames_and_deletes_with_unsaved_input) ... ok
+test_group_rename_restores_focus_and_selection_in_same_field (test_canon_management_ui.CanonManagementUITests.test_group_rename_restores_focus_and_selection_in_same_field) ... ok
+test_invalid_add_and_cancelled_delete_keep_inputs_and_disk (test_canon_management_ui.CanonManagementUITests.test_invalid_add_and_cancelled_delete_keep_inputs_and_disk) ... ok
+test_narrow_large_font_long_names_both_themes_without_horizontal_overflow (test_canon_management_ui.CanonManagementUITests.test_narrow_large_font_long_names_both_themes_without_horizontal_overflow) ... ok
+test_only_custom_fields_expose_management_menu (test_canon_management_ui.CanonManagementUITests.test_only_custom_fields_expose_management_menu) ... ok
+test_undo_reveals_collapsed_last_editor (test_canon_management_ui.CanonManagementUITests.test_undo_reveals_collapsed_last_editor) ... ok
+
+----------------------------------------------------------------------
+Ran 9 tests in 1.698s
+
+OK
+
+[10/14] test_canon_mapping_ui.py
+test_ambiguous_fields_are_editable_as_a_whole_raw_block (test_canon_mapping_ui.CanonMappingUITests.test_ambiguous_fields_are_editable_as_a_whole_raw_block) ... ok
+test_duplicate_module_buttons_act_on_the_selected_identity (test_canon_mapping_ui.CanonMappingUITests.test_duplicate_module_buttons_act_on_the_selected_identity) ... ok
+test_edit_only_preserves_other_spans_and_eol_then_save_again (test_canon_mapping_ui.CanonMappingUITests.test_edit_only_preserves_other_spans_and_eol_then_save_again) ... ok
+test_module_metadata_is_not_displayed_in_raw_editors (test_canon_mapping_ui.CanonMappingUITests.test_module_metadata_is_not_displayed_in_raw_editors) ... ok
+test_persisted_empty_types_keep_role_and_noop_save_is_byte_identical (test_canon_mapping_ui.CanonMappingUITests.test_persisted_empty_types_keep_role_and_noop_save_is_byte_identical) ... ok
+test_preamble_edit_keeps_title_bom_and_application_markers (test_canon_mapping_ui.CanonMappingUITests.test_preamble_edit_keeps_title_bom_and_application_markers) ... ok
+test_relation_rename_keeps_picker_after_save_and_reload (test_canon_mapping_ui.CanonMappingUITests.test_relation_rename_keeps_picker_after_save_and_reload) ... ok
+test_sectionless_preamble_and_frontmatter_are_editable_safely (test_canon_mapping_ui.CanonMappingUITests.test_sectionless_preamble_and_frontmatter_are_editable_safely) ... ok
+test_suffix_edit_and_module_delete_keep_the_between_note (test_canon_mapping_ui.CanonMappingUITests.test_suffix_edit_and_module_delete_keep_the_between_note) ... ok
+
+----------------------------------------------------------------------
+Ran 9 tests in 0.426s
+
+OK
+
+[11/14] test_canon_modules.py
+test_auto_modules_parsed_with_roles (test_canon_modules.ModuleDetectionTests.test_auto_modules_parsed_with_roles) ... ok
+test_detect_role_rules (test_canon_modules.ModuleDetectionTests.test_detect_role_rules) ... ok
+test_edited_auto_module_leaves_siblings_verbatim (test_canon_modules.ModuleDetectionTests.test_edited_auto_module_leaves_siblings_verbatim) ... ok
+test_never_edited_auto_modules_round_trip_verbatim (test_canon_modules.ModuleDetectionTests.test_never_edited_auto_modules_round_trip_verbatim) ... ok
+test_add_module_inserts_before_managed_and_reparses (test_canon_modules.ModuleMutationTests.test_add_module_inserts_before_managed_and_reparses) ... ok
+test_add_module_validations (test_canon_modules.ModuleMutationTests.test_add_module_validations) ... ok
+test_add_module_world_appends_at_end (test_canon_modules.ModuleMutationTests.test_add_module_world_appends_at_end) ... ok
+test_add_module_write_reparse_fields_and_group (test_canon_modules.ModuleMutationTests.test_add_module_write_reparse_fields_and_group) ... ok
+test_delete_rejections (test_canon_modules.ModuleMutationTests.test_delete_rejections) ... ok
+test_delete_removes_span_and_keeps_others_byte_identical (test_canon_modules.ModuleMutationTests.test_delete_removes_span_and_keeps_others_byte_identical) ... ok
+test_is_system_section (test_canon_modules.ModuleMutationTests.test_is_system_section) ... ok
+test_module_ops_write_and_reload_full_cycle (test_canon_modules.ModuleMutationTests.test_module_ops_write_and_reload_full_cycle) ... ok
+test_move_rejections_and_boundaries (test_canon_modules.ModuleMutationTests.test_move_rejections_and_boundaries) ... ok
+test_move_skips_system_blocks (test_canon_modules.ModuleMutationTests.test_move_skips_system_blocks) ... ok
+test_move_swaps_neighbors_and_keeps_systems_fixed (test_canon_modules.ModuleMutationTests.test_move_swaps_neighbors_and_keeps_systems_fixed) ... ok
+test_rename_group_section_becomes_detected_group (test_canon_modules.ModuleMutationTests.test_rename_group_section_becomes_detected_group) ... ok
+test_rename_preserves_body_bytes_exactly (test_canon_modules.ModuleMutationTests.test_rename_preserves_body_bytes_exactly) ... ok
+test_rename_raw_module_preserves_bytes (test_canon_modules.ModuleMutationTests.test_rename_raw_module_preserves_bytes) ... ok
+test_rename_rejections (test_canon_modules.ModuleMutationTests.test_rename_rejections) ... ok
+
+----------------------------------------------------------------------
+Ran 19 tests in 0.036s
+
+OK
+
+[12/14] test_canon_navigation_status.py
+test_ambiguous_and_invalid_documents_show_actionable_status_without_crash (test_canon_navigation_status.CanonNavigationStatusTests.test_ambiguous_and_invalid_documents_show_actionable_status_without_crash) ... ok
+test_cached_status_only_reparses_changed_file_and_keeps_system_policy (test_canon_navigation_status.CanonNavigationStatusTests.test_cached_status_only_reparses_changed_file_and_keeps_system_policy) ... ok
+test_identity_hints_refresh_without_reparsing_unchanged_documents (test_canon_navigation_status.CanonNavigationStatusTests.test_identity_hints_refresh_without_reparsing_unchanged_documents) ... ok
+test_missing_sync_and_world_states_are_visible_in_compact_and_wide_views (test_canon_navigation_status.CanonNavigationStatusTests.test_missing_sync_and_world_states_are_visible_in_compact_and_wide_views) ... ok
+test_outside_notes_do_not_count_as_synchronized_state (test_canon_navigation_status.CanonNavigationStatusTests.test_outside_notes_do_not_count_as_synchronized_state) ... ok
+test_refresh_changes_status_without_opening_file_or_losing_navigation (test_canon_navigation_status.CanonNavigationStatusTests.test_refresh_changes_status_without_opening_file_or_losing_navigation) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.546s
+
+OK
+
+[13/14] test_canon_open_routing.py
+test_blocks_with_message_while_ai_running_without_fallback (test_canon_open_routing.OpenCanonPageRoutingTests.test_blocks_with_message_while_ai_running_without_fallback) ... ok
+test_edit_canon_structured_falls_back_to_first_character (test_canon_open_routing.OpenCanonPageRoutingTests.test_edit_canon_structured_falls_back_to_first_character) ... ok
+test_edit_canon_structured_warns_while_ai_busy (test_canon_open_routing.OpenCanonPageRoutingTests.test_edit_canon_structured_warns_while_ai_busy) ... ok
+test_load_failure_shows_warning_and_stays (test_canon_open_routing.OpenCanonPageRoutingTests.test_load_failure_shows_warning_and_stays) ... ok
+test_open_path_cancel_keeps_current_view (test_canon_open_routing.OpenCanonPageRoutingTests.test_open_path_cancel_keeps_current_view) ... ok
+test_opens_embedded_page_for_canon_path (test_canon_open_routing.OpenCanonPageRoutingTests.test_opens_embedded_page_for_canon_path) ... ok
+test_returns_false_for_canon_kind_outside_project (test_canon_open_routing.OpenCanonPageRoutingTests.test_returns_false_for_canon_kind_outside_project) ... ok
+test_returns_false_for_non_canon_path (test_canon_open_routing.OpenCanonPageRoutingTests.test_returns_false_for_non_canon_path) ... ok
+test_returns_false_while_ai_running_with_fallback (test_canon_open_routing.OpenCanonPageRoutingTests.test_returns_false_while_ai_running_with_fallback) ... ok
+test_returns_false_without_project (test_canon_open_routing.OpenCanonPageRoutingTests.test_returns_false_without_project) ... ok
+test_returns_true_when_user_cancels_save (test_canon_open_routing.OpenCanonPageRoutingTests.test_returns_true_when_user_cancels_save) ... ok
+test_same_path_reveal_does_not_reload_or_prompt (test_canon_open_routing.OpenCanonPageRoutingTests.test_same_path_reveal_does_not_reload_or_prompt) ... ok
+test_left_panel_canon_click_opens_embedded_page (test_canon_open_routing.RealWindowCanonRoutingTests.test_left_panel_canon_click_opens_embedded_page) ... ok
+
+----------------------------------------------------------------------
+Ran 13 tests in 0.859s
+
+OK
+
+[14/14] test_canon_schema.py
+test_auto_state_block_bytes_preserved_across_edits (test_canon_schema.CanonSchemaTests.test_auto_state_block_bytes_preserved_across_edits) ... ok
+test_edited_entry_renders_idempotently (test_canon_schema.CanonSchemaTests.test_edited_entry_renders_idempotently) ... ok
+test_field_edit_only_touches_its_section (test_canon_schema.CanonSchemaTests.test_field_edit_only_touches_its_section) ... ok
+test_filled_entry_round_trip_byte_identical (test_canon_schema.CanonSchemaTests.test_filled_entry_round_trip_byte_identical) ... ok
+test_group_field_edit_and_reparse (test_canon_schema.CanonSchemaTests.test_group_field_edit_and_reparse) ... ok
+test_handwritten_lines_survive_field_edit (test_canon_schema.CanonSchemaTests.test_handwritten_lines_survive_field_edit) ... ok
+test_latin_colon_items_parse (test_canon_schema.CanonSchemaTests.test_latin_colon_items_parse) ... ok
+test_managed_and_free_sections_reject_form_edits (test_canon_schema.CanonSchemaTests.test_managed_and_free_sections_reject_form_edits) ... ok
+test_missing_section_and_missing_field (test_canon_schema.CanonSchemaTests.test_missing_section_and_missing_field) ... ok
+test_new_group_is_appended_and_reparsable (test_canon_schema.CanonSchemaTests.test_new_group_is_appended_and_reparsable) ... ok
+test_stray_marker_lines_are_preserved (test_canon_schema.CanonSchemaTests.test_stray_marker_lines_are_preserved) ... ok
+test_templates_round_trip_byte_identical (test_canon_schema.CanonSchemaTests.test_templates_round_trip_byte_identical) ... ok
+test_text_section_edit_and_reparse (test_canon_schema.CanonSchemaTests.test_text_section_edit_and_reparse) ... ok
+test_unknown_heading_section_stays_verbatim (test_canon_schema.CanonSchemaTests.test_unknown_heading_section_stays_verbatim) ... ok
+test_unknown_kind_rejected (test_canon_schema.CanonSchemaTests.test_unknown_kind_rejected) ... ok
+test_write_and_load_round_trip (test_canon_schema.CanonSchemaTests.test_write_and_load_round_trip) ... ok
+test_set_extras_on_dirty_section_keeps_content (test_canon_schema.RawSectionAndExtrasTests.test_set_extras_on_dirty_section_keeps_content) ... ok
+test_set_extras_rejections (test_canon_schema.RawSectionAndExtrasTests.test_set_extras_rejections) ... ok
+test_set_group_extras_round_trip (test_canon_schema.RawSectionAndExtrasTests.test_set_group_extras_round_trip) ... ok
+test_set_raw_section_text_crlf_section_keeps_crlf (test_canon_schema.RawSectionAndExtrasTests.test_set_raw_section_text_crlf_section_keeps_crlf) ... ok
+test_set_raw_section_text_edits_raw_module (test_canon_schema.RawSectionAndExtrasTests.test_set_raw_section_text_edits_raw_module) ... ok
+test_set_raw_section_text_no_change_preserves_bytes (test_canon_schema.RawSectionAndExtrasTests.test_set_raw_section_text_no_change_preserves_bytes) ... ok
+test_set_raw_section_text_rejections (test_canon_schema.RawSectionAndExtrasTests.test_set_raw_section_text_rejections) ... ok
+test_set_raw_section_text_round_trip_and_idempotent (test_canon_schema.RawSectionAndExtrasTests.test_set_raw_section_text_round_trip_and_idempotent) ... ok
+test_set_section_extras_append_and_remove_lines (test_canon_schema.RawSectionAndExtrasTests.test_set_section_extras_append_and_remove_lines) ... ok
+test_set_section_extras_crlf_preserves_line_endings (test_canon_schema.RawSectionAndExtrasTests.test_set_section_extras_crlf_preserves_line_endings) ... ok
+test_set_section_extras_surgical_round_trip (test_canon_schema.RawSectionAndExtrasTests.test_set_section_extras_surgical_round_trip) ... ok
+
+----------------------------------------------------------------------
+Ran 27 tests in 0.052s
+
+OK
+
+Modules: 14; tests: 195; skipped: 0; failed modules: 0

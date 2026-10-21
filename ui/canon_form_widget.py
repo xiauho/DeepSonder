@@ -20,8 +20,8 @@ import hashlib
 from copy import deepcopy
 from pathlib import Path
 
-from PySide6.QtCore import QFileSystemWatcher, QTimer, Signal, Qt
-from PySide6.QtWidgets import (QApplication, QButtonGroup, QDialog, QGroupBox,
+from PySide6.QtCore import QEvent, QFileSystemWatcher, QPoint, QTimer, Signal, Qt
+from PySide6.QtWidgets import (QApplication, QButtonGroup, QDialog, QFrame,
     QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMenu, QMessageBox, QPlainTextEdit,
     QPushButton, QRadioButton, QScrollArea, QSizePolicy, QToolButton, QVBoxLayout, QWidget)
 
@@ -39,6 +39,78 @@ from core.canon_fields import (add_field, rename_field, delete_field, move_field
 from core.character_identity import load_registry
 from core.storage import atomic_write_text
 from ui.wrapping_label import WrappingLabel
+from ui.icons import set_button_icon
+from ui.theme import colors_for
+from ui.canon_layout import CanonCard, CanonModuleHeader, CanonTextEdit
+
+
+# 空分区写作引导：让作者在打开一份空白资料时就知道每个分区该写什么。
+# 未登记的分区按角色回退到通用提示，不显示与内容无关的说明。
+SECTION_HINTS: dict[str, str] = {
+    "核心规则": "这个世界不变的底层规则。例：灵气的来源与枯竭条件、生死的界限。",
+    "地理与空间": "主要地点、区域关系与彼此的距离感。例：北境与中原之间隔着断魂岭。",
+    "历史与现状": "影响当下的关键历史事件，以及故事开始时各方所处的局面。",
+    "社会、势力与秩序": "主要势力、权力结构与阶层规则。例：宗门按境界分配资源。",
+    "技术、魔法或特殊现象": "这一世界的特殊能力与现象如何运作，以及它的边界。",
+    "体系定位": "这套体系在故事中解决什么问题，与其他体系如何区分。",
+    "等级或层级": "分几层、每层的名称与代表能力。例：炼气 → 筑基 → 金丹。",
+    "核心原则": "体系运转的基本逻辑。例：同等境界下法宝决定胜负。",
+    "获取方式": "角色如何得到它、需要满足什么条件。",
+    "使用限制": "什么时候不能用、什么情况下会失效。",
+    "代价与副作用": "使用的成本与反噬。例：越级施法会损伤经脉。",
+    "克制关系": "谁克制谁，以及克制成立的原因。",
+    "晋升与突破": "升级需要满足的条件与仪式，以及失败会怎样。",
+    "对剧情的约束": "因此不能出现的情节，避免后续写崩。例：凡人无法直接对抗修士。",
+    "已知例外": "打破规则的个别情况，需要交代成立原因。",
+    "已知例外与未解问题": "暂时说不通或刻意留白的地方，供后续埋伏笔。",
+    "空间层级": "空间分几层，每层各自的特征与用途。",
+    "空间之间的关系": "各空间如何连通或彼此隔离。",
+    "进入与离开条件": "满足什么条件才能进出，以及代价。",
+    "时间流速差异": "不同空间的时间比例。例：内一日，外一年。",
+    "空间边界与限制": "边界在哪里、有什么硬性限制。",
+    "空间资源": "空间内可获取的资源与稀缺程度。",
+    "与主世界的关系": "它对主世界的影响与联系。",
+    "全书不可违背的规则": "整本书都不能违反的硬约束。例：死者不可复生。",
+    "基础约束条件": "规则生效的前提。例：只有持剑者能触发。",
+    "生效与获取条件": "生效需要满足什么、又如何获得。",
+    "全局例外": "唯一的例外及其成立条件。",
+    "外貌与辨识特征": "可被反复引用的外观细节。例：左手腕有旧疤。",
+    "性格、动机与核心欲望": "他想要什么、害怕什么，冲突从哪里来。",
+    "长期目标与人物弧线": "这个角色从哪走到哪，关键转折在什么时候。",
+    "关键关系": "与其他角色的关系，以及这层关系里的张力。",
+    "秘密与人物弧线": "尚未揭晓的信息与揭露时机。",
+    "能力档案": "这项能力如何运作、有哪些限制与代价。",
+    "作者自由备注": "不属于模板分区的补充信息，保存时原样保留。",
+}
+
+# 模板预设字段的示例提示，只在输入框为空时显示。
+FIELD_HINTS: dict[str, str] = {
+    "姓名": "主名，同时作为角色卡文件名",
+    "别名": "其他称呼，用「、」分隔",
+    "年龄／出生信息": "例：27 岁／春天出生",
+    "性别": "例：女",
+    "身份／阵营": "例：守夜人 · 北境",
+    "首次出场": "例：第 3 章",
+    "所属体系": "例：御剑体系",
+    "能力属性": "例：火／风／神识",
+    "当前等级": "例：筑基三层",
+    "当前数值": "例：攻击 120",
+    "使用条件": "例：需持剑，且灵力充足",
+    "限制与代价": "例：每日最多三次",
+    "克制关系": "例：被水系克制",
+}
+
+
+def section_hint(heading: str, role: str) -> str:
+    """分区占位提示：优先取登记文案，否则按角色给出保守的通用提示。"""
+    hint = SECTION_HINTS.get(heading)
+    if hint:
+        return hint
+    if role == ROLE_TEXT:
+        return "填写这一分区的内容；保存后写回原 Markdown。"
+    if role in (ROLE_RAW, ROLE_FREE):
+        return "写下不属于模板分区的内容，保存时原样保留。"
+    return ""
 
 
 class NewModuleDialog(QDialog):
@@ -122,6 +194,8 @@ class CanonFormWidget(QWidget):
     modified_changed = Signal(bool)
     state_changed = Signal()
     reloaded = Signal(str)
+    outline_changed = Signal()
+    current_module_changed = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -148,11 +222,15 @@ class CanonFormWidget(QWidget):
         self._alias_map: dict[str, str] = {}
         self._theme_config: dict = {"theme": "light"}
         self._collapse_by_path: dict[str, set[str]] = {}
+        # 跨会话折叠记忆钩子：由主窗口注入，按文档路径读取/回写折叠的模块 id。
+        self.collapse_state_loader = None  # Callable[[Path], set[str] | None]
+        self.collapse_state_saver = None   # Callable[[Path, set[str]], None]
         self._module_bodies: dict[str, QWidget] = {}
         self._module_toggles: dict[str, QToolButton] = {}
+        self._heading_toggles: dict[QWidget, QToolButton] = {}
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 10, 18, 12)
+        layout.setContentsMargins(18, 8, 18, 8)
         layout.setSpacing(8)
 
         self.form_scroll = QScrollArea(self)
@@ -175,6 +253,13 @@ class CanonFormWidget(QWidget):
         self._refresh_timer.timeout.connect(self.refresh_from_disk)
         self._watcher.fileChanged.connect(lambda _path: self._refresh_timer.start())
         self._watcher.directoryChanged.connect(lambda _path: self._refresh_timer.start())
+        # 分区大纲的已填写状态与当前位置都从实时输入推导，避免每击键重建。
+        self._outline_timer = QTimer(self)
+        self._outline_timer.setSingleShot(True)
+        self._outline_timer.setInterval(300)
+        self._outline_timer.timeout.connect(self.outline_changed)
+        self._current_module = ""
+        self.form_scroll.verticalScrollBar().valueChanged.connect(self._track_current_module)
         QApplication.instance().focusChanged.connect(self._remember_focus)
         self._build_form()  # 初始为空表单，等待 load_entry
 
@@ -202,6 +287,78 @@ class CanonFormWidget(QWidget):
 
     def is_modified(self) -> bool:
         return self._modified
+
+    def outline_entries(self) -> list[tuple[str, str, bool]]:
+        """分区大纲：(module_id, 标题, 是否已填写)；资料导语用空 module_id 表示。
+
+        已填写状态读取当前输入控件的实时内容，因此未保存的编辑也能立即反映；
+        没有对应输入控件的分区（例如只读同步区）按已载入的数据判断。
+        """
+        if self.entry is None:
+            return []
+        values: dict[tuple[int, str, str], str] = {}
+        for section, key, editor in self._field_widgets:
+            values[(id(section), "", key)] = editor.text()
+        for section, group, key, editor in self._group_widgets:
+            values[(id(section), group, key)] = editor.text()
+        extras: dict[tuple[int, str], list[str]] = {}
+        for section, group, rows in self._extras_rows:
+            extras[(id(section), group or "")] = [row.text() for row in rows]
+        text_live = {id(section): editor.toPlainText() for section, editor in self._text_widgets}
+        raw_live = {id(section): editor.toPlainText() for section, editor in self._raw_widgets}
+
+        def fields_filled(section: CanonSection, group: str | None) -> bool:
+            holder = (next(g for g in section.groups if g.name == group)
+                      if group is not None else section)
+            for key, stored in holder.fields.items():
+                live = values.get((id(section), group or "", key))
+                if (stored if live is None else live).strip():
+                    return True
+            return any(line.strip() for line in extras.get((id(section), group or ""), []))
+
+        entries: list[tuple[str, str, bool]] = [
+            ("", "资料导语", any(e.toPlainText().strip() for _index, e in self._preamble_widgets))
+        ]
+        for section in self.entry.sections:
+            if section.role == ROLE_TEXT:
+                live = text_live.get(id(section))
+                filled = bool((str(live) if live is not None else section.text).strip())
+            elif section.role in (ROLE_RAW, ROLE_FREE):
+                live = raw_live.get(id(section))
+                body = raw_section_body(section) if live is None else str(live)
+                filled = bool(body.strip())
+            elif section.role == ROLE_FIELDS:
+                filled = fields_filled(section, None)
+            elif section.role == ROLE_GROUP:
+                filled = fields_filled(section, None) or any(
+                    fields_filled(section, group.name) for group in section.groups)
+            elif section.role == ROLE_MANAGED:
+                filled = bool(raw_section_body(section).strip())
+            else:
+                filled = False
+            entries.append((section.module_id, section.heading or "未识别章节", filled))
+        return entries
+
+    def reveal_module(self, module_id: str) -> bool:
+        """展开并滚动到指定分区；空 module_id 表示回到资料导语。
+
+        对齐标题行而不是正文，跳转后分区名仍在视口内，滚动位置即高亮来源。
+        """
+        content = self.form_scroll.widget()
+        if not module_id or content is None:
+            self.form_scroll.verticalScrollBar().setValue(0)
+            return True
+        toggle = self._module_toggles.get(module_id)
+        if toggle is None or module_id not in self._module_bodies:
+            return False
+        toggle.setChecked(True)
+        layout = content.layout()
+        if layout is not None:
+            layout.activate()
+        bar = self.form_scroll.verticalScrollBar()
+        offset = toggle.mapTo(content, QPoint(0, 0)).y()
+        bar.setValue(max(0, min(offset, bar.maximum())))
+        return True
 
     def set_theme(self, config: dict | None = None) -> None:
         """记录应用主题配置（表单配色由全局样式表驱动）。"""
@@ -400,6 +557,17 @@ class CanonFormWidget(QWidget):
         if any(current is editor for editor in self._editable_widgets()):
             self._last_editor = current
 
+    def eventFilter(self, watched, event) -> bool:
+        """标题行整行可点击折叠；标题行内的开关仍各自处理自己的点击。"""
+        toggle = self._heading_toggles.get(watched)
+        if (toggle is not None
+                and event.type() == QEvent.Type.MouseButtonRelease
+                and event.button() == Qt.MouseButton.LeftButton
+                and watched.childAt(event.position().toPoint()) is not toggle):
+            toggle.setChecked(not toggle.isChecked())
+            return True
+        return super().eventFilter(watched, event)
+
     def focus_editor(self):
         editors = self._editable_widgets()
         editor = next((e for e in editors if e is self._last_editor), None)
@@ -426,6 +594,24 @@ class CanonFormWidget(QWidget):
                 self.form_scroll.ensureWidgetVisible(editor)
                 break
 
+    def _track_current_module(self, _value: int = 0) -> None:
+        """按滚动位置推导视口顶部所在的分区，供分区大纲高亮。
+
+        与 reveal_module 使用同一处锚点（模块标题行），跳转后的高亮即被跳转的分区。
+        """
+        content = self.form_scroll.widget()
+        if content is None:
+            return
+        viewport_top = self.form_scroll.verticalScrollBar().value()
+        current, best = "", -1
+        for module_id, toggle in self._module_toggles.items():
+            top = toggle.mapTo(content, QPoint(0, 0)).y()
+            if top <= viewport_top + 12 and top > best:
+                best, current = top, module_id
+        if current != self._current_module:
+            self._current_module = current
+            self.current_module_changed.emit(current)
+
     def _set_modified(self, value: bool) -> None:
         value = bool(value)
         if value != self._modified:
@@ -434,6 +620,7 @@ class CanonFormWidget(QWidget):
 
     def _mark_modified(self) -> None:
         self._set_modified(True)
+        self._outline_timer.start()
 
     def _load_alias_map(self) -> dict[str, str]:
         """从人物身份记录构建 别名 → 主名 映射；记录损坏时降级为空映射。"""
@@ -459,9 +646,12 @@ class CanonFormWidget(QWidget):
         self._relation_sections.clear()
         self._module_bodies.clear()
         self._module_toggles.clear()
+        self._heading_toggles.clear()
         content = QWidget()
+        content.setObjectName("canonFormContent")
         body = QVBoxLayout(content)
-        body.setSpacing(12)
+        body.setContentsMargins(6, 6, 6, 12)
+        body.setSpacing(14)
         if self.entry is not None:
             controls = QHBoxLayout()
             controls.addStretch()
@@ -480,37 +670,39 @@ class CanonFormWidget(QWidget):
                     body.addWidget(self._suffix_panel(section))
         body.addStretch()
         self.form_scroll.setWidget(content)
+        self.outline_changed.emit()
 
     def _preamble_panel(self) -> QWidget:
-        box = QGroupBox()
+        box = CanonCard("canonIntroCard")
         layout = QVBoxLayout(box)
+        layout.setContentsMargins(16, 14, 16, 16)
+        layout.setSpacing(10)
         label = QLabel("资料导语")
-        label.setObjectName("sectionTitle")
+        label.setObjectName("canonModuleTitle")
         layout.addWidget(label)
         blocks = preamble_blocks(self.entry)
         visible = [i for i, (_start, _end, text) in enumerate(blocks) if text.strip()]
         if not visible:
             visible = [len(blocks) - 1]
         for index in visible:
-            editor = QPlainTextEdit()
-            editor.setObjectName("canonIntroEditor")
+            editor = CanonTextEdit(blocks[index][2], maximum_lines=6)
+            editor.setAccessibleName("资料导语")
             editor.setPlaceholderText("资料概述，可留空。")
-            editor.setPlainText(blocks[index][2])
-            editor.setMaximumHeight(90)
             editor.textChanged.connect(self._mark_modified)
             layout.addWidget(editor)
             self._preamble_widgets.append((index, editor))
         return box
 
     def _suffix_panel(self, section: CanonSection) -> QWidget:
-        box = QGroupBox()
+        box = CanonCard("canonIntroCard")
         layout = QVBoxLayout(box)
+        layout.setContentsMargins(16, 14, 16, 16)
+        layout.setSpacing(10)
         label = QLabel("区块间备注")
-        label.setObjectName("sectionTitle")
+        label.setObjectName("canonModuleTitle")
         layout.addWidget(label)
-        editor = QPlainTextEdit()
-        editor.setPlainText(section.suffix.replace("\r\n", "\n").replace("\r", "\n").strip("\n"))
-        editor.setMaximumHeight(100)
+        editor = CanonTextEdit(section.suffix.replace("\r\n", "\n").replace("\r", "\n").strip("\n"), maximum_lines=6)
+        editor.setAccessibleName("区块间备注")
         editor.textChanged.connect(self._mark_modified)
         layout.addWidget(editor)
         self._suffix_widgets.append((section, editor))
@@ -526,19 +718,25 @@ class CanonFormWidget(QWidget):
 
     def _collapsed_modules(self) -> set[str]:
         key = str(self.path.resolve()) if self.path else ""
-        return self._collapse_by_path.setdefault(key, set())
+        if key not in self._collapse_by_path:
+            seeded = None
+            if self.path is not None and self.collapse_state_loader is not None:
+                seeded = self.collapse_state_loader(self.path)
+            self._collapse_by_path[key] = set(seeded) if seeded else set()
+        return self._collapse_by_path[key]
 
     def set_modules_expanded(self, expanded: bool) -> None:
         for toggle in self._module_toggles.values():
             toggle.setChecked(expanded)
 
-    def _wrap_module(self, section: CanonSection, body: QWidget) -> QGroupBox:
-        box = QGroupBox()
-        box.setObjectName("canonModuleFrame")
+    def _wrap_module(self, section: CanonSection, body: QWidget) -> QFrame:
+        box = CanonCard()
         vbox = QVBoxLayout(box)
-        vbox.setContentsMargins(10, 10, 10, 10)
-        vbox.setSpacing(6)
-        header = QHBoxLayout()
+        vbox.setContentsMargins(16, 12, 16, 16)
+        vbox.setSpacing(12)
+        heading = QWidget()
+        header = QHBoxLayout(heading)
+        header.setContentsMargins(0, 0, 0, 0)
         header.setSpacing(6)
         toggle = QToolButton()
         toggle.setObjectName("canonModuleToggle")
@@ -547,14 +745,14 @@ class CanonFormWidget(QWidget):
         toggle.setProperty("moduleId", section.module_id)
         header.addWidget(toggle)
         title = WrappingLabel(section.heading or "未识别章节")
-        title.setObjectName("sectionTitle")
+        title.setObjectName("canonModuleTitle")
         title.setTextFormat(Qt.TextFormat.PlainText)
         title.setWordWrap(True)
         title.setMinimumWidth(0)
         policy = title.sizePolicy()
         policy.setHorizontalPolicy(QSizePolicy.Policy.Ignored)
         title.setSizePolicy(policy)
-        header.addWidget(title, 1)
+        header.addWidget(title, 1, Qt.AlignmentFlag.AlignVCenter)
         if section.role in (ROLE_RAW, ROLE_FREE):
             badge = QLabel("原文区块")
             badge.setObjectName("rawModuleBadge")
@@ -563,17 +761,21 @@ class CanonFormWidget(QWidget):
             badge = QLabel("系统区块")
             badge.setObjectName("systemModuleBadge")
             header.addWidget(badge)
-        vbox.addLayout(header)
         operations = None
         if not is_system_section(self.entry, section):
-            operations = self._module_op_buttons(section)
-            vbox.addWidget(operations, alignment=Qt.AlignmentFlag.AlignRight)
+            operations = self._module_menu(section)
+        vbox.addWidget(CanonModuleHeader(heading, operations))
         vbox.addWidget(body)
         self._module_bodies[section.module_id] = body
         self._module_toggles[section.module_id] = toggle
+        self._heading_toggles[heading] = toggle
+        heading.setCursor(Qt.CursorShape.PointingHandCursor)
+        heading.setToolTip("点击标题行展开或折叠该模块")
+        heading.installEventFilter(self)
 
         def set_expanded(expanded):
-            if not expanded and body.isAncestorOf(QApplication.focusWidget()):
+            focus = QApplication.focusWidget()
+            if not expanded and (body is focus or body.isAncestorOf(focus)):
                 toggle.setFocus()
             body.setVisible(expanded)
             if operations is not None:
@@ -583,7 +785,11 @@ class CanonFormWidget(QWidget):
             toggle.setAccessibleName(f"{action}模块：{section.heading}")
             toggle.setToolTip(f"{action}模块（不影响保存）")
             collapsed = self._collapsed_modules()
+            changed = (section.module_id in collapsed) == expanded
             collapsed.discard(section.module_id) if expanded else collapsed.add(section.module_id)
+            if changed and self.collapse_state_saver is not None and self.path is not None:
+                # 只回写当前仍存在的模块 id；重命名等产生的失效 id 不持久化。
+                self.collapse_state_saver(self.path, set(collapsed) & set(self._module_bodies))
 
         toggle.toggled.connect(set_expanded)
         expanded = section.module_id not in self._collapsed_modules()
@@ -591,24 +797,33 @@ class CanonFormWidget(QWidget):
         set_expanded(expanded)
         return box
 
-    def _module_op_buttons(self, section: CanonSection) -> QWidget:
-        ops = QWidget()
-        row = QHBoxLayout(ops)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(4)
+    def _module_menu(self, section: CanonSection) -> QToolButton:
+        """模块的结构操作收敛为一个 ⋯ 菜单，避免每行常驻四个按钮。"""
+        button = QToolButton()
+        button.setObjectName("moduleMenuButton")
+        set_button_icon(button, "more_horiz",
+                        str(colors_for(self._theme_config).get("muted_text_color", "#63748A")),
+                        size=18)
+        button.setAccessibleName(f"模块操作：{section.heading}")
+        button.setToolTip(f"模块操作：{section.heading}")
+        button.setProperty("moduleHeading", section.heading)
+        button.setProperty("moduleId", section.module_id)
+        button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        menu = QMenu(button)
         for text, name, handler in (
-            ("重命名", "moduleOpButton", lambda _=False, s=section: self._rename_module(s)),
-            ("上移", "moduleOpButton", lambda _=False, s=section: self._move_module(s, -1)),
-            ("下移", "moduleOpButton", lambda _=False, s=section: self._move_module(s, 1)),
-            ("删除", "moduleDeleteButton", lambda _=False, s=section: self._delete_module(s)),
+            ("重命名模块…", "moduleOpAction", lambda _=False, s=section: self._rename_module(s)),
+            ("上移", "moduleOpAction", lambda _=False, s=section: self._move_module(s, -1)),
+            ("下移", "moduleOpAction", lambda _=False, s=section: self._move_module(s, 1)),
+            ("删除模块…", "moduleDeleteAction", lambda _=False, s=section: self._delete_module(s)),
         ):
-            button = QPushButton(text)
-            button.setObjectName(name)
-            button.setProperty("moduleHeading", section.heading)
-            button.setProperty("moduleId", section.module_id)
-            button.clicked.connect(handler)
-            row.addWidget(button)
-        return ops
+            action = menu.addAction(text)
+            action.setObjectName(name)
+            action.setProperty("moduleHeading", section.heading)
+            action.setProperty("moduleId", section.module_id)
+            action.triggered.connect(handler)
+        button.setMenu(menu)
+        return button
 
     def _section_body(self, section: CanonSection):
         if section.role == ROLE_FIELDS:
@@ -618,22 +833,26 @@ class CanonFormWidget(QWidget):
         if section.role == ROLE_GROUP:
             body = QWidget()
             vbox = QVBoxLayout(body)
+            vbox.setContentsMargins(0, 0, 0, 0)
+            vbox.setSpacing(10)
             if section.extras:
                 vbox.addWidget(self._extras_panel(section, None))
             for group in section.groups:
-                group_box = QGroupBox()
+                group_box = QFrame()
                 group_box.setObjectName("canonGroupFrame")
                 layout = QVBoxLayout(group_box)
+                layout.setContentsMargins(12, 10, 12, 12)
+                layout.setSpacing(8)
                 row = QHBoxLayout()
                 title = WrappingLabel(group.name)
-                title.setObjectName("sectionTitle")
+                title.setObjectName("canonModuleTitle")
                 title.setTextFormat(Qt.TextFormat.PlainText)
                 title.setWordWrap(True)
                 title.setMinimumWidth(0)
                 policy = title.sizePolicy()
                 policy.setHorizontalPolicy(QSizePolicy.Policy.Ignored)
                 title.setSizePolicy(policy)
-                row.addWidget(title, 1)
+                row.addWidget(title, 1, Qt.AlignmentFlag.AlignVCenter)
                 row.addWidget(self._group_menu(section, group.name))
                 layout.addLayout(row)
                 fields = QWidget()
@@ -643,15 +862,15 @@ class CanonFormWidget(QWidget):
             add_button = QPushButton("＋ 添加条目")
             add_button.setProperty("moduleHeading", section.heading)
             add_button.clicked.connect(lambda _=False, s=section: self._add_group(s))
-            vbox.addWidget(add_button)
+            vbox.addWidget(add_button, alignment=Qt.AlignmentFlag.AlignLeft)
             return body
         if section.role == ROLE_TEXT:
             if (self.project is not None and self.kind == "character"
                     and section.schema_key == "关键关系"):
                 return self._relation_body(section)
-            editor = QPlainTextEdit()
-            editor.setPlainText(section.text)
-            editor.setMaximumHeight(140)
+            editor = CanonTextEdit(section.text)
+            editor.setAccessibleName(section.heading)
+            editor.setPlaceholderText(section_hint(section.heading, section.role))
             editor.textChanged.connect(lambda: self._mark_modified())
             self._text_widgets.append((section, editor))
             return editor
@@ -659,13 +878,14 @@ class CanonFormWidget(QWidget):
         body = QWidget()
         vbox = QVBoxLayout(body)
         vbox.setContentsMargins(0, 0, 0, 0)
-        editor = QPlainTextEdit()
-        editor.setPlainText(raw_section_body(section))
-        editor.setMaximumHeight(140)
+        editor = CanonTextEdit(raw_section_body(section))
+        editor.setAccessibleName(section.heading)
+        editor.setPlaceholderText(section_hint(section.heading, section.role))
         editor.textChanged.connect(lambda: self._mark_modified())
         self._raw_widgets.append((section, editor))
         vbox.addWidget(editor)
         caption = QLabel(section.warning or "该区块保留原文格式，修改后原样写入文档。")
+        caption.setObjectName("canonCaption")
         caption.setWordWrap(True)
         vbox.addWidget(caption)
         return body
@@ -679,6 +899,7 @@ class CanonFormWidget(QWidget):
         vbox.setContentsMargins(0, 0, 0, 0)
         vbox.setSpacing(4)
         caption = QLabel("以下为手写内容，保存时逐字保留：")
+        caption.setObjectName("canonCaption")
         caption.setWordWrap(True)
         vbox.addWidget(caption)
         rows: list[QLineEdit] = []
@@ -690,14 +911,15 @@ class CanonFormWidget(QWidget):
         self._extras_rows.append((section, group_name, rows))
         return panel
 
-    def _managed_widget(self, section: CanonSection) -> QGroupBox:
+    def _managed_widget(self, section: CanonSection) -> QFrame:
         body = QWidget()
         layout = QVBoxLayout(body)
-        viewer = QPlainTextEdit()
-        viewer.setPlainText(raw_section_body(section))
+        layout.setContentsMargins(0, 0, 0, 0)
+        viewer = CanonTextEdit(raw_section_body(section))
+        viewer.setAccessibleName(section.heading)
         viewer.setReadOnly(True)
-        viewer.setMaximumHeight(140)
         caption = QLabel("由 DeepSonder 自动同步，此处只读；请通过“同步角色档案”更新。")
+        caption.setObjectName("canonCaption")
         caption.setWordWrap(True)
         layout.addWidget(viewer)
         layout.addWidget(caption)
@@ -728,6 +950,7 @@ class CanonFormWidget(QWidget):
             form.addWidget(field)
             editor = QLineEdit(fields.get(key, ""))
             editor.setAccessibleName(f"{group_name + ' / ' if group_name else ''}{key}")
+            editor.setPlaceholderText(FIELD_HINTS.get(key, ""))
             label.setBuddy(editor)
             editor.textChanged.connect(lambda _text: self._mark_modified())
             if group_name is None:
@@ -750,7 +973,7 @@ class CanonFormWidget(QWidget):
         add.setProperty("moduleId", section.module_id)
         add.setProperty("groupName", group_name)
         add.clicked.connect(lambda _=False: self._add_field(section, group_name))
-        form.addWidget(add)
+        form.addWidget(add, alignment=Qt.AlignmentFlag.AlignLeft)
 
     def _management_menu(self, label, section, group=None, key=None):
         button = QToolButton()
@@ -848,7 +1071,7 @@ class CanonFormWidget(QWidget):
                 self._add_relation_row(section, vbox, line)
         add_button = QPushButton("＋ 关联角色")
         add_button.clicked.connect(lambda _=False, s=section, v=vbox: self._pick_relation(s, v))
-        vbox.addWidget(add_button)
+        vbox.addWidget(add_button, alignment=Qt.AlignmentFlag.AlignLeft)
         return body
 
     def _add_relation_row(self, section: CanonSection, vbox: QVBoxLayout, text: str) -> None:

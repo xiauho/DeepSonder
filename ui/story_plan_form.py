@@ -10,12 +10,15 @@ class StoryPlanForm(QScrollArea):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWidgetResizable(True)
+        # 与资料表单一致：滚动区透明无边框，页面即画布。
+        self.setObjectName("pageScroll")
         self._loading = False
         body = QWidget()
         layout = QVBoxLayout(body)
-        layout.setContentsMargins(16, 12, 16, 16)
-        layout.setSpacing(10)
+        layout.setContentsMargins(18, 8, 18, 8)
+        layout.setSpacing(8)
         intro = QLabel("只记录全书方向，以下内容均可留空。具体事件安排在时间线中，本章细节写在剧情简写中。")
+        intro.setObjectName("mutedLabel")
         intro.setWordWrap(True)
         layout.addWidget(intro)
         self.enabled = QCheckBox("用于 AI 创作")
@@ -34,6 +37,7 @@ class StoryPlanForm(QScrollArea):
             field.setMinimumHeight(100)
             field.setMaximumHeight(130)
             caption = QLabel(label + "（可选）")
+            caption.setObjectName("fieldLabel")
             caption.setBuddy(field)
             layout.addWidget(caption)
             layout.addWidget(field)

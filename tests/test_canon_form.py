@@ -8,6 +8,8 @@ from unittest.mock import MagicMock, patch
 from PySide6.QtWidgets import (QApplication, QDialog, QLabel, QLineEdit,
     QPlainTextEdit, QPushButton, QScrollArea, QToolButton)
 from PySide6.QtGui import QFontDatabase
+from PySide6.QtCore import QCoreApplication, QEvent, Qt
+from PySide6.QtTest import QTest
 from core.canon_schema import SECTION_START, load_canon_entry
 from core.character_card_sync import MANAGED_STATE_START
 from core.project_data import CANON_ENTRY_TYPES
@@ -30,6 +32,7 @@ class CanonFormTests(unittest.TestCase):
             QFontDatabase.removeApplicationFont(cls.font_id)
 
     def setUp(self):
+        self._existing_windows = {id(widget) for widget in self.app.topLevelWidgets()}
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.canon = Path(self.tmp.name) / "canon" / "characters"
@@ -37,6 +40,14 @@ class CanonFormTests(unittest.TestCase):
         self.path = self.canon / "白鸥.md"
         self.path.write_text(character_text(), encoding="utf-8")
         self.addCleanup(lambda: apply_theme(self.app, {'theme': 'light'}))
+
+    def tearDown(self):
+        # Theme changes must not keep restyling windows from earlier cases.
+        for widget in self.app.topLevelWidgets():
+            if id(widget) not in self._existing_windows:
+                widget.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        self.app.processEvents()
 
     def widget(self, **kwargs):
         widget = CanonFormWidget()
@@ -327,12 +338,17 @@ class CanonFormTests(unittest.TestCase):
 
     # ---------- 用户模块（Phase B：新建/重命名/上移/下移/删除） ----------
 
-    def op_button(self, host, heading, text):
+    def op_action(self, host, heading, text):
+        """模块结构操作已收敛到 ⋯ 菜单；返回对应动作供 trigger()。"""
         widget = host.form if isinstance(host, StructuredCanonPage) else host
-        for button in widget.findChildren(QPushButton):
-            if button.text() == text and button.property("moduleHeading") == heading:
-                return button
-        raise AssertionError(f"找不到模块「{heading}」的「{text}」按钮")
+        for button in widget.findChildren(QToolButton):
+            if (button.objectName() != "moduleMenuButton"
+                    or button.property("moduleHeading") != heading):
+                continue
+            for action in button.menu().actions():
+                if action.text() == text:
+                    return action
+        raise AssertionError(f"找不到模块「{heading}」的「{text}」操作")
 
     def test_new_module_dialog_confirm_creates_module(self):
         widget = self.widget()
@@ -409,7 +425,7 @@ class CanonFormTests(unittest.TestCase):
         widget = self.widget()
         with patch("ui.canon_form_widget.QInputDialog.getText",
                    return_value=("容貌印象", True)):
-            self.op_button(widget, "外貌与辨识特征", "重命名").click()
+            self.op_action(widget, "外貌与辨识特征", "重命名模块…").trigger()
         self.assertIsNotNone(widget.entry.section("容貌印象"))
         self.assertTrue(widget.is_modified())
         ok, _error = widget.write_changes()
@@ -423,7 +439,7 @@ class CanonFormTests(unittest.TestCase):
         widget = self.widget()
         with patch("ui.canon_form_widget.QInputDialog.getText",
                    return_value=("", False)):
-            self.op_button(widget, "外貌与辨识特征", "重命名").click()
+            self.op_action(widget, "外貌与辨识特征", "重命名模块…").trigger()
         self.assertIsNotNone(widget.entry.section("外貌与辨识特征"))
         self.assertFalse(widget.is_modified())
 
@@ -431,7 +447,7 @@ class CanonFormTests(unittest.TestCase):
         widget = self.widget()
         with patch("ui.canon_form_widget.QInputDialog.getText",
                    return_value=("基础档案", True)):
-            self.op_button(widget, "外貌与辨识特征", "重命名").click()
+            self.op_action(widget, "外貌与辨识特征", "重命名模块…").trigger()
         self.assertIn("已存在", widget.feedback.text())
         self.assertIsNotNone(widget.entry.section("外貌与辨识特征"))
         self.assertFalse(widget.is_modified())
@@ -440,12 +456,12 @@ class CanonFormTests(unittest.TestCase):
         widget = self.widget()
         with patch("ui.canon_form_widget.QMessageBox") as message_box:
             message_box.question.return_value = message_box.StandardButton.No
-            self.op_button(widget, "外貌与辨识特征", "删除").click()
+            self.op_action(widget, "外貌与辨识特征", "删除模块…").trigger()
         self.assertIsNotNone(widget.entry.section("外貌与辨识特征"))
         self.assertFalse(widget.is_modified())
         with patch("ui.canon_form_widget.QMessageBox") as message_box:
             message_box.question.return_value = message_box.StandardButton.Yes
-            self.op_button(widget, "外貌与辨识特征", "删除").click()
+            self.op_action(widget, "外貌与辨识特征", "删除模块…").trigger()
         self.assertIsNone(widget.entry.section("外貌与辨识特征"))
         self.assertTrue(widget.is_modified())
         ok, _error = widget.write_changes()
@@ -457,12 +473,12 @@ class CanonFormTests(unittest.TestCase):
 
     def test_move_buttons_reorder_modules(self):
         widget = self.widget()
-        self.op_button(widget, "外貌与辨识特征", "下移").click()
+        self.op_action(widget, "外貌与辨识特征", "下移").trigger()
         headings = [s.heading for s in widget.entry.sections]
         self.assertEqual(headings[1], "性格、动机与核心欲望")
         self.assertEqual(headings[2], "外貌与辨识特征")
         self.assertTrue(widget.is_modified())
-        self.op_button(widget, "外貌与辨识特征", "上移").click()
+        self.op_action(widget, "外貌与辨识特征", "上移").trigger()
         headings = [s.heading for s in widget.entry.sections]
         self.assertEqual(headings[1], "外貌与辨识特征")
         ok, _error = widget.write_changes()
@@ -473,18 +489,18 @@ class CanonFormTests(unittest.TestCase):
 
     def test_move_button_boundary_shows_feedback(self):
         widget = self.widget()
-        self.op_button(widget, "外貌与辨识特征", "上移").click()  # 上面是系统区块
+        self.op_action(widget, "外貌与辨识特征", "上移").trigger()  # 上面是系统区块
         self.assertIn("边界", widget.feedback.text())
         self.assertFalse(widget.is_modified())
         self.assertEqual([s.heading for s in widget.entry.sections][0], "基础档案")
 
-    def test_system_modules_show_badge_without_op_buttons(self):
+    def test_system_modules_show_badge_without_module_menu(self):
         widget = self.widget()
         for heading in ("基础档案", "当前剧情状态（DeepSonder 同步）"):
-            for text in ("重命名", "上移", "下移", "删除"):
-                matches = [b for b in widget.findChildren(QPushButton)
-                           if b.property("moduleHeading") == heading and b.text() == text]
-                self.assertEqual(matches, [], f"{heading} 不应有「{text}」按钮")
+            menus = [b for b in widget.findChildren(QToolButton)
+                     if b.objectName() == "moduleMenuButton"
+                     and b.property("moduleHeading") == heading]
+            self.assertEqual(menus, [], f"{heading} 不应有模块操作菜单")
         badges = [l for l in widget.findChildren(QLabel)
                   if l.objectName() == "systemModuleBadge"]
         self.assertEqual([b.text() for b in badges], ["系统区块", "系统区块"])  # 基础档案与只读同步区
@@ -504,7 +520,7 @@ class CanonFormTests(unittest.TestCase):
         self.assertTrue(widget._relation_rows)  # 仍渲染关联选择器
         with patch("ui.canon_form_widget.QInputDialog.getText",
                    return_value=("人物关系", True)):
-            self.op_button(widget, "关键关系", "重命名").click()
+            self.op_action(widget, "关键关系", "重命名模块…").trigger()
         self.assertTrue(widget._relation_rows)  # 展示标题变化不改变关联语义
         self.assertIsNotNone(widget.entry.section("人物关系"))
         self.assertEqual(widget.entry.section("人物关系").role, "text")
@@ -521,6 +537,142 @@ class CanonFormTests(unittest.TestCase):
             self.assertEqual(scroll.horizontalScrollBar().maximum(), 0)
             self.assertGreater(scroll.verticalScrollBar().maximum(), 0)
             page.close()
+
+    def test_clicking_module_heading_row_toggles_collapse(self):
+        widget = self.widget()
+        section = widget.entry.section("外貌与辨识特征")
+        toggle = widget._module_toggles[section.module_id]
+        heading = next(w for w, t in widget._heading_toggles.items() if t is toggle)
+        self.assertTrue(toggle.isChecked())
+        QTest.mouseClick(heading, Qt.MouseButton.LeftButton)
+        self.app.processEvents()
+        self.assertFalse(toggle.isChecked())
+        QTest.mouseClick(heading, Qt.MouseButton.LeftButton)
+        self.app.processEvents()
+        self.assertTrue(toggle.isChecked())
+        self.assertFalse(widget.is_modified())  # 折叠只是视图状态，不产生修改
+
+    def test_collapse_state_seeded_from_loader_without_writeback(self):
+        entry = load_canon_entry(self.path, "character")
+        target = next(s for s in entry.sections if s.heading == "外貌与辨识特征")
+        saved = []
+        widget = CanonFormWidget()
+        widget.collapse_state_loader = lambda path: {target.module_id}
+        widget.collapse_state_saver = lambda path, ids: saved.append(set(ids))
+        widget.load_entry(self.path, "character")
+        self.assertFalse(widget._module_toggles[target.module_id].isChecked())
+        other = next(s for s in widget.entry.sections if s.heading == "性格、动机与核心欲望")
+        self.assertTrue(widget._module_toggles[other.module_id].isChecked())
+        self.assertEqual(saved, [])  # 初次构建只是恢复状态，不回写偏好
+        self.assertFalse(widget.is_modified())
+
+    def test_collapse_toggle_notifies_saver_and_drops_stale_ids(self):
+        entry = load_canon_entry(self.path, "character")
+        target = next(s for s in entry.sections if s.heading == "外貌与辨识特征")
+        saved = []
+        widget = CanonFormWidget()
+        widget.collapse_state_loader = lambda path: {target.module_id, "stale-module-id"}
+        widget.collapse_state_saver = lambda path, ids: saved.append(set(ids))
+        widget.load_entry(self.path, "character")
+        other = next(s for s in widget.entry.sections if s.heading == "性格、动机与核心欲望")
+        widget._module_toggles[other.module_id].setChecked(False)
+        # 失效 id（已重命名模块）不持久化；其余折叠状态完整回写
+        self.assertEqual(saved[-1], {target.module_id, other.module_id})
+        widget._module_toggles[target.module_id].setChecked(True)
+        self.assertEqual(saved[-1], {other.module_id})
+        widget._module_toggles[other.module_id].setChecked(True)
+        self.assertEqual(saved[-1], set())  # 全部展开 → 清除记录
+
+    def test_empty_sections_show_writing_guidance(self):
+        widget = self.widget()
+        text_editor = next(e for s, e in widget._text_widgets
+                           if s.heading == "外貌与辨识特征")
+        self.assertIn("外观细节", text_editor.placeholderText())
+        name_field = next(e for _s, k, e in widget._field_widgets if k == "姓名")
+        self.assertIn("主名", name_field.placeholderText())
+
+    def test_auto_save_flushes_draft_and_stops_timer(self):
+        page = self.page()
+        page.configure_auto_save(True, 5)
+        name = next(e for _s, k, e in page.form._field_widgets if k == "姓名")
+        name.setText("自动写盘")
+        self.assertTrue(page.is_modified())
+        self.assertTrue(page._auto_save_timer.isActive())
+        page._auto_save_flush()
+        self.assertFalse(page.is_modified())
+        self.assertFalse(page._auto_save_timer.isActive())
+        self.assertIn("自动写盘", self.path.read_text(encoding="utf-8"))
+
+    def test_prepare_leave_with_auto_save_skips_confirmation(self):
+        page = self.page()
+        page.configure_auto_save(True, 5)
+        name = next(e for _s, k, e in page.form._field_widgets if k == "姓名")
+        name.setText("离开前写盘")
+        with patch("ui.canon_form_widget.QMessageBox") as message_box:
+            self.assertTrue(page.prepare_leave())
+            message_box.assert_not_called()
+        self.assertFalse(page.is_modified())
+        self.assertIn("离开前写盘", self.path.read_text(encoding="utf-8"))
+
+    def test_prepare_leave_without_auto_save_keeps_confirmation(self):
+        page = self.page()
+        name = next(e for _s, k, e in page.form._field_widgets if k == "姓名")
+        name.setText("等待确认")
+        with patch.object(page, "confirm_discard_or_save", return_value=False) as confirm:
+            self.assertFalse(page.prepare_leave())
+            confirm.assert_called_once()
+        self.assertTrue(page.is_modified())
+
+    # ---------- 页内大纲 ----------
+
+    def test_outline_entries_track_live_input(self):
+        page = self.page()
+        entries = page.outline_entries()
+        self.assertEqual(entries[0], ("", "资料导语", False))
+        self.assertEqual(entries[1][1], "基础档案")
+        self.assertTrue(all(filled for _id, _heading, filled in entries[1:]))
+        # 清空全部基础档案字段与一个文本分区后立即反映，不必等到保存
+        for _section, _key, editor in page.form._field_widgets:
+            editor.setText("")
+        page.form._text_widgets[0][1].setPlainText("")
+        refreshed = {heading: filled for _id, heading, filled in page.outline_entries()}
+        self.assertFalse(refreshed["基础档案"])
+        self.assertFalse(refreshed["外貌与辨识特征"])
+
+    def test_outline_list_shows_sections_and_jumps_to_module(self):
+        page = self.page()
+        page.resize(1100, 700)
+        page.show()
+        self.app.processEvents()
+        self.assertTrue(page.outline_panel.isVisible())
+        self.assertEqual(page.outline_list.count(), len(page.outline_entries()))
+        self.assertTrue(page.outline_list.item(0).text().startswith("○"))
+        self.assertTrue(page.outline_list.item(1).text().startswith("●"))
+        target = page.form.entry.section("秘密与人物弧线")
+        page.form._module_toggles[target.module_id].setChecked(False)
+        self.assertFalse(page.form._module_toggles[target.module_id].isChecked())
+        row = next(index for index in range(page.outline_list.count())
+                   if page.outline_list.item(index).data(Qt.ItemDataRole.UserRole)
+                   == target.module_id)
+        page._on_outline_item_clicked(page.outline_list.item(row))
+        self.app.processEvents()
+        self.assertTrue(page.form._module_toggles[target.module_id].isChecked())
+        self.assertEqual(page._outline_current, target.module_id)
+        page.close()
+
+    def test_outline_hides_below_threshold_and_uses_popup(self):
+        page = self.page()
+        page.resize(640, 620)
+        page.show()
+        self.app.processEvents()
+        self.assertFalse(page.outline_panel.isVisible())
+        self.assertFalse(page.outline_toggle.isChecked())
+        with patch("ui.structured_canon_page.QMenu") as menu:
+            page.outline_toggle.click()
+            self.assertTrue(menu.return_value.exec.called)
+            labels = [call.args[0] for call in menu.return_value.addAction.call_args_list]
+        self.assertEqual(len(labels), len(page.outline_entries()))
+        page.close()
 
     # ---------- on_saved 回调 ----------
 
@@ -642,14 +794,15 @@ class CanonFormTests(unittest.TestCase):
         self.assertEqual(page.title_label.text(), "白鸥")
         self.assertEqual(page.kind_badge.text(), "角色")
         self.assertTrue(page.kind_badge.isVisibleTo(page))
-        self.assertEqual(page.modified_badge.text(), "已保存")
+        # 干净状态不再常驻状态徽章；保存反馈由状态栏的保存提示承担。
+        self.assertFalse(page.modified_badge.isVisibleTo(page))
         self.field(page, "姓名").setText("白羽")
+        self.assertTrue(page.modified_badge.isVisibleTo(page))
         self.assertEqual(page.modified_badge.text(), "未保存修改")
         self.assertEqual(page.modified_badge.objectName(), "dirtyBadge")
         ok, _error = page.write_changes()
         self.assertTrue(ok)
-        self.assertEqual(page.modified_badge.text(), "已保存")
-        self.assertEqual(page.modified_badge.objectName(), "savedBadge")
+        self.assertFalse(page.modified_badge.isVisibleTo(page))
 
     def test_page_save_button_writes_and_emits_saved_signal(self):
         emitted = []

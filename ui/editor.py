@@ -171,6 +171,8 @@ class Editor(QWidget):
 
         self.dirty_badge = QLabel("已保存")
         self.dirty_badge.setObjectName("savedBadge")
+        # 干净状态不占页头；徽章只在未保存、正在保存或保存失败时出现。
+        self.dirty_badge.hide()
         header_layout.addWidget(self.dirty_badge, 0, Qt.AlignmentFlag.AlignVCenter)
         layout.addWidget(header)
         layout.addWidget(self.path_label)
@@ -509,6 +511,10 @@ class Editor(QWidget):
 
     def show_saving(self) -> None:
         self.dirty_badge.setText("正在保存…")
+        self.dirty_badge.setObjectName("dirtyBadge")
+        self.dirty_badge.style().unpolish(self.dirty_badge)
+        self.dirty_badge.style().polish(self.dirty_badge)
+        self.dirty_badge.show()
         self.dirty_badge.repaint()
 
     def show_save_error(self, message: str) -> None:
@@ -697,8 +703,19 @@ class Editor(QWidget):
     def _set_dirty(self, dirty: bool) -> None:
         changed = dirty != self._dirty
         self._dirty = dirty
-        self.dirty_badge.setText("保存失败" if getattr(self, "_save_failed", False) else "未保存" if dirty else "已保存")
-        self.dirty_badge.setObjectName("saveErrorBadge" if getattr(self, "_save_failed", False) else "dirtyBadge" if dirty else "savedBadge")
+        # 徽章只在需要用户注意时出现；干净状态由状态栏的保存提示承担反馈。
+        if getattr(self, "_save_failed", False):
+            state = ("保存失败", "saveErrorBadge")
+        elif dirty:
+            state = ("未保存", "dirtyBadge")
+        else:
+            state = None
+        if state is None:
+            self.dirty_badge.hide()
+        else:
+            self.dirty_badge.setText(state[0])
+            self.dirty_badge.setObjectName(state[1])
+            self.dirty_badge.show()
         self.dirty_badge.style().unpolish(self.dirty_badge)
         self.dirty_badge.style().polish(self.dirty_badge)
         if changed:

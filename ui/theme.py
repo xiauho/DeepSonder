@@ -425,8 +425,36 @@ QLabel#canonKindBadge {
     border: 1px solid __BORDER__;
     font-weight: 700;
 }
-QFrame#canonPageHeader { border: none; }
-QToolButton#canonManageButton, QPushButton#moduleOpButton {
+QWidget#canonPage { background: __BG__; }
+QFrame#canonPageHeader, QFrame#timelinePageHeader {
+    background: __PANEL__; border: none; border-bottom: 1px solid __BORDER__;
+}
+QFrame#canonModuleFrame, QFrame#canonIntroCard {
+    background: __PANEL__;
+    border: 1px solid __BORDER__;
+    border-radius: 10px;
+}
+QFrame#canonGroupFrame {
+    /* 分组条目用分隔线区分，不再在模块内嵌第二层卡片。 */
+    background: transparent;
+    border: none;
+    border-top: 1px solid __BORDER__;
+}
+QLabel#canonModuleTitle { font-size: __CANON_TITLE_SIZE__px; font-weight: 700; }
+QLabel#canonCaption { color: __MUTED__; font-size: __SMALL_FONT_SIZE__px; }
+QLabel#canonFieldLabel, QLabel#fieldLabel { color: __MUTED__; font-weight: 600; }
+QPlainTextEdit#canonTextEditor {
+    background: __FIELD__;
+    border: 1px solid __BORDER__;
+    border-radius: 8px;
+    padding: 8px 10px;
+    selection-background-color: __PRIMARY__;
+    selection-color: __ACCENT_TEXT__;
+}
+QPlainTextEdit#canonTextEditor:hover { border-color: __CONTROL_BORDER__; }
+QPlainTextEdit#canonTextEditor:focus { border-color: __ACCENT__; }
+QPlainTextEdit#canonTextEditor[readOnly="true"] { background: __BG__; }
+QToolButton#canonManageButton, QPushButton#moduleOpButton, QToolButton#moduleMenuButton {
     background: transparent;
     color: __MUTED__;
     border: 1px solid __BORDER__;
@@ -434,19 +462,7 @@ QToolButton#canonManageButton, QPushButton#moduleOpButton {
     padding: 2px 8px;
     font-size: __SMALL_FONT_SIZE__px;
 }
-QToolButton#canonManageButton:hover, QPushButton#moduleOpButton:hover { background: __HOVER__; color: __TEXT__; border-color: __ACCENT__; }
-QPushButton#moduleDeleteButton {
-    background: transparent;
-    color: __DANGER__;
-    border: 1px solid __BORDER__;
-    border-radius: 6px;
-    padding: 2px 8px;
-    font-size: __SMALL_FONT_SIZE__px;
-}
-QPushButton#moduleDeleteButton:hover { background: __HOVER__; color: __DANGER__; border-color: __DANGER__; }
-QGroupBox#canonModuleFrame, QGroupBox#canonGroupFrame {
-    margin-top: 0px; padding: 0px;
-}
+QToolButton#canonManageButton:hover, QPushButton#moduleOpButton:hover, QToolButton#moduleMenuButton:hover { background: __HOVER__; color: __TEXT__; border-color: __ACCENT__; }
 QToolButton#canonModuleToggle {
     min-width: 28px; min-height: 28px; padding: 2px;
     background: transparent; border-color: transparent;
@@ -461,6 +477,21 @@ QLabel#systemModuleBadge, QLabel#rawModuleBadge {
     padding: 2px 8px;
     font-size: __SMALL_FONT_SIZE__px;
 }
+QFrame#canonOutlinePanel {
+    background: __PANEL__;
+    border-left: 1px solid __BORDER__;
+}
+QLabel#canonOutlineTitle {
+    color: __MUTED__;
+    font-size: __SMALL_FONT_SIZE__px;
+    font-weight: 700;
+    padding: 0 4px;
+}
+QListWidget#canonOutlineList { background: transparent; border: none; outline: none; }
+QListWidget#canonOutlineList::item { padding: 5px 6px; border-radius: 6px; color: __MUTED__; }
+QListWidget#canonOutlineList::item:hover { background: __HOVER__; color: __TEXT__; }
+QListWidget#canonOutlineList::item:selected { background: __SELECTION__; color: __ACCENT__; }
+QToolButton#outlineToggleButton:checked { background: __SELECTION__; color: __ACCENT__; border-color: __ACCENT__; }
 
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
     background: __FIELD__;
@@ -735,6 +766,7 @@ def build_qss(config: dict | None = None) -> str:
     replacements = {
         "__FONT_SIZE__": str(font_size),
         "__SMALL_FONT_SIZE__": str(max(10, font_size - 2)),
+        "__CANON_TITLE_SIZE__": str(font_size + 2),
         "__EDITOR_FONT_SIZE__": str(editor_size),
         "__TREE_ITEM_HEIGHT__": str(max(30, font_size + 15)),
         "__BG__": colors["background_color"],

@@ -4,7 +4,7 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import patch
 
-from core.project import NovelProject
+from core.project import CORE_POWER_FILENAME, NovelProject
 from core.project_migrations import migrate_project
 from core.project_schema import PROJECT_MANIFEST_RELATIVE_PATH
 from core.project_data import (
@@ -146,6 +146,35 @@ class ProjectDataStoreTests(TestCase):
             )
             self.assertIn("能力体系设定", related.core_systems)
             self.assertNotIn("能力体系设定", related.power)
+
+    def test_new_project_default_canon_entries_carry_default_modules(self) -> None:
+        from core.canon_schema import entry_status, parse_canon_entry, render_canon_entry
+
+        with TemporaryDirectory() as tmp:
+            project = NovelProject.create(Path(tmp) / "proj", "测试")
+            cases = {
+                project.canon_dir / "world" / "世界观.md": ("world", 7),
+                project.canon_dir / "power" / CORE_POWER_FILENAME: ("power", 6),
+                project.canon_dir / "power" / "能力体系设定.md": ("power", 10),
+                project.canon_dir / "power" / "空间体系设定.md": ("power", 10),
+            }
+            for path, (kind, count) in cases.items():
+                text = path.read_text(encoding="utf-8")
+                entry = parse_canon_entry(kind, text)
+                self.assertEqual(len(entry.sections), count, path.name)
+                # 每个默认分区都命中已登记 Schema，不会被降级成用户模块
+                self.assertTrue(all(s.schema_key for s in entry.sections), path.name)
+                # 空分区计入缺分区，但不再虚报为“未登记”
+                self.assertEqual(entry_status(entry)["missing_sections"], count, path.name)
+                # 打开默认资料不重写文档
+                self.assertEqual(render_canon_entry(entry), text, path.name)
+
+    def test_generic_power_template_keeps_generic_missing_count(self) -> None:
+        from core.canon_schema import entry_status, parse_canon_entry
+        from core.project_data import CANON_ENTRY_TYPES
+
+        text = str(CANON_ENTRY_TYPES["power"]["template"]).format(title="通用体系")
+        self.assertEqual(entry_status(parse_canon_entry("power", text))["missing_sections"], 9)
 
     def test_related_canon_separates_core_selected_and_background_power(self) -> None:
         with TemporaryDirectory() as tmp:

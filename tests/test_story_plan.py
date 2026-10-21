@@ -5,7 +5,7 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase, SkipTest
 from unittest.mock import patch
 from PySide6.QtCore import QCoreApplication
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QLabel
 from application.document_service import DocumentService, DocumentServiceError, DocumentRevisionConflict
 from core.project import NovelProject
 from core.story_plan import STORY_PLAN_PATH, empty_plan, parse_plan, serialize_plan
@@ -121,6 +121,14 @@ class StoryPlanUITests(TestCase):
                 for field in editor.story_plan_form.fields.values():
                     self.assertGreater(field.width(), 200)
                     self.assertTrue(field.accessibleName())
+                # 与资料表单共用同一骨架：滚动区透明、标签走统一的字段/说明样式。
+                self.assertEqual(editor.story_plan_form.objectName(), "pageScroll")
+                labels = {label.objectName() for label in editor.story_plan_form.findChildren(QLabel)}
+                self.assertLessEqual(labels, {"mutedLabel", "fieldLabel"})
+                self.assertEqual(
+                    len([label for label in editor.story_plan_form.findChildren(QLabel)
+                         if label.objectName() == "fieldLabel"]),
+                    len(editor.story_plan_form.fields))
             editor.clear_document()
             self.assertIs(editor.editor_stack.currentWidget(), editor.text_edit)
 

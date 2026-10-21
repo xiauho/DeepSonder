@@ -267,6 +267,12 @@ class MainWindow(QMainWindow):
         from ui.workspace_state_controller import WorkspaceStateController
         self.workspace_state = WorkspaceStateController(self, ui_state_path)
         self.timeline_page.state_changed.connect(self.workspace_state.schedule)
+        # 资料页模块折叠状态随界面偏好跨会话记忆（只存模块 id，不存正文）。
+        canon_form = self.structured_canon_page.form
+        canon_form.collapse_state_loader = (
+            lambda path: self.workspace_state.canon_collapsed(self.project, path))
+        canon_form.collapse_state_saver = (
+            lambda path, ids: self.workspace_state.set_canon_collapsed(self.project, path, ids))
         self.quick_access_controller = QuickAccessController(self)
         self.left_panel.locate_current_requested.connect(self._locate_current_document)
         self.editor.document_loaded.connect(lambda: self.left_panel.set_current_document(self.editor.current_path()))
@@ -1578,10 +1584,10 @@ class MainWindow(QMainWindow):
         return self.content_stack.currentWidget() is self.structured_canon_page
 
     def _leave_canon_page_guard(self) -> bool:
-        """离开结构化表单页（打开非结构化文档）前的未保存确认；取消则中止。"""
+        """离开结构化表单页（打开非结构化文档）前处理未保存修改；取消则中止。"""
         if not self.structured_canon_page.is_modified():
             return True
-        return self.structured_canon_page.confirm_discard_or_save(self)
+        return self.structured_canon_page.prepare_leave(self)
 
     def _forget_canon_page_entry(self, target: Path) -> None:
         """被删除的材料若正显示在结构化页，则同步清空页面内存态。"""
@@ -2002,6 +2008,7 @@ class MainWindow(QMainWindow):
         self.project_lifecycle_controller.set_config(self.config)
         self.ai_workflow_controller.set_config(self.config)
         self.appearance_controller.apply(self.config)
+        self._refresh_auto_save_timer()
         self._update_page_header(self.window_state_controller.current_route)
         self._refresh_ai_actions()
         self.status_message.setText(message)
@@ -2045,6 +2052,10 @@ class MainWindow(QMainWindow):
         enabled = bool(self.config.get("auto_save", True))
         seconds = max(5, int(self.config.get("auto_save_interval", 30) or 30))
         self.document_controller.configure_auto_save(enabled, seconds)
+        # 初始化早于内容栈构建，这里允许页面尚未创建。
+        page = getattr(self, "structured_canon_page", None)
+        if page is not None:
+            page.configure_auto_save(enabled, seconds)
         self.auto_save_status.setText("自动保存已开启" if enabled else "自动保存已关闭")
 
     def _on_auto_saved(self, _path: str) -> None:
@@ -2074,10 +2085,10 @@ class MainWindow(QMainWindow):
         # Opening the first project normally has no current document yet. In
         # that state there is nothing to save, so project switching must be
         # allowed to continue.
-        # 结构化表单页的未保存修改先经三选一确认，取消则中止后续操作；
+        # 结构化表单页先处理未保存修改（自动保存开启时静默写盘），取消则中止后续操作；
         # 通用 md 编辑器沿用静默保存（冲突时仍走既有交互）。
         page = getattr(self, "structured_canon_page", None)
-        if page is not None and page.is_modified() and not page.confirm_discard_or_save(self):
+        if page is not None and not page.prepare_leave(self):
             return False
         if not self.editor.is_dirty():
             return True

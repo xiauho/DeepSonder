@@ -159,18 +159,20 @@ class LibraryScopesTests(TestCase):
         self.assertNotIn('核心 0', group.text(0))
         always = next(group.child(i) for i in range(group.childCount()) if group.child(i).data(0, self.panel.IMPORTANCE_ROLE) == 'always')
         regular = next(group.child(i) for i in range(group.childCount()) if group.child(i).data(0, self.panel.IMPORTANCE_ROLE) == 'non_core')
-        self.assertIn('常驻', always.text(0))
+        self.assertEqual(always.text(1), self.panel.STATUS_DOT)
+        self.assertIn('常驻', always.toolTip(1))
         self.assertEqual(regular.text(1), '')
         store.set_system_importance(Path(regular.data(0, self.panel.PATH_ROLE)), "core")
         self.panel.refresh_system_importance()
-        self.assertIn("核心", regular.text(0))
+        self.assertEqual(regular.text(1), self.panel.STATUS_DOT)
+        self.assertIn("核心", regular.toolTip(1))
         self.panel.resize(450, 650); self.app.processEvents()
         self.assertNotIn('常驻', always.text(0))
         self.assertEqual(always.text(1), '常驻')
         self.panel.refresh_system_importance()
         self.assertNotIn('核心 0', group.text(0))
         self.panel.resize(280, 650); self.app.processEvents()
-        self.assertIn('常驻', always.text(0))
+        self.assertEqual(always.text(1), self.panel.STATUS_DOT)
 
     def test_narrow_themes_large_font_controls_fit(self):
         from ui.theme import apply_theme

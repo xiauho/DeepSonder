@@ -47,32 +47,54 @@ DEFAULT_STORY_STATE = {
 DEFAULT_CHAPTER_SUMMARIES = {}
 DEFAULT_TIMELINE = ""
 CORE_POWER_FILENAME = "_核心规则.md"
+# 以下默认种子与 canon_schema 的分区 Schema 保持一致：新建项目生成的世界观、
+# 常驻核心规则、能力体系与空间体系都带有默认模块，标题即注册分区，不会因
+# 标题未登记而被降级成用户模块或虚报缺分区。
 DEFAULT_CORE_POWER_RULES = (
     "# 核心规则\n\n"
     "## 全书不可违背的规则\n\n"
-    "## 基础限制\n\n"
-    "## 全局例外\n"
+    "## 基础约束条件\n\n"
+    "## 生效与获取条件\n\n"
+    "## 代价与副作用\n\n"
+    "## 全局例外\n\n"
+    "## 对剧情的约束\n"
 )
 SYSTEM_REGISTRY_FILENAME = "system_registry.json"
 DEFAULT_ABILITY_SYSTEM = (
     "# 能力体系设定\n\n"
     "## 体系定位\n\n"
-    "## 等级与阶段\n\n"
-    "## 能力规则\n\n"
+    "## 等级或层级\n\n"
+    "## 核心原则\n\n"
+    "## 获取方式\n\n"
     "## 使用限制\n\n"
-    "## 消耗与代价\n\n"
+    "## 代价与副作用\n\n"
+    "## 克制关系\n\n"
     "## 晋升与突破\n\n"
-    "## 特殊例外\n"
+    "## 已知例外\n\n"
+    "## 对剧情的约束\n"
 )
 DEFAULT_SPACE_SYSTEM = (
     "# 空间体系设定\n\n"
+    "## 体系定位\n\n"
     "## 空间层级\n\n"
     "## 空间之间的关系\n\n"
     "## 进入与离开条件\n\n"
     "## 时间流速差异\n\n"
     "## 空间边界与限制\n\n"
     "## 空间资源\n\n"
-    "## 与主世界的关系\n"
+    "## 与主世界的关系\n\n"
+    "## 对剧情的约束\n\n"
+    "## 已知例外\n"
+)
+DEFAULT_WORLD = (
+    "# 世界观\n\n"
+    "## 核心规则\n\n"
+    "## 地理与空间\n\n"
+    "## 历史与现状\n\n"
+    "## 社会、势力与秩序\n\n"
+    "## 技术、魔法或特殊现象\n\n"
+    "## 对剧情的约束\n\n"
+    "## 已知例外与未解问题\n"
 )
 
 
@@ -154,6 +176,11 @@ class NovelProject:
         atomic_write_text(
             root / "canon" / "power" / CORE_POWER_FILENAME,
             DEFAULT_CORE_POWER_RULES,
+            encoding="utf-8",
+        )
+        atomic_write_text(
+            root / "canon" / "world" / "世界观.md",
+            DEFAULT_WORLD,
             encoding="utf-8",
         )
         ability_path = root / "canon" / "power" / "能力体系设定.md"

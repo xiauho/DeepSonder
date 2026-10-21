@@ -40,13 +40,41 @@ class WorkspacePersistenceTests(unittest.TestCase):
         window.resize(1300, 800)
         window.show()
         self.addCleanup(window.close)
-        self.assertTrue(window._load_project(self.project.root, quiet=True))
+        loaded = window._load_project(self.project.root, quiet=True)
+        if not loaded:
+            self.fail(self.load_failure_detail(window))
         self.events()
         return window
+
+    def load_failure_detail(self, window) -> str:
+        """加载返回 False 时给出上下文：_load_project(quiet=True) 会吞掉真实原因。"""
+        root = self.project.root
+        parts = [f"root={root}", f"root_exists={root.exists()}"]
+        try:
+            manifest = root / "project.json"
+            parts.append(f"project.json={manifest.stat().st_size} 字节" if manifest.is_file()
+                         else "project.json=缺失")
+        except OSError as exc:
+            parts.append(f"project.json=OSError({exc})")
+        try:
+            parts.append(f"chapters={len(self.project.list_chapters())}")
+        except (OSError, ValueError) as exc:
+            parts.append(f"chapters=异常({exc!r})")
+        parts.append(f"status={window.status_message.text()!r}")
+        parts.append(f"project={window.project}")
+        return "项目加载失败：" + "；".join(parts)
 
     def events(self):
         for _ in range(3):
             self.app.processEvents()
+
+    def test_load_failure_detail_reports_project_context(self):
+        window = self.window()
+        detail = self.load_failure_detail(window)
+        self.assertIn(f"root={self.project.root}", detail)
+        self.assertIn("project.json=", detail)
+        self.assertIn("chapters=2", detail)
+        self.assertIn("status=", detail)
 
     def test_timeline_page_restores_on_restart(self):
         window = self.window()
@@ -125,11 +153,63 @@ class WorkspacePersistenceTests(unittest.TestCase):
             self.assertFalse(window.document_controller.save())
         window.editor.text_edit.insertPlainText("继续写")
         self.assertEqual(window.editor.dirty_badge.text(), "保存失败")
+        self.assertFalse(window.editor.dirty_badge.isHidden())
         self.assertFalse(window.editor.path_label.isHidden())
         self.assertTrue(window.document_controller.save())
-        self.assertEqual(window.editor.dirty_badge.text(), "已保存")
+        self.assertTrue(window.editor.dirty_badge.isHidden())  # 干净状态不再常驻徽章
         self.assertTrue(window.editor.path_label.isHidden())
         self.assertIn("新内容", self.first.read_text(encoding="utf-8"))
+
+    def test_editor_dirty_badge_appears_only_when_attention_is_needed(self):
+        window = self.window()
+        badge = window.editor.dirty_badge
+        self.assertTrue(badge.isHidden())  # 载入即干净：页头不显示状态徽章
+        window.editor.text_edit.insertPlainText("改动")
+        self.events()
+        self.assertFalse(badge.isHidden())
+        self.assertEqual(badge.text(), "未保存")
+        self.assertEqual(badge.objectName(), "dirtyBadge")
+        self.assertTrue(window.document_controller.save())
+        self.events()
+        self.assertTrue(badge.isHidden())
+
+    def test_canon_module_collapse_state_survives_restart(self):
+        from tests.test_canon_schema import character_text
+        card = self.project.canon_dir / "characters" / "白鸥.md"
+        card.write_text(character_text(), encoding="utf-8")
+        window = self.window()
+        self.assertTrue(window._open_canon_page(str(card)))
+        self.events()
+        form = window.structured_canon_page.form
+        target = next(s for s in form.entry.sections if s.heading == "外貌与辨识特征")
+        form._module_toggles[target.module_id].setChecked(False)
+        window.workspace_state.flush()
+        window.close()
+        reopened = self.window()
+        self.assertTrue(reopened._open_canon_page(str(card)))
+        self.events()
+        restored = reopened.structured_canon_page.form
+        self.assertFalse(restored._module_toggles[target.module_id].isChecked())
+        others = [s for s in restored.entry.sections
+                  if s.module_id in restored._module_toggles and s.module_id != target.module_id]
+        self.assertTrue(others)
+        self.assertTrue(all(restored._module_toggles[s.module_id].isChecked() for s in others))
+
+    def test_canon_collapsed_validates_payload_and_clears_on_expand_all(self):
+        window = self.window()
+        card = self.project.canon_dir / "characters" / "白鸥.md"
+        state = window.workspace_state
+        self.assertIsNone(state.canon_collapsed(self.project, card))
+        state.set_canon_collapsed(self.project, card, {"b" * 32, "a" * 32, 1, "x" * 65})
+        self.assertEqual(state.canon_collapsed(self.project, card), {"a" * 32, "b" * 32})
+        state.set_canon_collapsed(self.project, self.root / "outside.md", {"c" * 32})
+        state.flush()
+        raw = json.loads(self.state.read_text(encoding="utf-8"))
+        key = str(self.project.root.resolve())
+        self.assertEqual(raw["projects"][key]["canon_collapsed"],
+                         {"canon/characters/白鸥.md": ["a" * 32, "b" * 32]})
+        state.set_canon_collapsed(self.project, card, set())
+        self.assertIsNone(state.canon_collapsed(self.project, card))
 
     def test_clear_search_and_locate_current_document(self):
         window = self.window()

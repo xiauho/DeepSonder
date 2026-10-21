@@ -84,6 +84,52 @@ FIELD_SCHEMAS: dict[str, dict] = {
 }
 
 
+# 体系设定的子类型 Schema。子类型按 system_registry 的 type（ability/space）
+# 与常驻核心规则文件名区分；与通用 power Schema 并列为该类型的可选分区集合。
+# 解析、状态与表单在“通用 + 全部子类型”中按标题解析，命中即视为该类型已登记
+# 的分区，避免子类型标题未登记而被降级成用户模块并虚报“缺分区”。
+SUBTYPE_SCHEMAS: dict[str, dict] = {
+    "power:ability": {
+        "sections": [
+            {"heading": "体系定位", "role": ROLE_TEXT},
+            {"heading": "等级或层级", "role": ROLE_TEXT},
+            {"heading": "核心原则", "role": ROLE_TEXT},
+            {"heading": "获取方式", "role": ROLE_TEXT},
+            {"heading": "使用限制", "role": ROLE_TEXT},
+            {"heading": "代价与副作用", "role": ROLE_TEXT},
+            {"heading": "克制关系", "role": ROLE_TEXT},
+            {"heading": "晋升与突破", "role": ROLE_TEXT},
+            {"heading": "已知例外", "role": ROLE_TEXT},
+            {"heading": "对剧情的约束", "role": ROLE_TEXT},
+        ],
+    },
+    "power:space": {
+        "sections": [
+            {"heading": "体系定位", "role": ROLE_TEXT},
+            {"heading": "空间层级", "role": ROLE_TEXT},
+            {"heading": "空间之间的关系", "role": ROLE_TEXT},
+            {"heading": "进入与离开条件", "role": ROLE_TEXT},
+            {"heading": "时间流速差异", "role": ROLE_TEXT},
+            {"heading": "空间边界与限制", "role": ROLE_TEXT},
+            {"heading": "空间资源", "role": ROLE_TEXT},
+            {"heading": "与主世界的关系", "role": ROLE_TEXT},
+            {"heading": "对剧情的约束", "role": ROLE_TEXT},
+            {"heading": "已知例外", "role": ROLE_TEXT},
+        ],
+    },
+    "power:core_rules": {
+        "sections": [
+            {"heading": "全书不可违背的规则", "role": ROLE_TEXT},
+            {"heading": "基础约束条件", "role": ROLE_TEXT},
+            {"heading": "生效与获取条件", "role": ROLE_TEXT},
+            {"heading": "代价与副作用", "role": ROLE_TEXT},
+            {"heading": "全局例外", "role": ROLE_TEXT},
+            {"heading": "对剧情的约束", "role": ROLE_TEXT},
+        ],
+    },
+}
+
+
 def schema_for(kind: str) -> dict:
     normalized = str(kind or "").strip().lower()
     if normalized not in FIELD_SCHEMAS or normalized not in CANON_ENTRY_TYPES:
@@ -91,15 +137,29 @@ def schema_for(kind: str) -> dict:
     return FIELD_SCHEMAS[normalized]
 
 
+def kind_schemas(kind: str) -> list[dict]:
+    """该类型可用的全部分区 Schema：通用 Schema 在前，子类型 Schema 随后。"""
+    normalized = str(kind or "").strip().lower()
+    schemas = [schema_for(normalized)]
+    schemas.extend(schema for key, schema in SUBTYPE_SCHEMAS.items()
+                   if key.split(":", 1)[0] == normalized)
+    return schemas
+
+
 def section_spec(kind: str, heading: str | CanonSection) -> dict | None:
-    """返回某分区声明的角色与字段键（供表单渲染缺失字段）。"""
+    """返回某分区声明的角色与字段键（供表单渲染缺失字段）。
+
+    先在通用 Schema 中查找，再回退到该类型的子类型 Schema，因此子类型材料
+    的标题无需显式传入子类型即可被识别为已登记分区。
+    """
     if isinstance(heading, CanonSection):
         if heading.has_metadata and not heading.schema_key:
             return None
         heading = heading.schema_key or heading.heading
-    for spec in schema_for(kind)["sections"]:
-        if spec["heading"] == heading:
-            return spec
+    for schema in kind_schemas(kind):
+        for spec in schema["sections"]:
+            if spec["heading"] == heading:
+                return spec
     return None
 
 
@@ -1004,7 +1064,7 @@ def entry_status(entry: CanonEntry) -> dict:
         managed = next((s for s in entry.sections if s.role == ROLE_MANAGED), None)
         return {"missing_fields": missing,
                 "synced": managed is not None and _managed_section_synced(managed)}
-    headings = [spec["heading"] for spec in schema_for(entry.kind)["sections"]
+    headings = [spec["heading"] for spec in _status_schema(entry)["sections"]
                 if spec["role"] == ROLE_TEXT]
     missing = 0
     for heading in headings:
@@ -1013,6 +1073,28 @@ def entry_status(entry: CanonEntry) -> dict:
         if section is None or not section.text.strip():
             missing += 1
     return {"missing_sections": missing}
+
+
+def _status_schema(entry: CanonEntry) -> dict:
+    """选择最贴合该材料的分区 Schema。
+
+    通用 Schema 与子类型 Schema（能力／空间／常驻核心规则）会大量重名，
+    因此以“已登记分区命中数”优先、并列时取分区更少者，避免把子类型材料
+    误判为通用体系后虚报缺分区。
+    """
+    best = kind_schemas(entry.kind)[0]
+    best_score = None
+    for schema in kind_schemas(entry.kind):
+        headings = [spec["heading"] for spec in schema["sections"]
+                    if spec["role"] == ROLE_TEXT]
+        matched = sum(1 for heading in headings
+                      if any(s.schema_key == heading
+                             or (not s.has_metadata and s.heading == heading)
+                             for s in entry.sections))
+        score = (matched, -len(headings))
+        if best_score is None or score > best_score:
+            best_score, best = score, schema
+    return best
 
 
 def collect_canon_index(project, alias_map: dict[str, str] | None = None) -> list[dict]:

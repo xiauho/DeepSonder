@@ -159,6 +159,47 @@ class WorkspaceStateController(QObject):
             return state if isinstance(state, dict) else {}
         return None
 
+    @staticmethod
+    def _canon_relative(project, path):
+        if project is None or path is None:
+            return None
+        try:
+            return Path(path).resolve().relative_to(project.root.resolve()).as_posix()
+        except (ValueError, OSError):
+            return None
+
+    def canon_collapsed(self, project, path):
+        """该资料文档上次会话折叠的模块 id 集合；无记录时返回 None。"""
+        relative = self._canon_relative(project, path)
+        if relative is None:
+            return None
+        record = self.data["projects"].get(str(project.root.resolve()), {})
+        collapsed = record.get("canon_collapsed", {}) if isinstance(record, dict) else {}
+        value = collapsed.get(relative) if isinstance(collapsed, dict) else None
+        if not isinstance(value, list):
+            return None
+        return {item for item in value if type(item) is str and 0 < len(item) <= 64}
+
+    def set_canon_collapsed(self, project, path, module_ids):
+        """记忆某资料文档当前折叠的模块 id；空集合表示全部展开，清除记录。"""
+        relative = self._canon_relative(project, path)
+        if relative is None:
+            return
+        root = str(project.root.resolve())
+        record = self.data["projects"].setdefault(root, {})
+        if not isinstance(record, dict):
+            record = {}; self.data["projects"][root] = record
+        collapsed = record.get("canon_collapsed")
+        if not isinstance(collapsed, dict):
+            collapsed = {}
+        collapsed.pop(relative, None)
+        ids = sorted({item for item in module_ids
+                      if type(item) is str and 0 < len(item) <= 64})[:200]
+        if ids:
+            collapsed[relative] = ids
+        record["canon_collapsed"] = dict(list(collapsed.items())[-100:])
+        self.schedule()
+
     def last_document(self, project):
         record = self.data["projects"].get(str(project.root.resolve()), {})
         relative = record.get("last") if isinstance(record, dict) else None

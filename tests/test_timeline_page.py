@@ -6,10 +6,11 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase, SkipTest
 from unittest.mock import patch
 from PySide6.QtCore import QCoreApplication, Qt
-from PySide6.QtWidgets import QApplication,QDialog,QPushButton
+from PySide6.QtWidgets import QApplication,QDialog,QFrame,QPushButton
 from core.project import NovelProject
 from core.config import DEFAULT_CONFIG
 from core.timeline_events import TimelineStore
+from ui.canon_layout import CanonModuleHeader
 from ui.timeline_page import TimelinePage,EventToChapterDialog
 from ui.main_window import MainWindow
 
@@ -109,6 +110,16 @@ class TimelinePageTests(TestCase):
         self.page.reload();self.app.processEvents()
         self.assertEqual(self.page.current()['id'],'event-1200')
         self.assertEqual(self.page.list.verticalScrollBar().value(),position)
+
+    def test_page_header_shares_skeleton_with_canon_page(self):
+        header = self.page.findChild(QFrame, 'timelinePageHeader')
+        self.assertIsNotNone(header)  # 页头容器与资料页共用同一条 QSS 规则
+        panel = header.findChild(CanonModuleHeader)
+        self.assertIsNotNone(panel)  # 复用同一套“标题 + 操作自适应分行”组件
+        self.assertEqual(self.page.title_label.objectName(), 'documentTitle')
+        self.assertEqual(self.page.new_button.objectName(), 'accentButton')  # 主操作与资料页一致
+        self.assertFalse(panel.heading.geometry().intersects(panel.operations.geometry()))
+        self.assertGreater(panel.operations.geometry().left(), panel.heading.geometry().left())
 
     def test_deleted_storyline_filter_restores_on_another_page(self):
         self.store.set_deleted(self.second, True)

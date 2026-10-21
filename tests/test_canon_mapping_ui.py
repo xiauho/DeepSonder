@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from PySide6.QtCore import QCoreApplication, QEvent
-from PySide6.QtWidgets import QApplication, QPushButton, QMessageBox
+from PySide6.QtWidgets import QApplication, QPushButton, QMessageBox, QToolButton
 from core.canon_schema import (SECTION_START, SECTION_END, add_module, parse_canon_entry,
     preamble_blocks, raw_section_body, render_canon_entry, rename_module, set_section_text)
 from tests.test_canon_schema import character_text
@@ -88,10 +88,12 @@ class CanonMappingUITests(unittest.TestCase):
         self.assertNotEqual(first.module_id, second.module_id)
         second_editor = widget._text_widgets[1][1]
         second_editor.setPlainText("只修改乙")
-        button = next(b for b in widget.findChildren(QPushButton)
-                      if b.text() == "重命名" and b.property("moduleId") == second.module_id)
+        menu = next(b for b in widget.findChildren(QToolButton)
+                    if b.objectName() == "moduleMenuButton"
+                    and b.property("moduleId") == second.module_id)
+        rename = next(a for a in menu.menu().actions() if a.text() == "重命名模块…")
         with patch("ui.canon_form_widget.QInputDialog.getText", return_value=("第二模块", True)):
-            button.click()
+            rename.trigger()
         self.assertEqual(widget.entry.sections[0].heading, "同名")
         self.assertEqual(widget.entry.sections[1].heading, "第二模块")
         self.assertTrue(widget.write_changes()[0])
