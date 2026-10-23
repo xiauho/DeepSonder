@@ -63,7 +63,8 @@ class ContextSelectionTests(TestCase):
 
         self.assertTrue(context.related.world.startswith("### 星港"))
         self.assertIn("星港相关性标记", context.related.world)
-        self.assertEqual(world_stat.candidates, 9)
+        # 新项目也包含默认世界观；候选数应覆盖夹具中的全部世界观文件。
+        self.assertEqual(world_stat.candidates, len(self.project.list_world()))
         self.assertEqual(world_stat.matched, 1)
         self.assertLess(world_stat.included, world_stat.candidates)
         self.assertGreater(world_stat.excluded_unmatched, 0)

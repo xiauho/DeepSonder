@@ -17,6 +17,7 @@ from tests.test_canon_index import FakeProject
 from tests.test_canon_schema import character_text
 from ui.canon_form_widget import CanonFormWidget, NewModuleDialog
 from ui.structured_canon_page import StructuredCanonPage
+from ui.canon_sync_view import CanonSyncView
 from ui.theme import apply_theme
 
 
@@ -252,9 +253,10 @@ class CanonFormTests(unittest.TestCase):
         widget = self.widget()
         managed = next(s for s in widget.entry.sections if s.role == "managed")
         self.assertFalse([w for s, k, w in widget._field_widgets if s is managed])
-        box = next(b for b in widget.form_scroll.findChildren(QPlainTextEdit)
-                   if managed.heading and b.toPlainText().startswith(MANAGED_STATE_START.strip()))
-        self.assertTrue(box.isReadOnly())
+        view = widget.findChild(CanonSyncView)
+        self.assertEqual(view.findChildren(QLineEdit), [])
+        self.assertEqual(view.findChildren(QPlainTextEdit), [])
+        self.assertEqual(view.value_labels["location"].text(), "北港")
 
     def test_group_field_edit_persists(self):
         widget = self.widget()
@@ -503,14 +505,14 @@ class CanonFormTests(unittest.TestCase):
             self.assertEqual(menus, [], f"{heading} 不应有模块操作菜单")
         badges = [l for l in widget.findChildren(QLabel)
                   if l.objectName() == "systemModuleBadge"]
-        self.assertEqual([b.text() for b in badges], ["系统区块", "系统区块"])  # 基础档案与只读同步区
+        self.assertEqual([b.text() for b in badges], ["结构固定", "自动同步·只读"])
         # 系统区块内容仍可编辑，受管区保持只读
         self.field(widget, "姓名").setText("白羽")
         self.assertTrue(widget.is_modified())
         managed = next(s for s in widget.entry.sections if s.role == "managed")
-        viewer = next(b for b in widget.form_scroll.findChildren(QPlainTextEdit)
-                      if b.toPlainText().startswith(MANAGED_STATE_START.strip()))
-        self.assertTrue(viewer.isReadOnly())
+        viewer = widget.findChild(CanonSyncView)
+        self.assertEqual(viewer.findChildren(QLineEdit), [])
+        self.assertEqual(viewer.findChildren(QPlainTextEdit), [])
         self.assertNotEqual(managed.heading, "")
 
     def test_relation_module_keeps_picker_after_rename(self):
@@ -794,15 +796,16 @@ class CanonFormTests(unittest.TestCase):
         self.assertEqual(page.title_label.text(), "白鸥")
         self.assertEqual(page.kind_badge.text(), "角色")
         self.assertTrue(page.kind_badge.isVisibleTo(page))
-        # 干净状态不再常驻状态徽章；保存反馈由状态栏的保存提示承担。
-        self.assertFalse(page.modified_badge.isVisibleTo(page))
+        self.assertTrue(page.modified_badge.isVisibleTo(page))
+        self.assertEqual(page.modified_badge.text(), "已保存")
         self.field(page, "姓名").setText("白羽")
         self.assertTrue(page.modified_badge.isVisibleTo(page))
-        self.assertEqual(page.modified_badge.text(), "未保存修改")
+        self.assertEqual(page.modified_badge.text(), "待保存")
         self.assertEqual(page.modified_badge.objectName(), "dirtyBadge")
         ok, _error = page.write_changes()
         self.assertTrue(ok)
-        self.assertFalse(page.modified_badge.isVisibleTo(page))
+        self.assertTrue(page.modified_badge.isVisibleTo(page))
+        self.assertEqual(page.modified_badge.text(), "保存成功")
 
     def test_page_save_button_writes_and_emits_saved_signal(self):
         emitted = []

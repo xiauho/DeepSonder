@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from PySide6.QtCore import QCoreApplication, QRect
+from PySide6.QtCore import QCoreApplication, QEvent, QRect
 from PySide6.QtWidgets import QApplication
 from core.config import DEFAULT_CONFIG
 from core.project import NovelProject
@@ -39,12 +39,19 @@ class WorkspacePersistenceTests(unittest.TestCase):
         window.project_lifecycle_controller.persist_config = lambda _config: None
         window.resize(1300, 800)
         window.show()
-        self.addCleanup(window.close)
+        self.addCleanup(self.dispose_window, window)
         loaded = window._load_project(self.project.root, quiet=True)
         if not loaded:
             self.fail(self.load_failure_detail(window))
         self.events()
         return window
+
+    def dispose_window(self, window):
+        # close() 保留 Qt 对象；逐例销毁，避免后续主题应用反复处理旧窗口。
+        window.close()
+        window.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        self.events()
 
     def load_failure_detail(self, window) -> str:
         """加载返回 False 时给出上下文：_load_project(quiet=True) 会吞掉真实原因。"""

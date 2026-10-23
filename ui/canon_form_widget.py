@@ -40,6 +40,7 @@ from core.character_identity import load_registry
 from core.storage import atomic_write_text
 from ui.wrapping_label import WrappingLabel
 from ui.icons import set_button_icon
+from ui.canon_sync_view import CanonSyncView
 from ui.theme import colors_for
 from ui.canon_layout import CanonCard, CanonModuleHeader, CanonTextEdit
 
@@ -196,6 +197,8 @@ class CanonFormWidget(QWidget):
     reloaded = Signal(str)
     outline_changed = Signal()
     current_module_changed = Signal(str)
+    sync_requested = Signal(str)
+    chapter_requested = Signal(str, str)  # 来源资料路径、章节 id
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -221,6 +224,8 @@ class CanonFormWidget(QWidget):
         self._relation_sections: list[CanonSection] = []
         self._alias_map: dict[str, str] = {}
         self._theme_config: dict = {"theme": "light"}
+        self._sync_available = True
+        self._sync_unavailable_reason = ""
         self._collapse_by_path: dict[str, set[str]] = {}
         # 跨会话折叠记忆钩子：由主窗口注入，按文档路径读取/回写折叠的模块 id。
         self.collapse_state_loader = None  # Callable[[Path], set[str] | None]
@@ -253,13 +258,23 @@ class CanonFormWidget(QWidget):
         self._refresh_timer.timeout.connect(self.refresh_from_disk)
         self._watcher.fileChanged.connect(lambda _path: self._refresh_timer.start())
         self._watcher.directoryChanged.connect(lambda _path: self._refresh_timer.start())
-        # 分区大纲的已填写状态与当前位置都从实时输入推导，避免每击键重建。
+        # 分区大纲的内容状态从实时输入推导，避免每击键重建。
         self._outline_timer = QTimer(self)
         self._outline_timer.setSingleShot(True)
         self._outline_timer.setInterval(300)
         self._outline_timer.timeout.connect(self.outline_changed)
         self._current_module = ""
-        self.form_scroll.verticalScrollBar().valueChanged.connect(self._track_current_module)
+        # 显式定位的目标可能无法贴顶（例如最后一个分区）；保留选择直到用户滚动。
+        self._navigation_target: str | None = None
+        self._navigation_timer = QTimer(self)
+        self._navigation_timer.setSingleShot(True)
+        self._navigation_timer.timeout.connect(self._scroll_to_navigation_target)
+        bar = self.form_scroll.verticalScrollBar()
+        bar.valueChanged.connect(self._track_current_module)
+        bar.actionTriggered.connect(self._resume_outline_tracking)
+        bar.sliderPressed.connect(self._resume_outline_tracking)
+        for widget in (self.form_scroll, self.form_scroll.viewport(), bar):
+            widget.installEventFilter(self)
         QApplication.instance().focusChanged.connect(self._remember_focus)
         self._build_form()  # 初始为空表单，等待 load_entry
 
@@ -289,31 +304,35 @@ class CanonFormWidget(QWidget):
         return self._modified
 
     def outline_entries(self) -> list[tuple[str, str, bool]]:
-        """分区大纲：(module_id, 标题, 是否已填写)；资料导语用空 module_id 表示。
+        """分区大纲：(module_id, 标题, 是否有内容)；资料导语用空 module_id 表示。
 
-        已填写状态读取当前输入控件的实时内容，因此未保存的编辑也能立即反映；
+        有内容不代表模板填写完整。状态读取当前输入控件，因此未保存的编辑也能反映；
         没有对应输入控件的分区（例如只读同步区）按已载入的数据判断。
         """
         if self.entry is None:
             return []
-        values: dict[tuple[int, str, str], str] = {}
+        values: dict[tuple[int, str], dict[str, str]] = {}
         for section, key, editor in self._field_widgets:
-            values[(id(section), "", key)] = editor.text()
+            values.setdefault((id(section), ""), {})[key] = editor.text()
         for section, group, key, editor in self._group_widgets:
-            values[(id(section), group, key)] = editor.text()
+            values.setdefault((id(section), group), {})[key] = editor.text()
         extras: dict[tuple[int, str], list[str]] = {}
         for section, group, rows in self._extras_rows:
             extras[(id(section), group or "")] = [row.text() for row in rows]
         text_live = {id(section): editor.toPlainText() for section, editor in self._text_widgets}
+        # 关系选择器没有普通文本框，最后一行被删除后也必须以空草稿覆盖旧文本。
+        text_live.update({id(section): "\n".join(
+            editor.text() for owner, editor in self._relation_rows if owner is section)
+            for section in self._relation_sections})
         raw_live = {id(section): editor.toPlainText() for section, editor in self._raw_widgets}
 
         def fields_filled(section: CanonSection, group: str | None) -> bool:
             holder = (next(g for g in section.groups if g.name == group)
                       if group is not None else section)
-            for key, stored in holder.fields.items():
-                live = values.get((id(section), group or "", key))
-                if (stored if live is None else live).strip():
-                    return True
+            # 预设字段即使还没有写入文件，也已有输入控件，必须纳入实时状态。
+            fields = {**holder.fields, **values.get((id(section), group or ""), {})}
+            if any(value.strip() for value in fields.values()):
+                return True
             return any(line.strip() for line in extras.get((id(section), group or ""), []))
 
         entries: list[tuple[str, str, bool]] = [
@@ -342,23 +361,41 @@ class CanonFormWidget(QWidget):
     def reveal_module(self, module_id: str) -> bool:
         """展开并滚动到指定分区；空 module_id 表示回到资料导语。
 
-        对齐标题行而不是正文，跳转后分区名仍在视口内，滚动位置即高亮来源。
+        对齐标题行；页底无法贴顶时仍选中目标，用户主动滚动后恢复位置跟踪。
         """
         content = self.form_scroll.widget()
-        if not module_id or content is None:
-            self.form_scroll.verticalScrollBar().setValue(0)
-            return True
-        toggle = self._module_toggles.get(module_id)
-        if toggle is None or module_id not in self._module_bodies:
+        if content is None:
             return False
-        toggle.setChecked(True)
+        if module_id and module_id not in self._module_bodies:
+            return False
+        self._navigation_target = module_id
+        if module_id:
+            self._module_toggles[module_id].setChecked(True)
+        self._scroll_to_navigation_target()
+        # 展开正文后的滚动范围由 Qt 延迟更新，再定位一次以保证标题可见。
+        self._navigation_timer.start(0)
+        return True
+
+    def _scroll_to_navigation_target(self) -> None:
+        target = self._navigation_target
+        content = self.form_scroll.widget()
+        if target is None or content is None:
+            return
         layout = content.layout()
         if layout is not None:
             layout.activate()
         bar = self.form_scroll.verticalScrollBar()
-        offset = toggle.mapTo(content, QPoint(0, 0)).y()
+        toggle = self._module_toggles.get(target)
+        # 标题换行后，箭头在标题行内垂直居中；以整行顶部定位，避免裁掉首行。
+        offset = toggle.parentWidget().mapTo(content, QPoint(0, 0)).y() if toggle is not None else 0
         bar.setValue(max(0, min(offset, bar.maximum())))
-        return True
+        # 即使滚动值没有变化，也要更新选择（相邻页底分区可能共享同一滚动值）。
+        self._set_current_module(target)
+
+    def _resume_outline_tracking(self, _action=0) -> None:
+        self._navigation_target = None
+        self._navigation_timer.stop()
+        self._track_current_module()
 
     def set_theme(self, config: dict | None = None) -> None:
         """记录应用主题配置（表单配色由全局样式表驱动）。"""
@@ -556,9 +593,19 @@ class CanonFormWidget(QWidget):
     def _remember_focus(self, _old, current) -> None:
         if any(current is editor for editor in self._editable_widgets()):
             self._last_editor = current
+            self._navigation_target = None
+            self._navigation_timer.stop()
 
     def eventFilter(self, watched, event) -> bool:
         """标题行整行可点击折叠；标题行内的开关仍各自处理自己的点击。"""
+        if watched in (self.form_scroll, self.form_scroll.viewport(),
+                       self.form_scroll.verticalScrollBar()):
+            if (event.type() == QEvent.Type.Wheel
+                    or (event.type() == QEvent.Type.KeyPress and event.key() in {
+                        Qt.Key.Key_Up, Qt.Key.Key_Down, Qt.Key.Key_PageUp,
+                        Qt.Key.Key_PageDown, Qt.Key.Key_Home, Qt.Key.Key_End,
+                        Qt.Key.Key_Space})):
+                self._resume_outline_tracking()
         toggle = self._heading_toggles.get(watched)
         if (toggle is not None
                 and event.type() == QEvent.Type.MouseButtonRelease
@@ -597,20 +644,26 @@ class CanonFormWidget(QWidget):
     def _track_current_module(self, _value: int = 0) -> None:
         """按滚动位置推导视口顶部所在的分区，供分区大纲高亮。
 
-        与 reveal_module 使用同一处锚点（模块标题行），跳转后的高亮即被跳转的分区。
+        显式跳转优先于滚动推导，避免页底无法贴顶时选中前一个分区。
         """
+        if self._navigation_target is not None:
+            self._set_current_module(self._navigation_target)
+            return
         content = self.form_scroll.widget()
         if content is None:
             return
         viewport_top = self.form_scroll.verticalScrollBar().value()
         current, best = "", -1
         for module_id, toggle in self._module_toggles.items():
-            top = toggle.mapTo(content, QPoint(0, 0)).y()
+            top = toggle.parentWidget().mapTo(content, QPoint(0, 0)).y()
             if top <= viewport_top + 12 and top > best:
                 best, current = top, module_id
-        if current != self._current_module:
-            self._current_module = current
-            self.current_module_changed.emit(current)
+        self._set_current_module(current)
+
+    def _set_current_module(self, module_id: str) -> None:
+        if module_id != self._current_module:
+            self._current_module = module_id
+            self.current_module_changed.emit(module_id)
 
     def _set_modified(self, value: bool) -> None:
         value = bool(value)
@@ -634,6 +687,8 @@ class CanonFormWidget(QWidget):
     # ---------- 表单构建 ----------
 
     def _build_form(self) -> None:
+        self._navigation_target = None
+        self._navigation_timer.stop()
         self._last_editor = None
         self._preamble_widgets.clear()
         self._suffix_widgets.clear()
@@ -670,6 +725,7 @@ class CanonFormWidget(QWidget):
                     body.addWidget(self._suffix_panel(section))
         body.addStretch()
         self.form_scroll.setWidget(content)
+        self._set_current_module("")
         self.outline_changed.emit()
 
     def _preamble_panel(self) -> QWidget:
@@ -758,8 +814,10 @@ class CanonFormWidget(QWidget):
             badge.setObjectName("rawModuleBadge")
             header.addWidget(badge)
         if is_system_section(self.entry, section):
-            badge = QLabel("系统区块")
+            badge = QLabel("自动同步·只读" if section.role == ROLE_MANAGED else "结构固定")
             badge.setObjectName("systemModuleBadge")
+            badge.setToolTip("通过同步预览确认更新，内容只读。" if section.role == ROLE_MANAGED
+                             else "模块名称、位置和预设字段固定，字段内容可以编辑。")
             header.addWidget(badge)
         operations = None
         if not is_system_section(self.entry, section):
@@ -778,8 +836,6 @@ class CanonFormWidget(QWidget):
             if not expanded and (body is focus or body.isAncestorOf(focus)):
                 toggle.setFocus()
             body.setVisible(expanded)
-            if operations is not None:
-                operations.setVisible(expanded)
             toggle.setArrowType(Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow)
             action = "折叠" if expanded else "展开"
             toggle.setAccessibleName(f"{action}模块：{section.heading}")
@@ -912,18 +968,19 @@ class CanonFormWidget(QWidget):
         return panel
 
     def _managed_widget(self, section: CanonSection) -> QFrame:
-        body = QWidget()
-        layout = QVBoxLayout(body)
-        layout.setContentsMargins(0, 0, 0, 0)
-        viewer = CanonTextEdit(raw_section_body(section))
-        viewer.setAccessibleName(section.heading)
-        viewer.setReadOnly(True)
-        caption = QLabel("由 DeepSonder 自动同步，此处只读；请通过“同步角色档案”更新。")
-        caption.setObjectName("canonCaption")
-        caption.setWordWrap(True)
-        layout.addWidget(viewer)
-        layout.addWidget(caption)
+        body = CanonSyncView(raw_section_body(section), self.project)
+        source = str(self.path)
+        body.sync_requested.connect(lambda target=source: self.sync_requested.emit(target))
+        body.chapter_requested.connect(lambda chapter_id, target=source:
+                                      self.chapter_requested.emit(target, chapter_id))
+        body.set_sync_available(self._sync_available, self._sync_unavailable_reason)
         return self._wrap_module(section, body)
+
+    def set_sync_available(self, available: bool, reason: str = "") -> None:
+        self._sync_available = available
+        self._sync_unavailable_reason = reason
+        for view in self.findChildren(CanonSyncView):
+            view.set_sync_available(available, reason)
 
     def _fields_form(self, body, section, group_name=None):
         form = QVBoxLayout(body)

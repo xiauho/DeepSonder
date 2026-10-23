@@ -132,7 +132,8 @@ class CanonAcceptanceTests(TestCase):
         self.close_window(); self.open_window()
         self.assertEqual(self.field("喜好").text(), "温茶与潮声")
         self.assertEqual(self.form.entry.section("物品").groups[0].name, "铜钥匙")
-        self.assertTrue(self.form._module_toggles[custom.module_id].isChecked())
+        # 折叠偏好跨会话恢复；重开不再将全部模块强制展开。
+        self.assertFalse(self.form._module_toggles[custom.module_id].isChecked())
         self.window.actions["save"].trigger()
         self.assertEqual(self.card.read_bytes(), saved)
         self.assertEqual(chapter.read_bytes(), chapter_before)
@@ -184,11 +185,11 @@ class CanonAcceptanceTests(TestCase):
             select.return_value.exec.return_value = QDialog.DialogCode.Accepted
             select.return_value.selection.return_value = (card, ("chapter_01", "chapter_02"))
             preview.return_value.exec.return_value = QDialog.DialogCode.Rejected
-            self.window.sync_character_card(str(card))
+            self.form._module_bodies[self.form.entry.section("当前剧情状态（DeepSonder 同步）").module_id].sync_button.click()
             self.assertEqual(card.read_bytes(), original)
             preview.return_value.exec.return_value = QDialog.DialogCode.Accepted
             preview.return_value.selected_fields.return_value = ("location", "power_level", "items")
-            self.window.sync_character_card(str(card))
+            self.form._module_bodies[self.form.entry.section("当前剧情状态（DeepSonder 同步）").module_id].sync_button.click()
         updated = card.read_bytes()
         start, end = MANAGED_STATE_START.encode(), MANAGED_STATE_END.encode()
         self.assertEqual(original[:original.index(start)], updated[:updated.index(start)])
@@ -196,8 +197,9 @@ class CanonAcceptanceTests(TestCase):
         self.assertNotIn(b"\n", updated.replace(b"\r\n", b""))
         self.assertEqual(parse_managed_state(updated.decode("utf-8"))["location"], "北塔")
         managed = next(s for s in self.form.entry.sections if s.role == "managed")
-        self.assertIn("北塔", self.form._module_bodies[managed.module_id].findChild(QPlainTextEdit).toPlainText())
-        self.assertTrue(self.form._module_bodies[managed.module_id].findChild(QPlainTextEdit).isReadOnly())
+        view = self.form._module_bodies[managed.module_id]
+        self.assertEqual(view.value_labels["location"].text(), "北塔")
+        self.assertEqual(view.findChildren(QPlainTextEdit), [])
         self.assertTrue(self.nav_item(card).data(0,self.window.left_panel.CANON_STATUS_ROLE)["synced"])
         stale = build_character_card_sync_proposal(project, card, ("chapter_01", "chapter_02"))
         self.field("别名").setText("资料编辑后变更")
@@ -216,6 +218,11 @@ class CanonAcceptanceTests(TestCase):
         controller._on_task_succeeded(token, json.dumps({"type":"consistency_report", "chapter_id":"chapter_01", "issues":[]}))
         controller._on_task_finished(token)
         self.assertTrue(self.window.ai_workflow_controller.has_pending_result)
+        managed = next(s for s in self.form.entry.sections if s.role == "managed")
+        self.assertFalse(self.form._module_bodies[managed.module_id].sync_button.isEnabled())
+        with patch("ui.main_window.CharacterCardSyncSelectionDialog") as select:
+            self.window.sync_character_card(str(self.card))
+            select.assert_not_called()
         chapter = self.project.chapters_dir / "chapter_01.md"
         before = chapter.read_bytes()
         self.assertFalse(self.window.actions["delete_chapter"].isEnabled())
@@ -233,6 +240,46 @@ class CanonAcceptanceTests(TestCase):
         self.assertEqual(chapter.read_bytes(), before)
         self.assertEqual(self.window.current_document().path, self.card)
         self.assertNotIn(token.task_id, controller._result_snapshots)
+
+    def test_state_chapter_button_respects_draft_leave_guard(self):
+        chapter = self.project.chapters_dir / "chapter_02.md"
+        chapter.write_text("# 第二章：来信\n\n## 正文\n来信。", encoding="utf-8")
+        self.form.load_entry(self.card, "character", self.project)
+        managed = next(s for s in self.form.entry.sections if s.role == "managed")
+        view = self.form._module_bodies[managed.module_id]
+        self.assertEqual(view.value_labels["as_of_chapter"].text(), "第二章：来信")
+        self.field("别名").setText("未保存别名")
+        before = self.card.read_bytes()
+        with patch.object(self.page, "confirm_discard_or_save", return_value=False):
+            view.chapter_button.click()
+        self.assertTrue(self.window._canon_page_active())
+        self.assertEqual(self.field("别名").text(), "未保存别名")
+        self.assertEqual(self.card.read_bytes(), before)
+        self.page.configure_auto_save(True, 5)
+        with patch("ui.canon_form_widget.atomic_write_text", side_effect=OSError("磁盘只读")), \
+                patch.object(self.page, "confirm_discard_or_save", return_value=False):
+            view.chapter_button.click()
+        self.assertTrue(self.window._canon_page_active())
+        self.assertEqual(self.field("别名").text(), "未保存别名")
+        self.assertEqual(self.card.read_bytes(), before)
+        self.assertTrue(self.page.write_changes()[0])
+        view.chapter_button.click()
+        self.assertEqual(self.window.current_document().path, chapter)
+        self.assertFalse(self.window._canon_page_active())
+
+    def test_deleted_state_chapter_does_not_navigate_or_write(self):
+        chapter = self.project.chapters_dir / "chapter_02.md"
+        chapter.write_text("# 来信\n\n## 正文\n来信。", encoding="utf-8")
+        self.form.load_entry(self.card, "character", self.project)
+        managed = next(s for s in self.form.entry.sections if s.role == "managed")
+        button = self.form._module_bodies[managed.module_id].chapter_button
+        before = self.card.read_bytes()
+        chapter.unlink()
+        button.click()
+        self.assertTrue(self.window._canon_page_active())
+        self.information.assert_called()
+        self.assertEqual(self.card.read_bytes(), before)
+        self.assertEqual(self.window.current_document().path, self.card)
 
 
     def test_queued_navigation_and_startup_callbacks_end_with_window(self):

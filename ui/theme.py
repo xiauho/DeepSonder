@@ -410,7 +410,7 @@ QPlainTextEdit#outputPanel, QTextBrowser#inspectorBrowser, QTextBrowser#pageBrow
 }
 QPlainTextEdit#outputPanel { font-family: "JetBrains Mono", "Cascadia Mono", "Microsoft YaHei UI"; font-size: __SMALL_FONT_SIZE__px; }
 
-QLabel#savedBadge, QLabel#dirtyBadge, QLabel#saveErrorBadge, QLabel#canonKindBadge {
+QLabel#savedBadge, QLabel#dirtyBadge, QLabel#saveErrorBadge, QLabel#canonKindBadge, QLabel#canonSavedBadge {
     padding: 4px 10px;
     border-radius: 10px;
     font-size: __SMALL_FONT_SIZE__px;
@@ -418,6 +418,7 @@ QLabel#savedBadge, QLabel#dirtyBadge, QLabel#saveErrorBadge, QLabel#canonKindBad
 QLabel#saveErrorBadge { color: __DANGER__; background: __FIELD__; }
 QLabel#saveErrorMessage { color: __DANGER__; padding: 6px 8px; background: __FIELD__; border-left: 3px solid __DANGER__; }
 QLabel#savedBadge { color: __GOOD__; background: __GOOD_BG__; }
+QLabel#canonSavedBadge { color: __MUTED__; background: transparent; }
 QLabel#dirtyBadge { color: __ACCENT__; background: __SELECTION__; }
 QLabel#canonKindBadge {
     color: __ACCENT__;
@@ -442,7 +443,7 @@ QFrame#canonGroupFrame {
 }
 QLabel#canonModuleTitle { font-size: __CANON_TITLE_SIZE__px; font-weight: 700; }
 QLabel#canonCaption { color: __MUTED__; font-size: __SMALL_FONT_SIZE__px; }
-QLabel#canonFieldLabel, QLabel#fieldLabel { color: __MUTED__; font-weight: 600; }
+QLabel#canonFieldLabel, QLabel#canonSyncLabel, QLabel#fieldLabel { color: __MUTED__; font-weight: 600; }
 QPlainTextEdit#canonTextEditor {
     background: __FIELD__;
     border: 1px solid __BORDER__;

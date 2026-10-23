@@ -31,6 +31,8 @@ class StructuredCanonPage(QWidget):
 
     reloaded = Signal(str)
     saved = Signal(str)  # 实际写盘成功后发出（参数为保存路径）
+    sync_requested = Signal(str)
+    chapter_requested = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -62,10 +64,6 @@ class StructuredCanonPage(QWidget):
         self.kind_badge.hide()
         toolbar_layout.addWidget(self.kind_badge)
 
-        self.modified_badge = QLabel("未保存修改")
-        self.modified_badge.hide()
-        toolbar_layout.addWidget(self.modified_badge)
-
         self.outline_toggle = QToolButton()
         self.outline_toggle.setObjectName("outlineToggleButton")
         set_button_icon(self.outline_toggle, "toc", size=17)
@@ -92,7 +90,24 @@ class StructuredCanonPage(QWidget):
         adaptive_header = CanonModuleHeader(self.title_label, toolbar)
         adaptive_header.setObjectName("canonPageToolbar")
         header_layout.addWidget(adaptive_header)
+        # 状态独占固定的一行，长度和颜色变化不再挤动标题及操作按钮。
+        status_row = QHBoxLayout()
+        status_row.setContentsMargins(0, 0, 0, 0)
+        self.modified_badge = QLabel("已保存")
+        self.modified_badge.setAccessibleName("资料保存状态")
+        policy = self.modified_badge.sizePolicy()
+        policy.setRetainSizeWhenHidden(True)
+        self.modified_badge.setSizePolicy(policy)
+        status_row.addWidget(self.modified_badge)
+        status_row.addStretch()
+        header_layout.addLayout(status_row)
         layout.addWidget(header)
+
+        self._saved_revision = None
+        self._saved_feedback_timer = QTimer(self)
+        self._saved_feedback_timer.setSingleShot(True)
+        self._saved_feedback_timer.setInterval(3000)
+        self._saved_feedback_timer.timeout.connect(self._sync_header)
 
         # 与章节编辑器共用同一项自动保存设置；关闭时保留显式保存与离开确认。
         self._auto_save_enabled = False
@@ -104,11 +119,13 @@ class StructuredCanonPage(QWidget):
         self.form = CanonFormWidget(self)
         self.form.on_saved = self._emit_saved
         self.form.reloaded.connect(self.reloaded)
-        self.form.modified_changed.connect(lambda _modified: self._sync_header())
+        self.form.modified_changed.connect(self._modified_changed)
         self.form.modified_changed.connect(self._schedule_auto_save)
         self.form.state_changed.connect(self._sync_header)
         self.form.outline_changed.connect(self._refresh_outline)
         self.form.current_module_changed.connect(self._set_outline_current)
+        self.form.sync_requested.connect(self._request_sync)
+        self.form.chapter_requested.connect(self._request_chapter)
 
         # 页内大纲：宽窗口常驻在表单右侧，窄窗口收进页头的分区按钮。
         self._outline_requested = True
@@ -125,12 +142,14 @@ class StructuredCanonPage(QWidget):
         outline_layout.setSpacing(6)
         self.outline_title = QLabel("分区")
         self.outline_title.setObjectName("canonOutlineTitle")
+        self.outline_title.setToolTip("● 有内容 · ○ 空白；不代表模板填写完整")
         outline_layout.addWidget(self.outline_title)
         self.outline_list = QListWidget()
         self.outline_list.setObjectName("canonOutlineList")
         self.outline_list.setTextElideMode(Qt.TextElideMode.ElideRight)
         self.outline_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.outline_list.setAccessibleName("资料分区大纲")
+        self.outline_list.setAccessibleDescription("● 有内容 · ○ 空白；不代表模板填写完整")
         self.outline_list.itemClicked.connect(self._on_outline_item_clicked)
         self.outline_list.itemActivated.connect(self._on_outline_item_clicked)
         outline_layout.addWidget(self.outline_list, 1)
@@ -162,7 +181,26 @@ class StructuredCanonPage(QWidget):
     # ---------- 状态同步 ----------
 
     def _emit_saved(self, path) -> None:
+        self._saved_revision = (str(path), self.form._expected_hash)
+        self._saved_feedback_timer.start()
+        self._sync_header()
         self.saved.emit(str(path))
+
+    def _modified_changed(self, modified: bool) -> None:
+        if modified:
+            self._saved_feedback_timer.stop()
+        self._sync_header()
+
+    def _request_sync(self, source: str) -> None:
+        if self.current_kind() == "character" and str(self.current_path()) == source:
+            self.sync_requested.emit(source)
+
+    def _request_chapter(self, source: str, chapter_id: str) -> None:
+        if str(self.current_path()) == source:
+            self.chapter_requested.emit(chapter_id)
+
+    def set_sync_available(self, available: bool, reason: str = "") -> None:
+        self.form.set_sync_available(available, reason)
 
     def _prompt_new_module(self) -> None:
         """页头“＋ 新建模块”入口：委托给表单的新建模块对话框。"""
@@ -177,13 +215,17 @@ class StructuredCanonPage(QWidget):
         self.kind_badge.setText(
             CANON_ENTRY_TYPES[kind]["label"] if kind in CANON_ENTRY_TYPES else "")
         self.kind_badge.setVisible(kind is not None)
-        # 状态徽章只在需要用户注意时出现；干净状态由状态栏的保存提示承担反馈。
+        if self._saved_revision != (str(path), self.form._expected_hash):
+            self._saved_feedback_timer.stop()
         if path is not None and self.form.external_changed:
             state = ("外部版本变化", "saveErrorBadge")
         elif path is not None and self.form.save_error:
             state = ("保存失败", "saveErrorBadge")
         elif path is not None and self.form.is_modified():
-            state = ("未保存修改", "dirtyBadge")
+            state = ("待保存", "dirtyBadge")
+        elif path is not None:
+            state = (("保存成功", "savedBadge") if self._saved_feedback_timer.isActive()
+                     else ("已保存", "canonSavedBadge"))
         else:
             state = None
         if state is None:
@@ -191,7 +233,11 @@ class StructuredCanonPage(QWidget):
         else:
             self.modified_badge.setText(state[0])
             self.modified_badge.setObjectName(state[1])
+            self.modified_badge.setAccessibleName(f"资料保存状态：{state[0]}")
+            self.modified_badge.setToolTip(self.form.save_error or state[0])
             self.modified_badge.show()
+        if self.form.external_changed or self.form.save_error:
+            self._saved_feedback_timer.stop()
         self.modified_badge.style().unpolish(self.modified_badge)
         self.modified_badge.style().polish(self.modified_badge)
         self.save_button.setEnabled(path is not None)
@@ -218,7 +264,6 @@ class StructuredCanonPage(QWidget):
         if self.width() >= self.OUTLINE_MIN_WIDTH:
             self._outline_requested = self.outline_toggle.isChecked()
         else:
-            self._outline_requested = False
             self._show_outline_popup()
         self._update_outline_visibility()
 
@@ -230,7 +275,7 @@ class StructuredCanonPage(QWidget):
             self._refresh_outline()
 
     def outline_entries(self) -> list[tuple[str, str, bool]]:
-        """当前大纲（实时读取表单输入）：(module_id, 标题, 是否已填写)。"""
+        """当前大纲（实时读取表单输入）：(module_id, 标题, 是否有内容)。"""
         return self.form.outline_entries()
 
     def _refresh_outline(self) -> None:
@@ -243,7 +288,9 @@ class StructuredCanonPage(QWidget):
         for module_id, heading, filled in entries:
             item = QListWidgetItem(f"{'●' if filled else '○'} {heading}")
             item.setData(Qt.ItemDataRole.UserRole, module_id)
-            item.setToolTip(f"{heading}\n{'已填写' if filled else '尚未填写'}")
+            status = "有内容" if filled else "空白"
+            item.setToolTip(f"{heading}\n{status}")
+            item.setData(Qt.ItemDataRole.AccessibleTextRole, f"{heading}，{status}")
             self.outline_list.addItem(item)
         self.outline_list.blockSignals(False)
         self._set_outline_current(self._outline_current if entries else "")
@@ -261,11 +308,13 @@ class StructuredCanonPage(QWidget):
 
     def _show_outline_popup(self) -> None:
         menu = QMenu(self.outline_toggle)
+        menu.setToolTipsVisible(True)
         entries = self.form.outline_entries()
         if not entries:
             menu.addAction("尚未打开设定材料").setEnabled(False)
         for module_id, heading, filled in entries:
             action = menu.addAction(("● " if filled else "○ ") + heading)
+            action.setToolTip(f"{heading}\n{'有内容' if filled else '空白'}")
             action.triggered.connect(
                 lambda _checked=False, target=module_id: self.form.reveal_module(target))
         menu.exec(self.outline_toggle.mapToGlobal(self.outline_toggle.rect().bottomLeft()))
@@ -431,6 +480,8 @@ class StructuredCanonPage(QWidget):
     def reset(self) -> None:
         """清空当前材料（项目切换、材料被删除等场景），不做任何写盘。"""
         self._auto_save_timer.stop()
+        self._saved_feedback_timer.stop()
+        self._saved_revision = None
         self.form.reset()
         self._sync_header()
 

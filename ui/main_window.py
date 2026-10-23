@@ -731,6 +731,8 @@ class MainWindow(QMainWindow):
         self.editor.text_edit.selectionChanged.connect(self._refresh_ai_actions)
         self.editor.stats_changed.connect(lambda _text: self._refresh_ai_actions())
         self.structured_canon_page.saved.connect(self._on_structured_canon_saved)
+        self.structured_canon_page.sync_requested.connect(self.sync_character_card)
+        self.structured_canon_page.chapter_requested.connect(self._open_canon_state_chapter)
         self.structured_canon_page.reloaded.connect(
             lambda path: self.project_session.notify_data_changed([Path(path)], kind="canon"))
         self.project_session.data_change_detail.connect(self._refresh_current_canon)
@@ -1615,11 +1617,11 @@ class MainWindow(QMainWindow):
         if project is None:
             self._require_project()
             return
-        if self.ai_controller.is_running():
+        if self.ai_controller.is_running() or self.ai_workflow_controller.has_pending_result:
             QMessageBox.information(
                 self,
                 "AI 正在工作",
-                "请等待当前 AI 任务完成后再同步角色档案。",
+                "请等待当前 AI 任务完成，并采用或放弃待审结果后再同步角色档案。",
             )
             return
         if not self._save_if_dirty():
@@ -1678,6 +1680,19 @@ class MainWindow(QMainWindow):
             f"已更新：{labels}\n本次同步截止章节：{proposal.as_of_chapter}\n\n"
             f"同步前版本已备份到：\n{result.backup_path}",
         )
+
+    def _open_canon_state_chapter(self, chapter_id: str) -> None:
+        if self.project is None or not self._canon_page_active():
+            return
+        try:
+            path = next((p for p in self.project.list_chapters() if p.stem == chapter_id), None)
+            if (path is None or not path.is_file()
+                    or path.resolve().parent != self.project.chapters_dir.resolve()):
+                QMessageBox.information(self, "章节不存在", "同步记录引用的章节已不存在，资料内容已保留。")
+                return
+            self._on_file_selected("章节", str(path))
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, "无法打开章节", str(exc))
 
     def new_world_entry(self) -> None:
         self.new_canon_entry("world")
@@ -2115,6 +2130,10 @@ class MainWindow(QMainWindow):
         workflow = getattr(self, "ai_workflow_controller", None)
         pending = workflow is not None and workflow.has_pending_result
         running = self.ai_controller.is_running() or pending
+        page = getattr(self, "structured_canon_page", None)
+        if page is not None:
+            page.set_sync_available(
+                not running, "请等待任务完成，并采用或放弃待审结果后再同步。" if running else "")
         chapter_open = self.project is not None and self.current_document().chapter_id is not None
         if "character_identity" in self.actions:
             self.actions["character_identity"].setEnabled(self.project is not None and not running)
