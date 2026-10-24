@@ -737,6 +737,7 @@ class MainWindow(QMainWindow):
             lambda path: self.project_session.notify_data_changed([Path(path)], kind="canon"))
         self.project_session.data_change_detail.connect(self._refresh_current_canon)
         self.structured_canon_page.form.modified_changed.connect(self._on_dirty_changed)
+        self.structured_canon_page.form.history_changed.connect(self._refresh_document_actions)
         self.ai_controller.started.connect(self._on_ai_started)
         self.ai_controller.finished.connect(self._on_ai_finished)
         self.document_controller.auto_saved.connect(self._on_auto_saved)
@@ -1741,6 +1742,9 @@ class MainWindow(QMainWindow):
                 self.actions[key].setToolTip("资料表单暂不支持跨模块查找与替换。")
             elif key == "find":
                 self.actions[key].setToolTip("查找与替换")
+            if context.structured and key in {"undo", "redo"}:
+                history = self.structured_canon_page.form.history
+                enabled = history.can_undo if key == "undo" else history.can_redo
             if not context.structured and self.editor.is_story_plan() and key in {"find", "inspector"}:
                 enabled = False
             self.actions[key].setEnabled(enabled)

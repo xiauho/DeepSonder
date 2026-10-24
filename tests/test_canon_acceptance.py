@@ -96,6 +96,49 @@ class CanonAcceptanceTests(TestCase):
         panel = self.window.left_panel
         return next(item for item in panel.document_items() if item.data(0,panel.PATH_ROLE) == str(path))
 
+    def test_document_history_through_menus_autosave_and_global_actions(self):
+        before = self.card.read_bytes()
+        tail = before[before.index("## 当前剧情状态".encode("utf-8")):]
+        chapter = self.project.chapters_dir / "chapter_01.md"
+        chapter_before = chapter.read_bytes()
+        states = [self.form._effective_text()]
+        self.field("姓名").setText("草稿中的白鸥")
+        states.append(self.form._effective_text())
+        self.prompt(lambda: self.form._add_field(self.form.entry.section("基础档案")), "偏好")
+        states.append(self.form._effective_text())
+        self.field("偏好").setText("温茶")
+        states.append(self.form._effective_text())
+        self.prompt(lambda: self.form._rename_field(self.form.entry.section("基础档案"), "偏好"), "爱好")
+        states.append(self.form._effective_text())
+        self.form._move_module(self.form.entry.section("外貌与辨识特征"), 1)
+        states.append(self.form._effective_text())
+        with patch("ui.canon_form_widget.QMessageBox.question", return_value=QMessageBox.StandardButton.Yes):
+            self.form._delete_module(self.form.entry.section("外貌与辨识特征"))
+        states.append(self.form._effective_text())
+        self.page.configure_auto_save(True, 30)
+        self.page._auto_save_flush()
+        saved = self.card.read_bytes()
+        self.assertTrue(saved.endswith(tail))
+        self.assertTrue(self.window.actions["undo"].isEnabled())
+        self.assertFalse(self.window.actions["redo"].isEnabled())
+        for expected in reversed(states[:-1]):
+            self.window.actions["undo"].trigger()
+            self.app.processEvents()
+            self.assertEqual(self.form._effective_text(), expected)
+            self.assertEqual(self.card.read_bytes(), saved)
+        self.assertFalse(self.window.actions["undo"].isEnabled())
+        self.assertTrue(self.window.actions["redo"].isEnabled())
+        self.window.actions["save"].trigger()
+        self.assertEqual(self.card.read_bytes(), before)
+        for expected in states[1:]:
+            self.window.actions["redo"].trigger()
+            self.app.processEvents()
+            self.assertEqual(self.form._effective_text(), expected)
+        self.window.actions["save"].trigger()
+        self.assertEqual(self.card.read_bytes(), saved)
+        self.assertEqual(chapter.read_bytes(), chapter_before)
+        self.assertEqual(self.world.read_text(encoding="utf-8"), "# 港口\n\n## 核心规则\n\n原始规则\n")
+
     def test_edit_structure_collapse_global_save_navigation_and_restart(self):
         before = self.card.read_bytes()
         untouched_tail = before[before.index("## 作者自由备注".encode("utf-8")):]

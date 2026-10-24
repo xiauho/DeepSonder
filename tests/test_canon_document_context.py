@@ -221,7 +221,8 @@ class CanonDocumentContextTests(unittest.TestCase):
         self.app.processEvents()
         self.page.form._remove_relation_row(relation, relation.parentWidget())
         self.window.actions["undo"].trigger()
-        self.assertTrue(field.text().endswith("x"))
+        self.assertTrue(self.name().text().endswith("x"))
+        self.assertEqual(len(self.page.form._relation_rows), 1)
 
 
 if __name__ == "__main__":

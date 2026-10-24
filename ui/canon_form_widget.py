@@ -21,6 +21,7 @@ from copy import deepcopy
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QFileSystemWatcher, QPoint, QTimer, Signal, Qt
+from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QDialog, QFrame,
     QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMenu, QMessageBox, QPlainTextEdit,
     QPushButton, QRadioButton, QScrollArea, QSizePolicy, QToolButton, QVBoxLayout, QWidget)
@@ -43,6 +44,7 @@ from ui.icons import set_button_icon
 from ui.canon_sync_view import CanonSyncView
 from ui.theme import colors_for
 from ui.canon_layout import CanonCard, CanonModuleHeader, CanonTextEdit
+from ui.canon_history import CanonEditHistory, CanonSnapshot, ordered_equal
 
 
 # 空分区写作引导：让作者在打开一份空白资料时就知道每个分区该写什么。
@@ -199,6 +201,7 @@ class CanonFormWidget(QWidget):
     current_module_changed = Signal(str)
     sync_requested = Signal(str)
     chapter_requested = Signal(str, str)  # 来源资料路径、章节 id
+    history_changed = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -233,6 +236,10 @@ class CanonFormWidget(QWidget):
         self._module_bodies: dict[str, QWidget] = {}
         self._module_toggles: dict[str, QToolButton] = {}
         self._heading_toggles: dict[QWidget, QToolButton] = {}
+        self.history = CanonEditHistory()
+        self._history_restoring = False
+        self._history_building = False
+        self._history_typing = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 8, 18, 8)
@@ -419,6 +426,7 @@ class CanonFormWidget(QWidget):
         self.save_error = ""
         self._baseline_text = ""
         self._alias_map = {}
+        self.history.clear()
         self._preamble_widgets.clear()
         self._suffix_widgets.clear()
         self._field_widgets.clear()
@@ -431,6 +439,7 @@ class CanonFormWidget(QWidget):
         self._build_form()
         self.feedback.clear()
         self._set_modified(False)
+        self.history_changed.emit()
         self.state_changed.emit()
 
     def load_entry(self, path: Path | str, kind: str, project=None) -> None:
@@ -457,6 +466,8 @@ class CanonFormWidget(QWidget):
         self._watcher.addPaths([str(path), str(path.parent)])
         self.entry = entry
         self._build_form()
+        self.history.clear(self._history_snapshot())
+        self.history_changed.emit()
         self.feedback.clear()
         self._set_modified(False)
         self.state_changed.emit()
@@ -541,12 +552,15 @@ class CanonFormWidget(QWidget):
         self.save_error = ""
         self.feedback.clear()
         self._set_modified(False)
+        self.history.replace_current(self._history_snapshot())
+        self.history_changed.emit()
         self.state_changed.emit()
 
     def write_changes(self) -> tuple[bool, str]:
         """Commit collected input and update the revision only after a successful write."""
         if self.path is None or self.entry is None:
             return False, "尚未打开设定材料。"
+        self.history.break_merge()
         try:
             current = self.path.read_bytes()
         except OSError as exc:
@@ -591,6 +605,8 @@ class CanonFormWidget(QWidget):
         return [editor for _section, _key, editor in self._editor_bindings()]
 
     def _remember_focus(self, _old, current) -> None:
+        if not self._history_restoring and not self._history_building and _old is not current:
+            self.history.break_merge()
         if any(current is editor for editor in self._editable_widgets()):
             self._last_editor = current
             self._navigation_target = None
@@ -598,6 +614,41 @@ class CanonFormWidget(QWidget):
 
     def eventFilter(self, watched, event) -> bool:
         """标题行整行可点击折叠；标题行内的开关仍各自处理自己的点击。"""
+        if watched in self._editable_widgets():
+            if event.type() in (QEvent.Type.ShortcutOverride, QEvent.Type.KeyPress):
+                command = ("undo" if event.matches(QKeySequence.StandardKey.Undo) else
+                           "redo" if event.matches(QKeySequence.StandardKey.Redo) else None)
+                if command:
+                    event.accept()
+                    if event.type() == QEvent.Type.KeyPress:
+                        self.edit_command(command)
+                    return True
+            if event.type() == QEvent.Type.KeyPress:
+                self.history.update_view(self._history_view(watched))
+                modifiers = event.modifiers()
+                typing = (bool(event.text()) and not modifiers & (
+                    Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier)
+                    and event.key() not in (Qt.Key.Key_Return, Qt.Key.Key_Enter,
+                                           Qt.Key.Key_Tab, Qt.Key.Key_Backspace, Qt.Key.Key_Delete))
+                deleting = event.key() in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete)
+                selected = (bool(watched.selectedText()) if isinstance(watched, QLineEdit)
+                            else watched.textCursor().hasSelection())
+                if selected:
+                    self.history.break_merge()
+                self._history_typing = (watched, "insert" if typing else event.key()) if (
+                    typing or (deleting and not selected)) else None
+                if self._history_typing is None:
+                    self.history.break_merge()
+            elif event.type() == QEvent.Type.KeyRelease:
+                self._history_typing = None
+            elif event.type() in (QEvent.Type.MouseButtonPress, QEvent.Type.FocusOut):
+                self._history_typing = None
+                self.history.break_merge()
+                self.history.update_view(self._history_view(watched))
+            elif event.type() == QEvent.Type.InputMethod:
+                # One committed IME phrase is one step; preedit text is not saved.
+                self._history_typing = None
+                self.history.break_merge()
         if watched in (self.form_scroll, self.form_scroll.viewport(),
                        self.form_scroll.verticalScrollBar()):
             if (event.type() == QEvent.Type.Wheel
@@ -626,8 +677,9 @@ class CanonFormWidget(QWidget):
         return editor
 
     def edit_command(self, command: str) -> None:
-        # A menu command must not fall back to another field when its previous
-        # target was removed. F6 may choose a first field; undo/redo may not.
+        if command in {"undo", "redo"}:
+            self._history_step(-1 if command == "undo" else 1)
+            return
         editor = next((e for e in self._editable_widgets() if e is self._last_editor), None)
         if editor is not None:
             self._reveal_editor(editor)
@@ -640,6 +692,184 @@ class CanonFormWidget(QWidget):
                 self._module_toggles[identity].setChecked(True)
                 self.form_scroll.ensureWidgetVisible(editor)
                 break
+
+    def _history_view(self, focus=None):
+        focus = focus if focus is not None else self._last_editor
+        target = None
+        for section, key, editor in self._editor_bindings():
+            if editor is focus:
+                if isinstance(editor, QLineEdit):
+                    anchor = editor.selectionStart()
+                    position = editor.cursorPosition()
+                    if anchor >= 0:
+                        end = anchor + len(editor.selectedText().encode("utf-16-le")) // 2
+                        anchor = end if position == anchor else anchor
+                    else:
+                        anchor = position
+                else:
+                    position, anchor = editor.textCursor().position(), editor.textCursor().anchor()
+                target = (section.module_id if section else None, key, position, anchor)
+                break
+        return {"focus": target, "scroll": self.form_scroll.verticalScrollBar().value()}
+
+    def _history_snapshot(self):
+        values = {(section.module_id if section else None, key):
+                  editor.text() if isinstance(editor, QLineEdit) else editor.toPlainText()
+                  for section, key, editor in self._editor_bindings()}
+        return CanonSnapshot(deepcopy(self.entry), values, self._history_view())
+
+    def _bind_history_editor(self, editor):
+        editor.installEventFilter(self)
+        editor.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        editor.customContextMenuRequested.connect(lambda point, e=editor: self._editor_menu(e, point))
+        editor.textChanged.connect(lambda *_, e=editor: self._input_history_changed(e))
+        if isinstance(editor, QLineEdit):
+            editor.cursorPositionChanged.connect(lambda *_: self._remember_history_cursor(editor))
+        else:
+            editor.cursorPositionChanged.connect(lambda: self._remember_history_cursor(editor))
+            # No second, widget-local history can accumulate behind the session.
+            editor.setUndoRedoEnabled(False)
+
+    def _remember_history_cursor(self, editor):
+        if not self._history_restoring and not self._history_building:
+            self.history.update_view(self._history_view(editor))
+
+    def _input_history_changed(self, editor):
+        if self._history_restoring or self._history_building:
+            return
+        self._last_editor = editor
+        key = next(((s.module_id if s else None, k) for s, k, e in self._editor_bindings()
+                    if e is editor), None)
+        merge = (key, self._history_typing[1]) if (
+            self._history_typing is not None and self._history_typing[0] is editor) else None
+        self._record_history(merge)
+
+    def _record_history(self, merge=None):
+        if self._history_restoring or self._history_building or self.entry is None:
+            return
+        self.history.record(self._history_snapshot(), merge)
+        self._sync_history_dirty()
+        self.history_changed.emit()
+
+    def _sync_history_dirty(self):
+        try:
+            modified = self._effective_text() != self._baseline_text
+        except ValueError:
+            modified = True  # Invalid intermediate input still belongs to the draft.
+        self._set_modified(modified)
+        self._outline_timer.start()
+        self.state_changed.emit()
+
+    def _editor_menu(self, editor, point):
+        menu = self._make_editor_menu(editor)
+        menu.exec(editor.mapToGlobal(point))
+        menu.deleteLater()
+
+    def _make_editor_menu(self, editor):
+        self._last_editor = editor
+        self.history.update_view(self._history_view(editor))
+        self.history.break_merge()
+        # A structural undo may destroy the input that opened this menu.
+        menu = QMenu(self)
+        for label, command, available in (("撤销\tCtrl+Z", "undo", self.history.can_undo),
+                                           ("重做\tCtrl+Y", "redo", self.history.can_redo)):
+            action = menu.addAction(label, lambda _=False, c=command: self.edit_command(c))
+            action.setEnabled(available)
+        menu.addSeparator()
+        selected = (bool(editor.selectedText()) if isinstance(editor, QLineEdit)
+                    else editor.textCursor().hasSelection())
+        for label, command in (("剪切", "cut"), ("复制", "copy"), ("粘贴", "paste")):
+            action = menu.addAction(label, getattr(editor, command))
+            action.setEnabled(selected if command in {"cut", "copy"} else
+                              bool(QApplication.clipboard().text()))
+        delete = menu.addAction("删除", editor.del_ if isinstance(editor, QLineEdit)
+                                else lambda: editor.textCursor().removeSelectedText())
+        delete.setEnabled(selected)
+        menu.addSeparator()
+        menu.addAction("全选", editor.selectAll)
+        return menu
+
+    def _history_step(self, direction):
+        self.history.update_view(self._history_view())
+        previous = self.history.current
+        snapshot = self.history.step(direction)
+        if snapshot is None:
+            return
+        self._view_restore_timer.stop()
+        self._pending_view_restore = None
+        self._history_typing = None
+        self._history_restoring = True
+        try:
+            bindings = {(s.module_id if s else None, k): e for s, k, e in self._editor_bindings()}
+            if not ordered_equal(self.entry, snapshot.entry) or bindings.keys() != snapshot.values.keys():
+                self.entry = deepcopy(snapshot.entry)
+                self._build_form()
+                # Relationship rows are live controls rather than schema fields;
+                # snapshots also preserve empty rows and deletion of the last row.
+                for section in self._relation_sections:
+                    body = self._module_bodies[section.module_id]
+                    for item, editor in list(self._relation_rows):
+                        if item is section:
+                            row = editor.parentWidget()
+                            row.setParent(None)
+                            row.deleteLater()
+                    self._relation_rows = [(s, e) for s, e in self._relation_rows if s is not section]
+                    for (identity, key), text in snapshot.values.items():
+                        if identity == section.module_id and key[0] == "relation":
+                            self._add_relation_row(section, body.layout(), text)
+                bindings = {(s.module_id if s else None, k): e for s, k, e in self._editor_bindings()}
+            for key, text in snapshot.values.items():
+                editor = bindings[key]
+                editor.blockSignals(True)
+                if isinstance(editor, QLineEdit):
+                    if editor.text() != text:
+                        editor.setText(text)
+                else:
+                    if editor.toPlainText() != text:
+                        editor.setPlainText(text)
+                        editor._schedule_fit()
+                editor.blockSignals(False)
+            self.feedback.setText(self.save_error)
+            self._sync_history_dirty()
+            # Restore the editor/selection; a structural deletion may have no
+            # surviving focus, in which case focus the changed module's heading.
+            target = snapshot.view.get("focus")
+            restored_ids = set(s.module_id for s in snapshot.entry.sections) - set(
+                s.module_id for s in previous.entry.sections)
+
+            def restore_view():
+                if self.history.current is not snapshot:
+                    return
+                for identity in restored_ids:
+                    self._module_toggles[identity].setChecked(True)
+                editor = bindings.get((target[0], target[1])) if target else None
+                if editor is not None:
+                    self._last_editor = editor
+                    self._reveal_editor(editor)
+                    editor.setFocus()
+                    position, anchor = target[2:]
+                    if isinstance(editor, QLineEdit):
+                        editor.setSelection(anchor, position - anchor)
+                    else:
+                        cursor = editor.textCursor()
+                        limit = editor.document().characterCount() - 1
+                        cursor.setPosition(min(anchor, limit))
+                        cursor.setPosition(min(position, limit), cursor.MoveMode.KeepAnchor)
+                        editor.setTextCursor(cursor)
+                else:
+                    self.form_scroll.verticalScrollBar().setValue(snapshot.view["scroll"])
+                for identity in restored_ids:
+                    self.reveal_module(identity)
+                    if target is None or target[0] != identity:
+                        self._module_toggles[identity].setFocus()
+
+            restore_view()
+            self._pending_view_restore = restore_view
+            self._view_restore_timer.start(0)
+        finally:
+            self._history_restoring = False
+        self.outline_changed.emit()
+        self.history_changed.emit()
 
     def _track_current_module(self, _value: int = 0) -> None:
         """按滚动位置推导视口顶部所在的分区，供分区大纲高亮。
@@ -687,6 +917,7 @@ class CanonFormWidget(QWidget):
     # ---------- 表单构建 ----------
 
     def _build_form(self) -> None:
+        self._history_building = True
         self._navigation_target = None
         self._navigation_timer.stop()
         self._last_editor = None
@@ -725,6 +956,9 @@ class CanonFormWidget(QWidget):
                     body.addWidget(self._suffix_panel(section))
         body.addStretch()
         self.form_scroll.setWidget(content)
+        for editor in self._editable_widgets():
+            self._bind_history_editor(editor)
+        self._history_building = False
         self._set_current_module("")
         self.outline_changed.emit()
 
@@ -1142,14 +1376,22 @@ class CanonFormWidget(QWidget):
         line.addWidget(remove)
         remove.clicked.connect(
             lambda _=False, e=editor, w=row: self._remove_relation_row(e, w))
-        vbox.addWidget(row)
+        last = vbox.itemAt(vbox.count() - 1) if vbox.count() else None
+        if last is not None and isinstance(last.widget(), QPushButton):
+            vbox.insertWidget(vbox.count() - 1, row)
+        else:
+            vbox.addWidget(row)
         self._relation_rows.append((section, editor))
+        if not self._history_building:
+            self._bind_history_editor(editor)
 
     def _remove_relation_row(self, editor: QLineEdit, row: QWidget) -> None:
+        self.history.update_view(self._history_view(editor))
         self._relation_rows = [(s, e) for s, e in self._relation_rows if e is not editor]
         row.setParent(None)
         row.deleteLater()
         self._mark_modified()
+        self._record_history()
 
     def _pick_relation(self, section: CanonSection, vbox: QVBoxLayout) -> None:
         candidates = self._relation_candidates()
@@ -1159,8 +1401,10 @@ class CanonFormWidget(QWidget):
         selected, ok = QInputDialog.getItem(self, "关联角色", "选择角色：", candidates, 0, False)
         if not ok or not selected:
             return
+        self.history.update_view(self._history_view())
         self._add_relation_row(section, vbox, f"- {selected}：")
         self._mark_modified()
+        self._record_history()
         self.feedback.clear()
 
     def _relation_candidates(self) -> list[str]:
@@ -1272,6 +1516,9 @@ class CanonFormWidget(QWidget):
 
     def _change_structure(self, operation, remap_focus=None) -> None:
         draft = self._collected_entry()
+        before = render_canon_entry(draft)
+        self.history.update_view(self._history_view())
+        self.history.break_merge()
         # Remember the field before a dialog/menu took focus. Track the copied
         # section object so renames and moves do not invalidate its identity.
         focus = self._last_editor or QApplication.focusWidget()
@@ -1281,14 +1528,16 @@ class CanonFormWidget(QWidget):
             if editor is focus:
                 index = next((i for i, item in enumerate(old_sections) if item is section), None)
                 if isinstance(editor, QLineEdit):
-                    cursor = (editor.cursorPosition(), editor.selectionStart(), len(editor.selectedText()))
+                    cursor = (editor.cursorPosition(), editor.selectionStart(),
+                              len(editor.selectedText().encode("utf-16-le")) // 2)
                 else:
                     cursor = (editor.textCursor().position(), editor.textCursor().anchor())
                 focused = (draft.sections[index] if index is not None else None, key, cursor)
                 break
         scroll = self.form_scroll.verticalScrollBar().value()
         operation(draft)
-        render_canon_entry(draft)  # Validate the whole collected draft before replacing any widgets.
+        if render_canon_entry(draft) == before:
+            return  # No-op dialogs do not consume a history step or rebuild inputs.
         if focused is not None and remap_focus is not None:
             section, key, cursor = focused
             focused = (section, remap_focus(section, key), cursor)
@@ -1323,6 +1572,7 @@ class CanonFormWidget(QWidget):
         restore_view()
         self._pending_view_restore = restore_view
         self._view_restore_timer.start(0)
+        self._record_history()
 
     def _effective_text(self) -> str:
         return render_canon_entry(self._collected_entry())
