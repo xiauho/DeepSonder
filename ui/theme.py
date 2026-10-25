@@ -465,6 +465,15 @@ QPlainTextEdit#canonTextEditor {
 QPlainTextEdit#canonTextEditor:hover { border-color: __CONTROL_BORDER__; }
 QPlainTextEdit#canonTextEditor:focus { border-color: __ACCENT__; }
 QPlainTextEdit#canonTextEditor[readOnly="true"] { background: __BG__; }
+QPushButton#canonIntroToggle {
+    background: transparent;
+    color: __MUTED__;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 4px 8px;
+}
+QPushButton#canonIntroToggle:hover { color: __ACCENT__; background: __HOVER__; }
+QPushButton#canonIntroToggle:focus { border-color: __ACCENT__; }
 QToolButton#canonManageButton, QPushButton#moduleOpButton, QToolButton#moduleMenuButton {
     background: transparent;
     color: __MUTED__;

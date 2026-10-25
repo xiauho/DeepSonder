@@ -168,6 +168,42 @@ class CanonAcceptanceTests(TestCase):
         self.assertEqual(self.field("姓名").text(), "白鸥")
         self.assertEqual(self.card.read_bytes(), before)
 
+    def test_responsive_layout_and_compact_intro_preserve_history_and_save(self):
+        before = self.card.read_bytes()
+        tail = before[before.index("## 作者自由备注".encode("utf-8")):]
+        editor = self.field("姓名")
+        editor.setText("重排后的白鸥")
+        editor.setFocus()
+        editor.setSelection(1, 3)
+        steps = len(self.form.history.states)
+        for width in (1920, 1100, 1920):
+            self.window.resize(width, 900)
+            QTest.qWait(90)
+            self.assertIs(self.field("姓名"), editor)
+            self.assertEqual(editor.selectedText(), "排后的")
+            self.assertEqual(len(self.form.history.states), steps)
+        self.window.actions["save"].trigger()
+        self.assertTrue(self.card.read_bytes().endswith(tail))
+        self.field("别名").setText("很长的别名" * 20)
+        self.window.actions["undo"].trigger()
+        self.assertEqual(self.field("别名").text(), "林舟")
+        self.assertEqual(self.field("姓名").text(), "重排后的白鸥")
+        empty = self.card.with_name("空白导语.md")
+        source = character_text().encode("utf-8")
+        empty.write_bytes(source)
+        self.window._on_file_selected("角色", str(empty))
+        self.assertFalse(self.form._preamble_widgets[0][1].isVisible())
+        self.form._intro_card.toggle.click()
+        self.form._preamble_widgets[0][1].setPlainText("概述草稿")
+        self.page.configure_auto_save(True, 30)
+        self.page._auto_save_flush()
+        self.assertIn("概述草稿", empty.read_text(encoding="utf-8"))
+        self.window.actions["undo"].trigger()
+        self.assertTrue(self.form._preamble_widgets[0][1].isVisible())
+        self.assertTrue(self.form.is_modified())
+        self.window.actions["save"].trigger()
+        self.assertEqual(empty.read_bytes(), source)
+
     def test_edit_structure_collapse_global_save_navigation_and_restart(self):
         before = self.card.read_bytes()
         untouched_tail = before[before.index("## 作者自由备注".encode("utf-8")):]

@@ -5,8 +5,9 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import patch
-from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QPointF
+from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QPointF, Qt
 from PySide6.QtGui import QHoverEvent
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from core.canon_schema import load_canon_entry
 from core.character_card_sync import MANAGED_STATE_START, MANAGED_STATE_END
@@ -143,6 +144,50 @@ class CanonNavigationStatusTests(TestCase):
             self.assertEqual(name_pixel.name().upper(), colors_for(config)["hover_color"].upper())
             self.assertEqual(status_pixel(card).name().upper(),
                              colors_for(config)["background_color"].upper())
+
+    def test_status_dot_hover_focus_and_text_alternatives(self):
+        card = self.item(self.card)
+        index = self.panel.tree.indexFromItem(card, 1)
+        rect = self.panel.tree.visualRect(index)
+        viewport = self.panel.tree.viewport()
+        self.panel.search.setFocus()
+        self.panel.tree.setCurrentItem(card)
+        baseline = viewport.grab(rect).toImage()
+        point = QPointF(rect.center())
+        self.app.sendEvent(viewport, QHoverEvent(QEvent.Type.HoverMove, point, point, point))
+        self.app.processEvents()
+        self.assertEqual(self.panel.tree._status_hover, index)
+        self.assertEqual(viewport.cursor().shape(), Qt.CursorShape.PointingHandCursor)
+        self.assertNotEqual(viewport.grab(rect).toImage(), baseline)
+        self.app.sendEvent(viewport, QEvent(QEvent.Type.Leave))
+        self.panel.tree.setFocus()
+        self.app.processEvents()
+        self.assertNotEqual(viewport.grab(rect).toImage(), baseline)
+        self.assertIn("白鸥", card.data(1, Qt.ItemDataRole.AccessibleTextRole))
+        self.assertIn("Alt+Enter", card.data(1, Qt.ItemDataRole.AccessibleDescriptionRole))
+
+    def test_alt_enter_opens_status_without_opening_or_writing_document(self):
+        before = self.card.read_bytes()
+        selected = []
+        self.panel.file_selected.connect(lambda *args: selected.append(args))
+        for width in (280, 580):
+            self.panel.resize(width, 680)
+            self.app.processEvents()
+            item = self.item(self.card)
+            self.panel.tree.setCurrentItem(item)
+            self.panel.tree.setFocus()
+            with patch.object(self.panel, "_show_status_menu") as menu:
+                QTest.keyClick(self.panel.tree, Qt.Key.Key_Return, Qt.KeyboardModifier.AltModifier)
+                self.assertIs(menu.call_args.args[0], item)
+            self.assertEqual(selected, [])
+            self.assertEqual(self.card.read_bytes(), before)
+
+    def test_non_core_system_keeps_a_compact_status_target(self):
+        item = next(i for i in self.panel.document_items() if i.data(0, self.panel.IMPORTANCE_ROLE))
+        item.setData(0, self.panel.IMPORTANCE_ROLE, "non_core")
+        self.panel._apply_document_appearance(item)
+        self.assertEqual(item.text(1), self.panel.STATUS_DOT)
+        self.assertIn("非核心", item.data(1, Qt.ItemDataRole.AccessibleTextRole))
 
     def test_identity_hints_refresh_without_reparsing_unchanged_documents(self):
         alias = self.card.with_name("林舟.md")

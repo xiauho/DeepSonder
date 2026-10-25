@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QSize, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QFont, QPalette
+from PySide6.QtCore import QEvent, QModelIndex, QRectF, QSize, Qt, Signal
+from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPalette, QPen
 from PySide6.QtWidgets import (
     QButtonGroup,
     QFrame,
@@ -52,6 +52,25 @@ class StatusDotDelegate(QStyledItemDelegate):
         painter.fillRect(opt.rect, opt.palette.color(QPalette.ColorRole.Window))
         opt.backgroundBrush = QBrush(Qt.BrushStyle.NoBrush)
         super().paint(painter, opt, index)
+        tree = self.parent()
+        current = tree.currentIndex()
+        focused = (tree.hasFocus() and current.isValid() and current.row() == index.row()
+                   and current.parent() == index.parent())
+        hovered = getattr(tree, "_status_hover", QModelIndex()) == index
+        if opt.text == "●" and (focused or hovered):
+            painter.save()
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            pen = QPen(QColor(tree.property("statusAccentColor")))
+            pen.setWidthF(1.5)
+            if focused:
+                pen.setStyle(Qt.PenStyle.DashLine)
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            diameter = min(18, opt.rect.width() - 12, opt.rect.height() - 8)
+            center = opt.rect.center()
+            painter.drawEllipse(QRectF(center.x() - diameter / 2,
+                                       center.y() - diameter / 2, diameter, diameter))
+            painter.restore()
 
 
 class LeftPanel(QWidget):
@@ -223,6 +242,10 @@ class LeftPanel(QWidget):
         self.tree.setObjectName("projectTree")
         self.tree.setHeaderHidden(True)
         self.tree.setColumnCount(2)
+        self.tree._status_hover = QModelIndex()
+        self.tree.setProperty("statusAccentColor", self._accent_color)
+        self.tree.setMouseTracking(True)
+        self.tree.viewport().setMouseTracking(True)
         self.tree.setItemDelegateForColumn(1, StatusDotDelegate(self.tree))
         self.tree.header().setStretchLastSection(False)
         self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
@@ -278,6 +301,33 @@ class LeftPanel(QWidget):
         self._update_tree_layout()
 
     def eventFilter(self, watched, event):
+        if hasattr(self, "tree"):
+            if watched is self.tree.viewport():
+                if event.type() in (QEvent.Type.MouseMove, QEvent.Type.HoverMove):
+                    index = self.tree.indexAt(event.position().toPoint())
+                    item = self.tree.itemFromIndex(index) if index.isValid() else None
+                    active = bool(index.column() == 1 and item is not None and (
+                        item.data(0, self.CANON_STATUS_ROLE) or item.data(0, self.IMPORTANCE_ROLE)))
+                    self.tree._status_hover = index if active else QModelIndex()
+                    self.tree.viewport().setCursor(Qt.CursorShape.PointingHandCursor if active
+                                                   else Qt.CursorShape.ArrowCursor)
+                    self.tree.viewport().update()
+                elif event.type() in (QEvent.Type.Leave, QEvent.Type.HoverLeave):
+                    self.tree._status_hover = QModelIndex()
+                    self.tree.viewport().unsetCursor()
+                    self.tree.viewport().update()
+            if watched is self.tree:
+                if (event.type() == QEvent.Type.KeyPress
+                        and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter)
+                        and event.modifiers() & Qt.KeyboardModifier.AltModifier):
+                    item = self.tree.currentItem()
+                    if item is not None and (item.data(0, self.CANON_STATUS_ROLE)
+                                             or item.data(0, self.IMPORTANCE_ROLE)):
+                        position = self.tree.viewport().mapToGlobal(self.tree.visualItemRect(item).bottomRight())
+                        self._show_status_menu(item, position)
+                        return True
+                if event.type() in (QEvent.Type.FocusIn, QEvent.Type.FocusOut):
+                    self.tree.viewport().update()
         if hasattr(self, "tree") and (
             (watched is self.tree.viewport() and event.type() == QEvent.Type.Resize)
             or (watched is self.tree and event.type() in {QEvent.Type.FontChange, QEvent.Type.StyleChange})
@@ -329,7 +379,7 @@ class LeftPanel(QWidget):
         self.add_canon_button.setVisible(not chapters)
         self.search.setPlaceholderText("搜索章节…" if chapters else "搜索资料…")
         self.search.setAccessibleName(self.search.placeholderText())
-        self._nav_hint.setText("单击打开 · 右键管理章节" if chapters else "单击打开 · 点击状态列或右键查看资料状态")
+        self._nav_hint.setText("单击打开 · 右键管理章节" if chapters else "资料状态：点击圆点、右键或 Alt+Enter")
         self._nav_hint.setWordWrap(True)
         self.style_footer.setVisible(not chapters)
         self._update_locate_button()
@@ -391,6 +441,7 @@ class LeftPanel(QWidget):
         colors = colors_for(config)
         self._icon_color = colors["muted_text_color"]
         self._accent_color = colors["accent_color"]
+        self.tree.setProperty("statusAccentColor", self._accent_color)
         self._muted_color = colors["muted_text_color"]
         root = self.tree.invisibleRootItem()
         for index in range(root.childCount()):
@@ -405,6 +456,8 @@ class LeftPanel(QWidget):
                     self._apply_document_appearance(child)
 
     def set_project(self, project: NovelProject | None) -> None:
+        self.tree._status_hover = QModelIndex()
+        self.tree.viewport().unsetCursor()
         same_project = bool(
             self._project
             and project
@@ -803,7 +856,7 @@ class LeftPanel(QWidget):
         if status.get("identity"):
             name += " · 别名" if status["identity"] == "alias" else " · 主身份"
         item.setText(0, name)
-        item.setText(1, self.STATUS_DOT if self._compact_mode and badge else badge)
+        item.setText(1, self.STATUS_DOT if self._compact_mode and (status or importance) else badge)
         item.setTextAlignment(
             1,
             Qt.AlignmentFlag.AlignCenter if self._compact_mode
@@ -812,7 +865,12 @@ class LeftPanel(QWidget):
         policy = self.IMPORTANCE_TOOLTIPS.get(importance, "")
         detail = "\n".join(part for part in (details, policy) if part)
         item.setToolTip(0, f"{title}\n{item.data(0, self.PATH_ROLE)}\n{detail}".rstrip())
-        item.setToolTip(1, detail)
+        instruction = "资料状态：点击状态列、右键或按 Alt+Enter 查看。"
+        item.setToolTip(1, f"{detail}\n{instruction}".strip())
+        item.setData(1, Qt.ItemDataRole.AccessibleTextRole,
+                     f"{title}的资料状态：{badge or '非核心'}")
+        item.setData(1, Qt.ItemDataRole.AccessibleDescriptionRole,
+                     f"{detail}\n{instruction}".strip())
         emphasized = importance in {"core", "always"} or status.get("warnings") or status.get("error")
         item.setForeground(1, QBrush(QColor(self._accent_color if emphasized else self._muted_color)))
         font = item.font(0)

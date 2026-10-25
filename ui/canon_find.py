@@ -4,7 +4,7 @@ import re
 
 from PySide6.QtCore import QEvent, QObject, QPoint, QTimer, Qt
 from PySide6.QtGui import QColor, QKeySequence, QShortcut, QTextCursor
-from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit,
+from PySide6.QtWidgets import (QApplication, QFrame, QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit,
                                QPushButton, QTextEdit, QToolButton, QVBoxLayout, QWidget)
 from shiboken6 import isValid
 
@@ -91,6 +91,7 @@ class CanonFindController(QObject):
         form.form_rebuilt.connect(self._content_changed)
         form.state_changed.connect(self._content_changed)
         form.document_replaced.connect(self.reset)
+        form.view_layout_changed.connect(self._layout_changed)
         self._shortcuts = []
         for keys, callback in (("F3", self.next), ("Shift+F3", self.previous), ("Esc", self.close)):
             shortcut = QShortcut(QKeySequence(keys), page)
@@ -137,6 +138,7 @@ class CanonFindController(QObject):
         self.bar.input.setFocus()
         self.bar.input.selectAll()
         self.refresh()
+        self._reveal_timer.start(0)
 
     def close(self):
         if not self._active:
@@ -185,6 +187,10 @@ class CanonFindController(QObject):
             self._reveal_timer.stop()
             self._clear_highlight()
             self._timer.start()
+
+    def _layout_changed(self):
+        if self._active and self.bar.isAncestorOf(QApplication.focusWidget()):
+            self._reveal_timer.start(0)
 
     def refresh(self):
         self._timer.stop()

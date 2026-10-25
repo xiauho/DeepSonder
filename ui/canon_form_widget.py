@@ -43,7 +43,7 @@ from ui.wrapping_label import WrappingLabel
 from ui.icons import set_button_icon
 from ui.canon_sync_view import CanonSyncView
 from ui.theme import colors_for
-from ui.canon_layout import CanonCard, CanonModuleHeader, CanonTextEdit
+from ui.canon_layout import CanonCard, CanonFieldsGrid, CanonIntroCard, CanonModuleHeader, CanonTextEdit
 from ui.canon_history import CanonEditHistory, CanonSnapshot, ordered_equal
 
 
@@ -205,6 +205,7 @@ class CanonFormWidget(QWidget):
     form_about_to_rebuild = Signal()
     form_rebuilt = Signal()
     document_replaced = Signal()
+    view_layout_changed = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -246,6 +247,7 @@ class CanonFormWidget(QWidget):
         self._search_labels = {}
         self._search_expanded = set()
         self._search_navigating = False
+        self._intro_card = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 8, 18, 8)
@@ -282,6 +284,10 @@ class CanonFormWidget(QWidget):
         self._navigation_timer = QTimer(self)
         self._navigation_timer.setSingleShot(True)
         self._navigation_timer.timeout.connect(self._scroll_to_navigation_target)
+        self._layout_timer = QTimer(self)
+        self._layout_timer.setSingleShot(True)
+        self._layout_timer.setInterval(16)
+        self._layout_timer.timeout.connect(self._settle_visual_layout)
         bar = self.form_scroll.verticalScrollBar()
         bar.valueChanged.connect(self._track_current_module)
         bar.actionTriggered.connect(self._resume_outline_tracking)
@@ -384,6 +390,8 @@ class CanonFormWidget(QWidget):
         self._navigation_target = module_id
         if module_id:
             self._module_toggles[module_id].setChecked(True)
+        elif self._intro_card is not None:
+            self._intro_card.expand()
         self._scroll_to_navigation_target()
         # 展开正文后的滚动范围由 Qt 延迟更新，再定位一次以保证标题可见。
         self._navigation_timer.start(0)
@@ -742,6 +750,10 @@ class CanonFormWidget(QWidget):
             getattr(editor, command)()
 
     def _reveal_editor(self, editor) -> None:
+        if self._intro_card is not None and editor in [e for _i, e in self._preamble_widgets]:
+            self._intro_card.expand()
+            self.form_scroll.ensureWidgetVisible(editor)
+            return
         for identity, body in self._module_bodies.items():
             if body is editor or body.isAncestorOf(editor):
                 self._module_toggles[identity].setChecked(True)
@@ -812,6 +824,8 @@ class CanonFormWidget(QWidget):
         except ValueError:
             modified = True  # Invalid intermediate input still belongs to the draft.
         self._set_modified(modified)
+        for grid in self.findChildren(CanonFieldsGrid):
+            grid._schedule()
         self._outline_timer.start()
         self.state_changed.emit()
 
@@ -889,6 +903,12 @@ class CanonFormWidget(QWidget):
             # Restore the editor/selection; a structural deletion may have no
             # surviving focus, in which case focus the changed module's heading.
             target = snapshot.view.get("focus")
+            if target is None:
+                changed = [key for key, value in snapshot.values.items()
+                           if key in bindings and previous.values.get(key) != value]
+                if len(changed) == 1:
+                    identity, key = changed[0]
+                    target = (identity, key, 0, 0)
             restored_ids = set(s.module_id for s in snapshot.entry.sections) - set(
                 s.module_id for s in previous.entry.sections)
 
@@ -971,9 +991,20 @@ class CanonFormWidget(QWidget):
 
     # ---------- 表单构建 ----------
 
+    def _schedule_visual_layout(self):
+        self._layout_timer.start()
+
+    def _settle_visual_layout(self):
+        focus = QApplication.focusWidget()
+        if focus in self._editable_widgets() and focus.isVisibleTo(self.form_scroll.widget()):
+            self.form_scroll.ensureWidgetVisible(focus, 16, 16)
+        self.view_layout_changed.emit()
+
     def _build_form(self) -> None:
         self.form_about_to_rebuild.emit()
         self._history_building = True
+        self._layout_timer.stop()
+        self._intro_card = None
         self._search_labels.clear()
         self._navigation_target = None
         self._navigation_timer.stop()
@@ -1021,13 +1052,9 @@ class CanonFormWidget(QWidget):
         self.form_rebuilt.emit()
 
     def _preamble_panel(self) -> QWidget:
-        box = CanonCard("canonIntroCard")
-        layout = QVBoxLayout(box)
-        layout.setContentsMargins(16, 14, 16, 16)
-        layout.setSpacing(10)
-        label = QLabel("资料导语")
-        label.setObjectName("canonModuleTitle")
-        layout.addWidget(label)
+        box = CanonIntroCard()
+        self._intro_card = box
+        box.visibility_changed.connect(self._schedule_visual_layout)
         blocks = preamble_blocks(self.entry)
         visible = [i for i, (_start, _end, text) in enumerate(blocks) if text.strip()]
         if not visible:
@@ -1037,7 +1064,7 @@ class CanonFormWidget(QWidget):
             editor.setAccessibleName("资料导语")
             editor.setPlaceholderText("资料概述，可留空。")
             editor.textChanged.connect(self._mark_modified)
-            layout.addWidget(editor)
+            box.add_editor(editor)
             self._preamble_widgets.append((index, editor))
         return box
 
@@ -1299,7 +1326,12 @@ class CanonFormWidget(QWidget):
     def _fields_form(self, body, section, group_name=None):
         form = QVBoxLayout(body)
         form.setContentsMargins(0, 0, 0, 0)
-        form.setSpacing(8)
+        form.setSpacing(10)
+        grid = None
+        if self.kind == "character" and section.schema_key == "基础档案" and group_name is None:
+            grid = CanonFieldsGrid()
+            grid.reflowed.connect(self._schedule_visual_layout)
+            form.addWidget(grid)
         group = next((g for g in section.groups if g.name == group_name), None)
         fields = section.fields if group_name is None else group.fields
         extras = section.extras if group_name is None else group.extras
@@ -1317,9 +1349,10 @@ class CanonFormWidget(QWidget):
             field = QWidget()
             column = QVBoxLayout(field)
             column.setContentsMargins(0, 0, 0, 0)
-            column.setSpacing(3)
+            column.setSpacing(4)
             column.addWidget(label)
-            form.addWidget(field)
+            if grid is None:
+                form.addWidget(field)
             editor = QLineEdit(fields.get(key, ""))
             editor.setAccessibleName(f"{group_name + ' / ' if group_name else ''}{key}")
             editor.setPlaceholderText(FIELD_HINTS.get(key, ""))
@@ -1339,6 +1372,9 @@ class CanonFormWidget(QWidget):
                 layout.addWidget(editor, 1)
                 layout.addWidget(self._field_menu(section, key, group_name))
                 column.addWidget(row)
+            if grid is not None:
+                grid.add_field(field, label, editor,
+                    short=key in {"姓名", "别名", "年龄／出生信息", "性别", "首次出场"})
         if extras:
             form.addWidget(self._extras_panel(section, group_name))
         add = QPushButton("＋ 添加字段")
