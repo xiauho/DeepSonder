@@ -88,7 +88,7 @@ class CanonDocumentContextTests(unittest.TestCase):
             hidden_undo.assert_not_called()
         self.window.actions["redo"].trigger()
         self.assertTrue(field.text().endswith("x"))
-        self.assertFalse(self.window.actions["find"].isEnabled())
+        self.assertTrue(self.window.actions["find"].isEnabled())
         self.assertFalse(self.window.actions["expand"].isEnabled())
         self.assertFalse(self.window.actions["style_review"].isEnabled())
         self.window.actions["focus"].trigger()

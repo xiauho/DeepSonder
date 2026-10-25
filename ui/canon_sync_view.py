@@ -56,6 +56,7 @@ class CanonSyncView(QWidget):
         self._source = source
         self._has_project = project is not None
         self.value_labels: dict[str, QLabel] = {}
+        self.caption_labels: dict[str, QLabel] = {}
         self.chapter_button = None
         self.raw_button = None
         layout = QVBoxLayout(self)
@@ -85,6 +86,7 @@ class CanonSyncView(QWidget):
                 label.setAccessibleName(f"{heading}：{value}")
                 self.value_labels[key] = label
                 caption = QLabel(heading)
+                self.caption_labels[key] = caption
                 caption.setObjectName("canonSyncLabel")
                 caption.setTextFormat(Qt.TextFormat.PlainText)
                 form.addRow(caption, label)

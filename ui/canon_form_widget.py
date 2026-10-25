@@ -202,6 +202,9 @@ class CanonFormWidget(QWidget):
     sync_requested = Signal(str)
     chapter_requested = Signal(str, str)  # 来源资料路径、章节 id
     history_changed = Signal()
+    form_about_to_rebuild = Signal()
+    form_rebuilt = Signal()
+    document_replaced = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -240,6 +243,9 @@ class CanonFormWidget(QWidget):
         self._history_restoring = False
         self._history_building = False
         self._history_typing = None
+        self._search_labels = {}
+        self._search_expanded = set()
+        self._search_navigating = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 8, 18, 8)
@@ -410,6 +416,8 @@ class CanonFormWidget(QWidget):
 
     def reset(self) -> None:
         """清空当前材料（项目切换等场景），不触发任何确认或写盘。"""
+        self.document_replaced.emit()
+        self._search_expanded.clear()
         self._refresh_timer.stop()
         self._view_restore_timer.stop()
         self._pending_view_restore = None
@@ -452,6 +460,8 @@ class CanonFormWidget(QWidget):
         original = path.read_bytes()
         text = original.decode("utf-8")
         entry = parse_canon_entry(kind, text)
+        self.document_replaced.emit()
+        self._search_expanded.clear()
         self.project = project
         self._alias_map = self._load_alias_map() if project is not None else {}
         self.path = path
@@ -604,6 +614,51 @@ class CanonFormWidget(QWidget):
     def _editable_widgets(self):
         return [editor for _section, _key, editor in self._editor_bindings()]
 
+    def search_targets(self):
+        """Visible author content in document order, addressed by stable module id."""
+        bindings = list(self._editor_bindings())
+        for section, key, editor in bindings:
+            if section is None:
+                yield (None, key), editor
+        if self.entry is None:
+            return
+        for section in self.entry.sections:
+            identity = section.module_id
+            heading = (identity, ("heading",))
+            yield heading, self._search_labels[heading]
+            rows = [(key, editor) for s, key, editor in bindings if s is section]
+
+            def field_target(key, editor):
+                if key[0] in {"field", "group"}:
+                    group = key[1] if key[0] == "group" else None
+                    label_key = (identity, ("field-label", group, key[-1]))
+                    yield label_key, self._search_labels[label_key]
+                yield (identity, key), editor
+
+            if section.role == ROLE_GROUP:
+                for key, editor in rows:
+                    if key[0] == "extras" and key[1] is None:
+                        yield (identity, key), editor
+                for group in section.groups:
+                    label_key = (identity, ("group-label", group.name))
+                    yield label_key, self._search_labels[label_key]
+                    for key, editor in rows:
+                        if key[0] in {"group", "extras"} and key[1] == group.name:
+                            yield from field_target(key, editor)
+            else:
+                for key, editor in rows:
+                    if key[0] != "suffix":
+                        yield from field_target(key, editor)
+            if section.role == ROLE_MANAGED:
+                for view in self._module_bodies[identity].findChildren(CanonSyncView) + (
+                        [self._module_bodies[identity]] if isinstance(self._module_bodies[identity], CanonSyncView) else []):
+                    for key, value in view.value_labels.items():
+                        yield (identity, ("sync-label", key)), view.caption_labels[key]
+                        yield (identity, ("sync-value", key)), value
+            for key, editor in rows:
+                if key[0] == "suffix":
+                    yield (identity, key), editor
+
     def _remember_focus(self, _old, current) -> None:
         if not self._history_restoring and not self._history_building and _old is not current:
             self.history.break_merge()
@@ -731,7 +786,7 @@ class CanonFormWidget(QWidget):
             editor.setUndoRedoEnabled(False)
 
     def _remember_history_cursor(self, editor):
-        if not self._history_restoring and not self._history_building:
+        if not self._history_restoring and not self._history_building and not self._search_navigating:
             self.history.update_view(self._history_view(editor))
 
     def _input_history_changed(self, editor):
@@ -917,7 +972,9 @@ class CanonFormWidget(QWidget):
     # ---------- 表单构建 ----------
 
     def _build_form(self) -> None:
+        self.form_about_to_rebuild.emit()
         self._history_building = True
+        self._search_labels.clear()
         self._navigation_target = None
         self._navigation_timer.stop()
         self._last_editor = None
@@ -961,6 +1018,7 @@ class CanonFormWidget(QWidget):
         self._history_building = False
         self._set_current_module("")
         self.outline_changed.emit()
+        self.form_rebuilt.emit()
 
     def _preamble_panel(self) -> QWidget:
         box = CanonCard("canonIntroCard")
@@ -1016,8 +1074,43 @@ class CanonFormWidget(QWidget):
         return self._collapse_by_path[key]
 
     def set_modules_expanded(self, expanded: bool) -> None:
-        for toggle in self._module_toggles.values():
-            toggle.setChecked(expanded)
+        for identity in self._module_toggles:
+            self._set_module_expanded(identity, expanded)
+
+    def _set_module_expanded(self, identity, expanded, *, persist=True):
+        body, toggle = self._module_bodies[identity], self._module_toggles[identity]
+        focus = QApplication.focusWidget()
+        if not expanded and (body is focus or body.isAncestorOf(focus)):
+            toggle.setFocus()
+        blocked = toggle.blockSignals(True)
+        toggle.setChecked(expanded)
+        toggle.blockSignals(blocked)
+        body.setVisible(expanded)
+        toggle.setArrowType(Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow)
+        section = next(s for s in self.entry.sections if s.module_id == identity)
+        action = "折叠" if expanded else "展开"
+        toggle.setAccessibleName(f"{action}模块：{section.heading}")
+        toggle.setToolTip(f"{action}模块（不影响保存）")
+        if not persist:
+            return
+        self._search_expanded.discard(identity)
+        collapsed = self._collapsed_modules()
+        changed = (identity in collapsed) == expanded
+        collapsed.discard(identity) if expanded else collapsed.add(identity)
+        if changed and self.collapse_state_saver is not None and self.path is not None:
+            self.collapse_state_saver(self.path, set(collapsed) & set(self._module_bodies))
+
+    def reveal_search_module(self, identity):
+        if identity and identity in self._module_toggles:
+            if not self._module_toggles[identity].isChecked():
+                self._search_expanded.add(identity)
+                self._set_module_expanded(identity, True, persist=False)
+
+    def restore_search_expansion(self):
+        for identity in list(self._search_expanded):
+            if identity in self._module_toggles and identity in self._collapsed_modules():
+                self._set_module_expanded(identity, False, persist=False)
+        self._search_expanded.clear()
 
     def _wrap_module(self, section: CanonSection, body: QWidget) -> QFrame:
         box = CanonCard()
@@ -1036,6 +1129,7 @@ class CanonFormWidget(QWidget):
         header.addWidget(toggle)
         title = WrappingLabel(section.heading or "未识别章节")
         title.setObjectName("canonModuleTitle")
+        self._search_labels[(section.module_id, ("heading",))] = title
         title.setTextFormat(Qt.TextFormat.PlainText)
         title.setWordWrap(True)
         title.setMinimumWidth(0)
@@ -1065,26 +1159,11 @@ class CanonFormWidget(QWidget):
         heading.setToolTip("点击标题行展开或折叠该模块")
         heading.installEventFilter(self)
 
-        def set_expanded(expanded):
-            focus = QApplication.focusWidget()
-            if not expanded and (body is focus or body.isAncestorOf(focus)):
-                toggle.setFocus()
-            body.setVisible(expanded)
-            toggle.setArrowType(Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow)
-            action = "折叠" if expanded else "展开"
-            toggle.setAccessibleName(f"{action}模块：{section.heading}")
-            toggle.setToolTip(f"{action}模块（不影响保存）")
-            collapsed = self._collapsed_modules()
-            changed = (section.module_id in collapsed) == expanded
-            collapsed.discard(section.module_id) if expanded else collapsed.add(section.module_id)
-            if changed and self.collapse_state_saver is not None and self.path is not None:
-                # 只回写当前仍存在的模块 id；重命名等产生的失效 id 不持久化。
-                self.collapse_state_saver(self.path, set(collapsed) & set(self._module_bodies))
-
-        toggle.toggled.connect(set_expanded)
-        expanded = section.module_id not in self._collapsed_modules()
-        toggle.setChecked(expanded)
-        set_expanded(expanded)
+        toggle.toggled.connect(lambda expanded, identity=section.module_id:
+                               self._set_module_expanded(identity, expanded))
+        expanded = (section.module_id not in self._collapsed_modules()
+                    or section.module_id in self._search_expanded)
+        self._set_module_expanded(section.module_id, expanded, persist=False)
         return box
 
     def _module_menu(self, section: CanonSection) -> QToolButton:
@@ -1135,6 +1214,7 @@ class CanonFormWidget(QWidget):
                 layout.setSpacing(8)
                 row = QHBoxLayout()
                 title = WrappingLabel(group.name)
+                self._search_labels[(section.module_id, ("group-label", group.name))] = title
                 title.setObjectName("canonModuleTitle")
                 title.setTextFormat(Qt.TextFormat.PlainText)
                 title.setWordWrap(True)
@@ -1226,6 +1306,7 @@ class CanonFormWidget(QWidget):
         declared = list((section_spec(self.kind, section) or {}).get("keys", []))
         for key in [*declared, *(k for k in fields if k not in declared)]:
             label = WrappingLabel(key)
+            self._search_labels[(section.module_id, ("field-label", group_name, key))] = label
             label.setTextFormat(Qt.TextFormat.PlainText)
             label.setAccessibleName(key)
             label.setWordWrap(True)

@@ -312,8 +312,11 @@ class MainWindow(QMainWindow):
 
     def _find_current_document(self) -> None:
         context = self.current_document()
-        if context.path is not None and not context.structured:
-            self.editor.show_find()
+        if context.path is not None:
+            if context.structured:
+                self.structured_canon_page.show_find()
+            else:
+                self.editor.show_find()
 
     def focus_editor(self) -> None:
         context = self.current_document()
@@ -1738,8 +1741,7 @@ class MainWindow(QMainWindow):
             if self.content_stack.currentWidget() is self.timeline_page:
                 enabled = False
             if context.structured and key == "find":
-                enabled = False
-                self.actions[key].setToolTip("资料表单暂不支持跨模块查找与替换。")
+                self.actions[key].setToolTip("在本份资料中查找（Ctrl+F）")
             elif key == "find":
                 self.actions[key].setToolTip("查找与替换")
             if context.structured and key in {"undo", "redo"}:

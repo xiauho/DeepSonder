@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel
 from core.project_data import CANON_ENTRY_TYPES
 from core.storage import atomic_write_text
 from ui.canon_form_widget import CanonFormWidget
+from ui.canon_find import CanonFindBar, CanonFindController
 from ui.canon_layout import CanonModuleHeader
 from ui.elided_label import ElidedLabel
 from ui.icons import set_button_icon, refresh_button_icons
@@ -117,6 +118,9 @@ class StructuredCanonPage(QWidget):
         self._auto_save_timer.timeout.connect(self._auto_save_flush)
 
         self.form = CanonFormWidget(self)
+        self.find_bar = CanonFindBar(self)
+        self.find_controller = CanonFindController(self, self.form, self.find_bar)
+        layout.addWidget(self.find_bar)
         self.form.on_saved = self._emit_saved
         self.form.reloaded.connect(self.reloaded)
         self.form.modified_changed.connect(self._modified_changed)
@@ -179,6 +183,12 @@ class StructuredCanonPage(QWidget):
         self._sync_header()
 
     # ---------- 状态同步 ----------
+
+    def show_find(self) -> None:
+        self.find_controller.show()
+
+    def hide_find(self) -> None:
+        self.find_controller.close()
 
     def _emit_saved(self, path) -> None:
         self._saved_revision = (str(path), self.form._expected_hash)
@@ -490,3 +500,6 @@ class StructuredCanonPage(QWidget):
         muted = str(colors_for(config).get("muted_text_color", "#63748A"))
         set_button_icon(self.outline_toggle, "toc", muted, size=17)
         refresh_button_icons(self.form, muted)
+        refresh_button_icons(self.find_bar, muted)
+        if self.find_controller._active:
+            self.find_controller._highlight_current()

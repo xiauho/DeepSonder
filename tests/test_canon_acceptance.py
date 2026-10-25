@@ -7,7 +7,7 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import patch
 
-from PySide6.QtCore import QCoreApplication, QEvent
+from PySide6.QtCore import QCoreApplication, QEvent, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QDialog, QMessageBox, QPlainTextEdit
 from core.canon_schema import parse_canon_entry
@@ -138,6 +138,35 @@ class CanonAcceptanceTests(TestCase):
         self.assertEqual(self.card.read_bytes(), saved)
         self.assertEqual(chapter.read_bytes(), chapter_before)
         self.assertEqual(self.world.read_text(encoding="utf-8"), "# 港口\n\n## 核心规则\n\n原始规则\n")
+
+    def test_global_find_searches_unsaved_canon_and_restores_user_folds(self):
+        before = self.card.read_bytes()
+        self.field("姓名").setText("草稿星潮信号")
+        history_size = len(self.form.history.states)
+        identity = self.form.entry.section("基础档案").module_id
+        self.form._module_toggles[identity].setChecked(False)
+        with patch.object(self.window.editor, "show_find") as chapter_find:
+            self.form._module_toggles[identity].setFocus()
+            QTest.keyClick(self.form._module_toggles[identity], Qt.Key.Key_F,
+                           Qt.KeyboardModifier.ControlModifier)
+            chapter_find.assert_not_called()
+        self.assertTrue(self.page.find_bar.isVisible())
+        self.assertIs(self.app.focusWidget(), self.page.find_bar.input)
+        self.page.find_bar.input.setText("星潮信号")
+        self.page.find_controller.refresh()
+        self.app.processEvents()
+        self.assertEqual(len(self.page.find_controller.hits), 1)
+        self.assertEqual(self.field("姓名").selectedText(), "星潮信号")
+        self.assertTrue(self.form._module_toggles[identity].isChecked())
+        self.assertIn(identity, self.form._collapsed_modules())
+        self.assertEqual(self.card.read_bytes(), before)
+        self.assertEqual(len(self.form.history.states), history_size)
+        QTest.keyClick(self.page.find_bar.input, Qt.Key.Key_Escape)
+        self.assertFalse(self.page.find_bar.isVisible())
+        self.assertFalse(self.form._module_toggles[identity].isChecked())
+        self.window.actions["undo"].trigger()
+        self.assertEqual(self.field("姓名").text(), "白鸥")
+        self.assertEqual(self.card.read_bytes(), before)
 
     def test_edit_structure_collapse_global_save_navigation_and_restart(self):
         before = self.card.read_bytes()

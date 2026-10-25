@@ -444,6 +444,16 @@ QFrame#canonGroupFrame {
 QLabel#canonModuleTitle { font-size: __CANON_TITLE_SIZE__px; font-weight: 700; }
 QLabel#canonCaption { color: __MUTED__; font-size: __SMALL_FONT_SIZE__px; }
 QLabel#canonFieldLabel, QLabel#canonSyncLabel, QLabel#fieldLabel { color: __MUTED__; font-weight: 600; }
+QLabel[canonFindCurrent="true"] {
+    background: __PRIMARY__;
+    color: __ACCENT_TEXT__;
+    border-radius: 3px;
+}
+QLineEdit[canonFindCurrent="true"] {
+    border-color: __ACCENT__;
+    selection-background-color: __PRIMARY__;
+    selection-color: __ACCENT_TEXT__;
+}
 QPlainTextEdit#canonTextEditor {
     background: __FIELD__;
     border: 1px solid __BORDER__;
