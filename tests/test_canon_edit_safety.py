@@ -98,6 +98,42 @@ class CanonDraftSafetyTests(unittest.TestCase):
         self.assertEqual(self.widget.write_changes(), (True, ""))
         self.assertIn("### 新能力", self.path.read_text(encoding="utf-8"))
 
+    def test_transient_windows_lock_saves_draft_and_updates_revision(self):
+        self.name().setText("短暂占用后保存")
+        replace = os.replace
+        attempts = []
+
+        def briefly_locked(source, destination):
+            attempts.append(source)
+            if len(attempts) < 3:
+                error = PermissionError("temporary Windows lock")
+                error.winerror = 5
+                raise error
+            replace(source, destination)
+
+        with patch("core.storage.os.replace", side_effect=briefly_locked), patch("core.storage.time.sleep"):
+            self.assertEqual(self.widget.write_changes(), (True, ""))
+        self.assertIn("短暂占用后保存", self.path.read_text(encoding="utf-8"))
+        self.assertFalse(self.widget.is_modified())
+        self.name().setText("连续编辑")
+        self.assertEqual(self.widget.write_changes(), (True, ""))
+        self.assertIn("连续编辑", self.path.read_text(encoding="utf-8"))
+
+    def test_external_revision_during_lock_retains_disk_and_local_draft(self):
+        self.name().setText("保留本地草稿")
+        external = self.path.read_bytes() + "\n外部新增内容\n".encode("utf-8")
+        error = PermissionError("temporary Windows lock")
+        error.winerror = 32
+        with patch("core.storage.os.replace", side_effect=error), patch("core.storage.time.sleep", side_effect=lambda _delay: self.path.write_bytes(external)):
+            ok, message = self.widget.write_changes()
+        self.assertFalse(ok)
+        self.assertIn("文件已发生变化", message)
+        self.assertEqual(self.path.read_bytes(), external)
+        self.assertEqual(self.name().text(), "保留本地草稿")
+        self.assertTrue(self.widget.is_modified())
+        self.assertFalse(self.widget.write_changes()[0])
+        self.assertTrue(self.widget.external_changed)
+
     def test_remove_last_relation_is_persisted(self):
         for _section, editor in list(self.widget._relation_rows):
             self.widget._remove_relation_row(editor, editor.parentWidget())
