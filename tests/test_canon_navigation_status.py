@@ -5,10 +5,10 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import patch
-from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QPointF, Qt
-from PySide6.QtGui import QHoverEvent
+from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QPointF, QRect, Qt
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QHoverEvent, QImage, QPainter
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QStyle, QStyleOptionViewItem
 from core.canon_schema import load_canon_entry
 from core.character_card_sync import MANAGED_STATE_START, MANAGED_STATE_END
 from core.project import NovelProject
@@ -165,6 +165,54 @@ class CanonNavigationStatusTests(TestCase):
         self.assertNotEqual(viewport.grab(rect).toImage(), baseline)
         self.assertIn("白鸥", card.data(1, Qt.ItemDataRole.AccessibleTextRole))
         self.assertIn("Alt+Enter", card.data(1, Qt.ItemDataRole.AccessibleDescriptionRole))
+
+    def test_status_dot_and_ring_share_pixel_center_across_fonts_and_scales(self):
+        card = self.item(self.card)
+        tree = self.panel.tree
+        index = tree.indexFromItem(card, 1)
+        delegate = tree.itemDelegateForColumn(1)
+
+        def center_for(image, color):
+            reference = color.getRgb()[:3]
+            points = [(x, y) for y in range(image.height()) for x in range(image.width())
+                      if sum((a - b) ** 2 for a, b in zip(image.pixelColor(x, y).getRgb()[:3], reference)) < 30 ** 2]
+            self.assertTrue(points, color.name())
+            xs, ys = zip(*points)
+            return ((min(xs) + max(xs) + 1) / 2, (min(ys) + max(ys) + 1) / 2)
+
+        for theme in ("light", "dark"):
+            config = {"theme": theme}
+            apply_theme(self.app, config)
+            self.panel.set_theme(config)
+            for family in ("Microsoft YaHei UI", "Segoe UI"):
+                for size in (14, 20):
+                    font = QFont(family)
+                    font.setPixelSize(size)
+                    card.setFont(1, font)
+                    for scale in (1, 1.25, 1.5, 2):
+                        for focused in (False, True):
+                            with self.subTest(theme=theme, family=family, size=size, scale=scale, focused=focused):
+                                self.panel.search.setFocus()
+                                tree._status_hover = index
+                                if focused:
+                                    tree.setCurrentItem(card)
+                                    tree.setFocus()
+                                opt = QStyleOptionViewItem()
+                                opt.initFrom(tree)
+                                opt.rect = QRect(0, 0, 28, 44)
+                                opt.font = font
+                                opt.fontMetrics = QFontMetrics(font)
+                                opt.state = QStyle.StateFlag.State_Enabled
+                                image = QImage(round(28 * scale), round(44 * scale), QImage.Format.Format_ARGB32_Premultiplied)
+                                image.setDevicePixelRatio(scale)
+                                image.fill(QColor(colors_for(config)["background_color"]))
+                                painter = QPainter(image)
+                                delegate.paint(painter, opt, index)
+                                painter.end()
+                                dot = center_for(image, card.foreground(1).color())
+                                ring = center_for(image, QColor(self.panel._accent_color))
+                                self.assertLessEqual(abs(dot[0] - ring[0]), 1)
+                                self.assertLessEqual(abs(dot[1] - ring[1]), 1)
 
     def test_alt_enter_opens_status_without_opening_or_writing_document(self):
         before = self.card.read_bytes()

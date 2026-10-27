@@ -51,15 +51,26 @@ class StatusDotDelegate(QStyledItemDelegate):
         # 样式表会按行状态先铺一层底色且不读取 backgroundBrush，必须直接覆盖。
         painter.fillRect(opt.rect, opt.palette.color(QPalette.ColorRole.Window))
         opt.backgroundBrush = QBrush(Qt.BrushStyle.NoBrush)
-        super().paint(painter, opt, index)
+        if opt.text != "●":
+            super().paint(painter, opt, index)
+            return
+        # Font glyph baselines do not necessarily share the cell's center.
+        # Draw both circles around one floating-point center at every DPI.
+        center = QRectF(opt.rect).center()
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        group = (QPalette.ColorGroup.Active if opt.state & QStyle.StateFlag.State_Enabled
+                 else QPalette.ColorGroup.Disabled)
+        painter.setBrush(opt.palette.color(group, QPalette.ColorRole.Text))
+        radius = max(4.0, min(8.0, opt.fontMetrics.height() * 0.32)) / 2
+        painter.drawEllipse(center, radius, radius)
         tree = self.parent()
         current = tree.currentIndex()
         focused = (tree.hasFocus() and current.isValid() and current.row() == index.row()
                    and current.parent() == index.parent())
         hovered = getattr(tree, "_status_hover", QModelIndex()) == index
-        if opt.text == "●" and (focused or hovered):
-            painter.save()
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if focused or hovered:
             pen = QPen(QColor(tree.property("statusAccentColor")))
             pen.setWidthF(1.5)
             if focused:
@@ -67,10 +78,9 @@ class StatusDotDelegate(QStyledItemDelegate):
             painter.setPen(pen)
             painter.setBrush(Qt.BrushStyle.NoBrush)
             diameter = min(18, opt.rect.width() - 12, opt.rect.height() - 8)
-            center = opt.rect.center()
             painter.drawEllipse(QRectF(center.x() - diameter / 2,
                                        center.y() - diameter / 2, diameter, diameter))
-            painter.restore()
+        painter.restore()
 
 
 class LeftPanel(QWidget):

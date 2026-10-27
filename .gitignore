@@ -32,3 +32,7 @@ Thumbs.db
 projects/*
 !projects/demo_novel/
 !projects/demo_novel/**
+
+# Local UI acceptance captures, logs and preview scripts
+/output/ui-audit-*/
+/output/ui-stage*/
