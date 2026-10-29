@@ -81,6 +81,12 @@
       "note": "Separate chapter/canon browsing with per-scope search, selection, expansion and scroll state; direct planning documents and a virtual timeline page and expandable canon groups. Fixed book-style settings shortcut, scope-aware locate, compact item-level system importance labels; quick-open and restart restoration support flat documents."
     },
     {
+      "id": "workspace.grouped_navigation_and_compact_tasks",
+      "requirement": "required",
+      "status": "supported",
+      "notes": "常用导航收敛为写作、资料、检查；检查内提供独立的检查报告和故事记忆页签，并记住会话内上次访问页。项目概览、新建、打开、导入、最近项目和导出位于常驻项目菜单；回收站及命令查找位于更多菜单，复用原动作及安全检查。目录不再重复显示章节／资料切换，按工作区显示对应目录；切换时通过原文档打开流程恢复所选章节、故事规划、结构化资料或时间轴，并保留各自搜索、展开和滚动状态。AI 任务常驻显示状态、阶段进度和取消或待审阅操作，按内容自适应高度；上下文和工作记录在详情中展开，收起不放弃结果或清空记录。AI 审阅与明确写入确认仍沿用原流程。"
+    },
+    {
       "id": "ai.task_panel_and_deferred_review",
       "requirement": "required",
       "status": "supported",

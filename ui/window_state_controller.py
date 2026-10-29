@@ -85,7 +85,7 @@ class WindowStateController(QObject):
             self.exit_focus_mode()
         self._current_route = route
         if route in self.WRITING_ROUTES:
-            self.left_panel.set_scope("canon" if route in {"canon", "timeline"} else "all")
+            self.left_panel.set_scope("canon" if route in {"canon", "timeline"} else "chapters")
             self.page_stack.setCurrentWidget(self.writing_page)
         else:
             self.page_stack.setCurrentWidget(self.pages[route])

@@ -5,7 +5,6 @@ from pathlib import Path
 from PySide6.QtCore import QEvent, QModelIndex, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPalette, QPen
 from PySide6.QtWidgets import (
-    QButtonGroup,
     QFrame,
     QHeaderView,
     QHBoxLayout,
@@ -158,27 +157,14 @@ class LeftPanel(QWidget):
         header = QFrame()
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(0, 0, 0, 0)
-        title_box = QVBoxLayout()
-        title_box.setSpacing(1)
-        self.project_menu = QMenu(self)
-        title = QToolButton()
-        title.setText("项目")
-        title.setAccessibleName("项目菜单")
-        title.setToolTip("新建、打开、导入或导出项目")
-        title.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        title.setMenu(self.project_menu)
-        title.setObjectName("panelTitle")
-        self.project_label = QLabel("尚未打开项目")
-        self.project_label.setObjectName("mutedLabel")
-        self.project_label.setMinimumWidth(0)
-        self.project_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        title_box.addWidget(title)
-        title_box.addWidget(self.project_label)
+        self.scope_title = QLabel("章节")
+        self.scope_title.setObjectName("panelTitle")
+        self.scope_title.setMinimumWidth(0)
         self.add_chapter_button = add_btn = IconTextButton("add", "章节")
         add_btn.setObjectName("smallAccentButton")
         add_btn.setToolTip("新建章节")
         add_btn.clicked.connect(self.new_chapter_requested)
-        header_layout.addLayout(title_box, 1)
+        header_layout.addWidget(self.scope_title, 1)
 
 
         self.add_canon_button = canon_add_btn = QToolButton()
@@ -209,22 +195,6 @@ class LeftPanel(QWidget):
         toggle_btn.clicked.connect(self.toggle_requested)
         header_layout.addWidget(toggle_btn)
         layout.addWidget(header)
-        scope_row = QHBoxLayout()
-        scope_row.setSpacing(0)
-        self.scope_buttons = {}
-        scope_group = QButtonGroup(self)
-        for scope, label in (("chapters", "章节"), ("canon", "资料")):
-            button = QToolButton()
-            button.setText(label)
-            button.setAccessibleName(f"浏览{label}")
-            button.setObjectName("editorModeButton")
-            button.setCheckable(True)
-            button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            scope_group.addButton(button)
-            button.clicked.connect(lambda _checked=False, value=scope: self.set_scope(value))
-            scope_row.addWidget(button, 1)
-            self.scope_buttons[scope] = button
-        layout.addLayout(scope_row)
         create_row = QHBoxLayout()
         create_row.addWidget(add_btn)
         create_row.addWidget(canon_add_btn)
@@ -376,6 +346,7 @@ class LeftPanel(QWidget):
         self._scope_states[self._scope] = {
             "query": self.search.text(),
             "selected": self._selected_path,
+            "feature": self._selected_feature,
             "scroll": self.tree.verticalScrollBar().value(),
             "expanded": {self.tree.topLevelItem(i).data(0, self.CATEGORY_ROLE):
                          self.tree.topLevelItem(i).isExpanded()
@@ -384,7 +355,8 @@ class LeftPanel(QWidget):
 
     def _apply_scope_controls(self) -> None:
         chapters = self._scope == "chapters"
-        self.scope_buttons[self._scope].setChecked(True)
+        self.scope_title.setText("章节" if chapters else "故事资料")
+        self.scope_title.setAccessibleName("当前目录：" + self.scope_title.text())
         self.add_chapter_button.setVisible(chapters)
         self.add_canon_button.setVisible(not chapters)
         self.search.setPlaceholderText("搜索章节…" if chapters else "搜索资料…")
@@ -426,7 +398,23 @@ class LeftPanel(QWidget):
         self._remember_scope()
         self._scope = scope
         state = self._scope_states.get(scope, {})
+        self._restore_browse_state(state)
+
+    def browse_state(self) -> dict:
+        self._remember_scope()
+        state = dict(self._scope_states[self._scope])
+        state["expanded"] = dict(state["expanded"])
+        state["scope"] = self._scope
+        return state
+
+    def restore_browse_state(self, state: dict) -> None:
+        self._scope = state["scope"]
+        self._scope_states[self._scope] = dict(state)
+        self._restore_browse_state(state)
+
+    def _restore_browse_state(self, state: dict) -> None:
         self._selected_path = state.get("selected")
+        self._selected_feature = state.get("feature")
         self.search.blockSignals(True)
         self.search.setText(state.get("query", ""))
         self.search.blockSignals(False)
@@ -436,6 +424,7 @@ class LeftPanel(QWidget):
         self.tree.clearSelection()
         self._apply_scope_controls()
         self._filter_tree(self.search.text())
+        self._restore_selection()
         self.tree.doItemsLayout()
         self.tree.verticalScrollBar().setValue(state.get("scroll", 0))
 
@@ -484,8 +473,7 @@ class LeftPanel(QWidget):
         self._project = project
         self._selected_path = selected_path
         self.tree.clear()
-        self.project_label.setText(project.name if project else "尚未打开项目")
-        self.project_label.setToolTip(project.name if project else "尚未打开项目")
+        self.scope_title.setToolTip(project.name if project else "尚未打开项目")
         self.style_button.setEnabled(project is not None and self._style_available)
         if project is None:
             self._apply_scope_controls()

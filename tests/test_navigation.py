@@ -50,6 +50,6 @@ class PrimaryNavigationStyleTests(TestCase):
             inactive_settings_colors,
         )
         self.assertEqual(
-            self._child_colors(navigation.buttons["dashboard"]),
+            self._child_colors(navigation.buttons["project"]),
             (LIGHT_COLORS["accent_color"],) * 2,
         )

@@ -1,7 +1,7 @@
 """One session-local surface for AI execution, review entry and diagnostics."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QEvent, QTimer, Qt, Signal
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QPlainTextEdit, QProgressBar,
     QPushButton, QSizePolicy, QToolButton, QVBoxLayout,
@@ -24,6 +24,7 @@ class AITaskPanel(QFrame):
     context_requested = Signal()
     report_requested = Signal()
     state_changed = Signal()
+    layout_changed = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -32,6 +33,9 @@ class AITaskPanel(QFrame):
         self.task_id = None
         self.task_kind = ""
         self.report_ready = False
+        self._fit_timer = QTimer(self)
+        self._fit_timer.setSingleShot(True)
+        self._fit_timer.timeout.connect(self._fit_height)
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 10, 14, 10)
         root.setSpacing(6)
@@ -48,7 +52,6 @@ class AITaskPanel(QFrame):
         close = QPushButton("收起")
         close.setObjectName("ghostButton")
         close.clicked.connect(self.close_requested)
-        header.addWidget(close)
         root.addLayout(header)
         self.detail = QLabel("选择 AI 创作菜单中的任务。生成内容需审阅确认后才会写入。")
         self.detail.setTextFormat(Qt.TextFormat.PlainText)
@@ -58,7 +61,9 @@ class AITaskPanel(QFrame):
         self.progress.setRange(0, 0)
         self.progress.setFixedHeight(6)
         root.addWidget(self.progress)
-        actions = QHBoxLayout()
+        self.details_container = QFrame()
+        actions = QHBoxLayout(self.details_container)
+        actions.setContentsMargins(0, 0, 0, 0)
         self.review_button = QPushButton("审阅结果")
         self.review_button.setObjectName("accentButton")
         self.review_button.clicked.connect(self.review_requested)
@@ -70,8 +75,9 @@ class AITaskPanel(QFrame):
         self.context_button.clicked.connect(self.context_requested)
         self.report_button = QPushButton("检查报告")
         self.report_button.clicked.connect(self.report_requested)
-        for button in (self.review_button, self.discard_button, self.cancel_button,
-                       self.context_button, self.report_button):
+        for button in (self.review_button, self.discard_button, self.cancel_button):
+            header.addWidget(button)
+        for button in (self.context_button, self.report_button):
             actions.addWidget(button)
         actions.addStretch(1)
         self.log_toggle = QToolButton()
@@ -79,7 +85,15 @@ class AITaskPanel(QFrame):
         self.log_toggle.setCheckable(True)
         self.log_toggle.toggled.connect(self._toggle_log)
         actions.addWidget(self.log_toggle)
-        root.addLayout(actions)
+        root.addWidget(self.details_container)
+        self.details_toggle = QToolButton()
+        self.details_toggle.setText("详情")
+        self.details_toggle.setAccessibleName("展开 AI 任务详情")
+        self.details_toggle.setCheckable(True)
+        self.details_toggle.toggled.connect(self._toggle_details)
+        header.addWidget(self.details_toggle)
+        header.addWidget(close)
+        self.details_container.hide()
         self.log_container = QFrame()
         log_layout = QVBoxLayout(self.log_container)
         log_layout.setContentsMargins(0, 0, 0, 0)
@@ -101,9 +115,48 @@ class AITaskPanel(QFrame):
         self.log_container.hide()
         self._refresh()
 
+    def event(self, event):
+        handled = super().event(event)
+        if event.type() in (QEvent.Type.LayoutRequest, QEvent.Type.FontChange, QEvent.Type.StyleChange):
+            if hasattr(self, "_fit_timer"):
+                self._fit_timer.start(0)
+        return handled
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._fit_timer.start(0)
+
+    def _fit_height(self):
+        if self.details_toggle.isChecked():
+            if self.maximumHeight() != 16777215:
+                self.setMinimumHeight(0)
+                self.setMaximumHeight(16777215)
+                self.layout_changed.emit()
+            return
+        height = self.layout().totalHeightForWidth(max(1, self.width()))
+        if height < 0:
+            height = self.layout().totalSizeHint().height()
+        height = max(height, self.layout().totalMinimumSize().height())
+        if self.minimumHeight() != height or self.maximumHeight() != height:
+            self.setFixedHeight(height)
+            self.layout_changed.emit()
+
+    def _toggle_details(self, visible):
+        self.details_container.setVisible(visible)
+        self.details_toggle.setText("收起详情" if visible else "详情")
+        self.details_toggle.setAccessibleName("收起 AI 任务详情" if visible else "展开 AI 任务详情")
+        if not visible:
+            self.log_toggle.setChecked(False)
+        self._fit_timer.start(0)
+        self.layout_changed.emit()
+
     def _toggle_log(self, visible: bool) -> None:
+        if visible:
+            self.details_toggle.setChecked(True)
         self.log_container.setVisible(visible)
         self.log_toggle.setText("收起工作记录" if visible else "展开工作记录")
+        self._fit_timer.start(0)
+        self.layout_changed.emit()
 
     def _refresh(self) -> None:
         pending = self.state == "pending"
@@ -121,6 +174,7 @@ class AITaskPanel(QFrame):
             "finished": "后台已结束", "failed": "失败", "cancelled": "已取消",
             "discarded": "已放弃",
         }[self.state])
+        self._fit_timer.start(0)
         self.state_changed.emit()
 
     def start(self, token) -> None:
@@ -131,6 +185,7 @@ class AITaskPanel(QFrame):
         self.scope.setText(f"{TASK_LABELS.get(token.kind, 'AI')} · {token.chapter_id}")
         self.scope.setToolTip(self.scope.text())
         self.detail.setText("正在后台处理，可继续写作或收起面板。")
+        self.details_toggle.setChecked(False)
         self.log_toggle.setChecked(False)
         self._refresh()
 
@@ -157,5 +212,6 @@ class AITaskPanel(QFrame):
         self.task_kind = ""
         self.report_ready = False
         self.scope.clear()
+        self.details_toggle.setChecked(False)
         self.log_toggle.setChecked(False)
         self.set_state("idle", "选择 AI 创作菜单中的任务。生成内容需审阅确认后才会写入。")

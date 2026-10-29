@@ -28,7 +28,6 @@ class MainWindowDeleteBehaviorTests(unittest.TestCase):
         self.assertEqual(MainWindow.DELETE_CHAPTER_SHORTCUT, "Ctrl+Shift+Delete")
 
     def test_trash_is_a_navigation_action_not_a_workspace_route(self) -> None:
-        self.assertTrue(hasattr(PrimaryNavigation, "trash_requested"))
         self.assertNotIn("trash", {route for route, _icon, _label in PrimaryNavigation.ROUTES})
 
 

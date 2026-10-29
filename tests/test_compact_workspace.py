@@ -96,8 +96,9 @@ class CompactWorkspaceTests(TestCase):
             self.assertIn(w.actions[key], w.ai_creation_menu.actions())
         self.assertTrue(w.ai_creation_button.isEnabled())
         self.assertIn(w.actions['output'], w.ai_creation_menu.actions())
-        for key in ('new_project', 'open_project', 'export', 'trash'):
-            self.assertIn(w.actions[key], w.left_panel.project_menu.actions())
+        for key in ('dashboard', 'new_project', 'open_project', 'export'):
+            self.assertIn(w.actions[key], w.primary_nav.project_menu.actions())
+        self.assertIn(w.actions['trash'], w.primary_nav.more_menu.actions())
 
     def test_save_failure_remains_visible_in_compact_header(self):
         self.window.editor.show_save_error('磁盘只读')

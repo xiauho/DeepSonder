@@ -36,3 +36,5 @@ projects/*
 # Local UI acceptance captures, logs and preview scripts
 /output/ui-audit-*/
 /output/ui-stage*/
+/output/ui-implementation-*/
+/output/ui-proposal-*/

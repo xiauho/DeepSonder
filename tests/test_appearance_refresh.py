@@ -91,7 +91,7 @@ class AppearanceRefreshTests(unittest.TestCase):
             button.setEnabled(True)
             self.app.processEvents()
             self.assertEqual(nav.grab().toImage().pixelColor(2, 2).name().upper(), colors['sidebar_color'])
-            for label in (nav.buttons['memory']._text_label, nav.buttons['memory']._icon_label):
+            for label in (nav.buttons['reports']._text_label, nav.buttons['reports']._icon_label):
                 self.assertEqual(label.palette().color(label.foregroundRole()).name().upper(), colors['accent_color'])
             self.assertEqual(button._text_label.palette().color(QPalette.ColorRole.WindowText).name().upper(), colors['primary_text_color'])
             self.assertEqual(self.app.palette().color(QPalette.ColorRole.HighlightedText).name().upper(), colors['primary_text_color'])

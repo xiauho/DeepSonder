@@ -8,7 +8,7 @@ from ui.quick_access import QuickAccessDialog, QuickEntry
 
 class QuickAccessController:
     PROJECT_COMMANDS = frozenset(("export", "trash", "new_chapter", "delete_chapter",
-        "new_character", "character_sync", "new_world", "new_power", "new_timeline", "manage_timeline", "focus_directory"))
+        "new_character", "character_sync", "new_world", "new_power", "new_timeline", "manage_timeline", "focus_directory", "show_memory", "show_reports"))
     DOCUMENT_COMMANDS = frozenset(("save", "undo", "redo", "find", "focus_editor", "locate_document"))
 
     def __init__(self, window):
@@ -46,7 +46,7 @@ class QuickAccessController:
                 group = "AI 创作"
             elif key in {"save", "undo", "redo", "find"}:
                 group = "文档编辑"
-            elif key in {"focus", "comfortable_width", "navigation", "inspector", "output", "focus_editor", "focus_directory", "locate_document"}:
+            elif key in {"focus", "comfortable_width", "navigation", "inspector", "output", "focus_editor", "focus_directory", "locate_document", "show_memory", "show_reports"}:
                 group = "视图与导航"
             else:
                 group = "项目与应用"

@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QSizePolicy,
     QSplitter,
     QStackedWidget,
     QToolButton,
@@ -246,6 +247,7 @@ class MainWindow(QMainWindow):
         self.task_panel.context_requested.connect(self._show_task_context)
         self.task_panel.report_requested.connect(lambda: self._show_route("reports"))
         self.task_panel.state_changed.connect(self._sync_task_entry)
+        self.task_panel.layout_changed.connect(self._resize_task_panel)
         self.ai_workflow_controller.output_requested.connect(
             self.ai_task_view_controller.append_output
         )
@@ -359,6 +361,9 @@ class MainWindow(QMainWindow):
 
         action("new_project", "新建项目…", self.new_project, "Ctrl+Shift+N")
         action("open_project", "打开项目…", self.open_project, "Ctrl+Shift+O")
+        action("dashboard", "项目概览", lambda: self._show_route("dashboard"))
+        action("show_reports", "检查报告", lambda: self._open_review_page("reports"))
+        action("show_memory", "故事记忆", lambda: self._open_review_page("memory"))
         action("import_legacy_project", "导入旧版项目…", self.import_legacy_project)
         action("save", "保存", self.save_current_file, "Ctrl+S")
         action("export", "导出作品", lambda: self._show_route("export"), "Ctrl+Shift+E")
@@ -455,9 +460,27 @@ class MainWindow(QMainWindow):
         self.page_title.setObjectName("pageTitle")
         self.page_subtitle = QLabel("项目概览与最近创作")
         self.page_subtitle.setObjectName("mutedLabel")
+        self.page_subtitle.setMinimumWidth(0)
+        self.page_subtitle.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         title_box.addWidget(self.page_title)
         title_box.addWidget(self.page_subtitle)
         header_layout.addLayout(title_box, 1)
+        self.review_tabs = QWidget()
+        review_layout = QHBoxLayout(self.review_tabs)
+        review_layout.setContentsMargins(0, 0, 0, 0)
+        review_layout.setSpacing(4)
+        self.review_buttons = {}
+        for route, key in (("reports", "show_reports"), ("memory", "show_memory")):
+            button = QToolButton()
+            button.setObjectName("editorModeButton")
+            button.setText(self.actions[key].text())
+            button.setAccessibleName(self.actions[key].text())
+            button.setCheckable(True)
+            button.clicked.connect(self.actions[key].trigger)
+            review_layout.addWidget(button)
+            self.review_buttons[route] = button
+        self.review_tabs.hide()
+        header_layout.addWidget(self.review_tabs)
         self.ai_indicator = QLabel("●  DSH 空闲中")
         self.ai_indicator.setObjectName("aiStatus")
         header_layout.addWidget(self.ai_indicator)
@@ -576,12 +599,6 @@ class MainWindow(QMainWindow):
         self.left_panel = LeftPanel()
         self.editor = Editor()
         self.editor.attach_document_actions(self.action_bar)
-        self.left_panel.project_menu.addAction(self.actions["new_project"])
-        self.left_panel.project_menu.addAction(self.actions["open_project"])
-        self.left_panel.project_menu.addAction(self.actions["import_legacy_project"])
-        self.left_panel.project_menu.addSeparator()
-        self.left_panel.project_menu.addAction(self.actions["export"])
-        self.left_panel.project_menu.addAction(self.actions["trash"])
         self.inspector = Inspector()
         self.main_splitter.addWidget(self.left_panel)
         from ui.timeline_page import TimelinePage
@@ -630,12 +647,24 @@ class MainWindow(QMainWindow):
 
     def _build_menus(self) -> None:
         file_menu = self.menuBar().addMenu("文件")
+        file_menu.addAction(self.actions["dashboard"])
+        file_menu.addSeparator()
         file_menu.addAction(self.actions["new_project"])
         file_menu.addAction(self.actions["open_project"])
         file_menu.addAction(self.actions["import_legacy_project"])
         self.recent_menu = QMenu("最近项目", self)
         file_menu.addMenu(self.recent_menu)
         self._refresh_recent_menu()
+        project_menu = self.primary_nav.project_menu
+        project_menu.addAction(self.actions["dashboard"])
+        project_menu.addSeparator()
+        for key in ("new_project", "open_project", "import_legacy_project"):
+            project_menu.addAction(self.actions[key])
+        project_menu.addMenu(self.recent_menu)
+        project_menu.addSeparator()
+        project_menu.addAction(self.actions["export"])
+        self.primary_nav.more_menu.addAction(self.actions["trash"])
+        self.primary_nav.more_menu.addAction(self.actions["commands"])
         file_menu.addSeparator()
         file_menu.addAction(self.actions["save"])
         file_menu.addAction(self.actions["export"])
@@ -678,6 +707,9 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.actions["inspector"])
         view_menu.addAction(self.actions["output"])
         view_menu.addSeparator()
+        view_menu.addAction(self.actions["show_reports"])
+        view_menu.addAction(self.actions["show_memory"])
+        view_menu.addSeparator()
         for key in ("focus_editor", "focus_directory", "locate_document"):
             view_menu.addAction(self.actions[key])
 
@@ -718,8 +750,6 @@ class MainWindow(QMainWindow):
         self.timeline_page.changed.connect(self._timeline_changed)
         self.project_session.project_changed.connect(self.timeline_page.show_project)
         self.project_session.data_change_detail.connect(lambda _project, _change: self.timeline_page.reload())
-        self.primary_nav.new_project_requested.connect(self.new_project)
-        self.primary_nav.trash_requested.connect(self.open_trash)
         self.dashboard_page.new_project_requested.connect(self.new_project)
         self.dashboard_page.open_project_requested.connect(self.open_project)
         self.dashboard_page.import_requested.connect(self._import_markdown_chapters)
@@ -792,6 +822,7 @@ class MainWindow(QMainWindow):
     # Routing and shared shell
     # ------------------------------------------------------------------
     def _show_route(self, route: str) -> bool:
+        previous_route = self.window_state_controller.current_route
         if route not in self.ROUTES:
             route = "dashboard"
         if route not in {"dashboard", "settings"} and not self._require_project():
@@ -817,9 +848,10 @@ class MainWindow(QMainWindow):
         self.window_state_controller.activate_route(route)
         if keep_canon:
             self.content_stack.setCurrentWidget(self.structured_canon_page)
-        if route == "canon" and not self._canon_page_active():
-            # 结构化表单页已是当前内容时不默认选材，避免覆盖用户正在查看的材料
-            self.story_navigation_controller.select_default_canon()
+        if (route in {"writing", "canon"} and previous_route != route
+                and not getattr(self, "_opening_document", False)
+                and not getattr(self, "_restoring_workspace", False)):
+            self._restore_workspace_document(route)
 
         if route == "timeline":
             self.left_panel.select_timeline()
@@ -828,11 +860,40 @@ class MainWindow(QMainWindow):
         self._refresh_delete_action()
         if hasattr(self, "workspace_state"):
             self.workspace_state.capture()
-        self._update_page_header(route)
+        self._update_page_header(self.window_state_controller.current_route)
         self._update_window_title()
         return True
 
+    def _restore_workspace_document(self, route: str) -> None:
+        """Restore a workspace via the normal document guards without clearing its filter."""
+        state = self.left_panel.browse_state()
+        self._restoring_workspace = True
+        try:
+            if route == "canon" and state.get("feature") == "timeline":
+                self.manage_timeline()
+                return
+            candidates = [item for item in self.left_panel.document_items()
+                          if (item.data(0, self.left_panel.CATEGORY_ROLE) == "章节") == (route == "writing")]
+            target = next((item for item in candidates
+                           if item.data(0, self.left_panel.PATH_ROLE) == state.get("selected")), None)
+            if target is None:
+                target = next((item for item in candidates
+                               if Path(item.data(0, self.left_panel.PATH_ROLE)).is_file()), None)
+            if target is None:
+                self.editor.clear_document("尚无章节，请新建章节。" if route == "writing" else "尚无资料，请新建资料。")
+                return
+            category = target.data(0, self.left_panel.CATEGORY_ROLE)
+            path = str(target.data(0, self.left_panel.PATH_ROLE))
+            state["selected"] = path
+            self._on_file_selected(category, path)
+        finally:
+            self.left_panel.restore_browse_state(state)
+            self._restoring_workspace = False
+
     def _update_page_header(self, route: str) -> None:
+        self.review_tabs.setVisible(route in {"reports", "memory"})
+        for key, button in self.review_buttons.items():
+            button.setChecked(key == route)
         labels = {
             "dashboard": ("项目", "项目概览与最近创作"),
             "writing": ("写作台", "章节正文、故事雷达与 AI 辅助"),
@@ -846,7 +907,12 @@ class MainWindow(QMainWindow):
         title, subtitle = labels[route]
         self.page_title.setText(title)
         self.page_subtitle.setText(subtitle if not self.project else f"{self.project.name} · {subtitle}")
+        self.page_subtitle.setToolTip(self.page_subtitle.text())
         self.theme_button.setText("深色" if self.config.get("theme") == "light" else "浅色")
+
+    def _open_review_page(self, route: str) -> None:
+        if not self._show_route(route):
+            self._update_page_header(self.window_state_controller.current_route)
 
     # ------------------------------------------------------------------
     # Projects and documents
@@ -1026,7 +1092,6 @@ class MainWindow(QMainWindow):
     def _on_ai_started(self, _token) -> None:
         self.reports_page.set_check_running(True)
         self._refresh_delete_action()
-        self.primary_nav.set_trash_enabled(False)
         self.actions["trash"].setEnabled(False)
         self._refresh_ai_actions()
 
@@ -1038,7 +1103,6 @@ class MainWindow(QMainWindow):
 
     def _refresh_trash_access(self) -> None:
         enabled = self.project is not None and not self.ai_controller.is_running()
-        self.primary_nav.set_trash_enabled(enabled)
         self.actions["trash"].setEnabled(enabled)
 
     def new_project(self) -> None:
@@ -1883,6 +1947,14 @@ class MainWindow(QMainWindow):
         self.left_panel.select_path(path)
 
     def _on_file_selected(self, category: str, path_str: str) -> None:
+        previous = getattr(self, "_opening_document", False)
+        self._opening_document = True
+        try:
+            self._open_selected_document(category, path_str)
+        finally:
+            self._opening_document = previous
+
+    def _open_selected_document(self, category: str, path_str: str) -> None:
         if self.project and Path(path_str).resolve() == self.project.style_guide_path.resolve():
             self.ai_workflow_controller.manage_style_library()
             return
@@ -2011,6 +2083,15 @@ class MainWindow(QMainWindow):
         label = {"running": "AI 正在处理", "cancelling": "AI 正在取消", "pending": "AI 结果待审阅", "failed": "AI 任务失败"}.get(self.task_panel.state, "AI 任务")
         self.task_entry.setText(label)
         self.task_entry.setAccessibleName(label + "，打开任务面板")
+
+    def _resize_task_panel(self) -> None:
+        if not self.task_panel.isVisible():
+            return
+        total = sum(self.outer_splitter.sizes())
+        target = self.task_panel.minimumHeight()
+        if self.task_panel.details_toggle.isChecked():
+            target = min(self.task_panel.sizeHint().height(), max(120, total // 2))
+        self.outer_splitter.setSizes([max(1, total - target), target])
 
     def _ai_result_pending(self, token) -> None:
         self.task_panel.pending(token)
