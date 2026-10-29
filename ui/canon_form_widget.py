@@ -1025,9 +1025,10 @@ class CanonFormWidget(QWidget):
         content.setObjectName("canonFormContent")
         body = QVBoxLayout(content)
         body.setContentsMargins(6, 6, 6, 12)
-        body.setSpacing(14)
+        body.setSpacing(0)
         if self.entry is not None:
             controls = QHBoxLayout()
+            controls.setSpacing(8)
             controls.addStretch()
             for text, expanded in (("全部展开", True), ("全部折叠", False)):
                 button = QPushButton(text)

@@ -18,6 +18,9 @@ class _FakeWidget:
     def is_story_plan(self):
         return False
 
+    def focus_writing_surface(self):
+        self.text_edit.setFocus()
+
     def setVisible(self, visible):
         self.visible = visible
 

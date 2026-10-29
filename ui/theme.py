@@ -109,6 +109,7 @@ QPushButton[railButton="true"] { padding: 0px; min-height: 48px; }
 QPushButton[railButton="true"] QLabel#buttonText { font-size: 12px; }
 QPushButton[railButton="true"]:focus { border: 2px solid __ACCENT__; }
 QToolButton#workspaceToggle { min-width: 32px; min-height: 32px; padding: 0px; border-radius: 6px; }
+QToolButton#workspaceToggle[withText="true"] { padding: 0px 8px; }
 QToolButton#workspaceToggle:checked { background: __SELECTION__; color: __ACCENT__; }
 QToolButton#workspaceToggle:focus { border: 2px solid __ACCENT__; }
 QLabel#buttonIcon {
@@ -374,6 +375,16 @@ QPlainTextEdit#writingEditor, QTextBrowser#markdownPreview {
     font-size: __EDITOR_FONT_SIZE__px;
 }
 QPlainTextEdit#writingEditor:focus, QTextBrowser#markdownPreview:focus { border-color: __ACCENT__; }
+QWidget#chapterWritingPage { background: __PANEL__; }
+QPlainTextEdit#writingEditor[chapterProse="true"] {
+    border: 1px solid transparent;
+    border-bottom: 1px solid __BORDER__;
+    border-radius: 0;
+}
+QPlainTextEdit#writingEditor[chapterProse="true"]:focus {
+    border-color: transparent;
+    border-bottom-color: __ACCENT__;
+}
 QLineEdit#documentTitleEdit {
     background: transparent;
     border: none;
@@ -438,13 +449,15 @@ QLabel#canonKindBadge {
     font-weight: 700;
 }
 QWidget#canonPage { background: __BG__; }
+QWidget#canonFormContent { background: __PANEL__; }
 QFrame#canonPageHeader, QFrame#timelinePageHeader {
     background: __PANEL__; border: none; border-bottom: 1px solid __BORDER__;
 }
 QFrame#canonModuleFrame, QFrame#canonIntroCard {
     background: __PANEL__;
-    border: 1px solid __BORDER__;
-    border-radius: 10px;
+    border: none;
+    border-top: 1px solid __BORDER__;
+    border-radius: 0;
 }
 QFrame#canonGroupFrame {
     /* 分组条目用分隔线区分，不再在模块内嵌第二层卡片。 */
@@ -500,7 +513,14 @@ QToolButton#canonModuleToggle {
 }
 QToolButton#canonModuleToggle:hover { background: __HOVER__; }
 QToolButton#canonModuleToggle:focus { border-color: __ACCENT__; }
-QLabel#systemModuleBadge, QLabel#rawModuleBadge {
+QLabel#systemModuleBadge {
+    color: __MUTED__;
+    background: transparent;
+    border: none;
+    padding: 2px 4px;
+    font-size: __SMALL_FONT_SIZE__px;
+}
+QLabel#rawModuleBadge {
     color: __MUTED__;
     background: __FIELD__;
     border: 1px solid __BORDER__;

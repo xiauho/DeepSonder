@@ -46,7 +46,7 @@ class QuickAccessController:
                 group = "AI 创作"
             elif key in {"save", "undo", "redo", "find"}:
                 group = "文档编辑"
-            elif key in {"focus", "navigation", "inspector", "output", "focus_editor", "focus_directory", "locate_document"}:
+            elif key in {"focus", "comfortable_width", "navigation", "inspector", "output", "focus_editor", "focus_directory", "locate_document"}:
                 group = "视图与导航"
             else:
                 group = "项目与应用"

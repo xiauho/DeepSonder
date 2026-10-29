@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QEvent, QTimer, Qt, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPlainTextEdit,
+    QSizePolicy,
     QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 from core.chapter_document import ChapterDocument, ChapterEdits, rejection_reason
+from ui.elided_label import ElidedLabel
 
 
 _FIELDS = (
@@ -31,10 +33,15 @@ class ChapterWritingPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("chapterWritingPage")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._loading = False
         self._outline_mode = "fields"
         self._author_present = False
         self._prep_expanded = True
+        self._comfortable_width = True
+        self._column_timer = QTimer(self)
+        self._column_timer.setSingleShot(True)
+        self._column_timer.timeout.connect(self._layout_reading_column)
         self._extra_fields: list[tuple[str, QPlainTextEdit]] = []
 
         layout = QVBoxLayout(self)
@@ -43,9 +50,10 @@ class ChapterWritingPage(QWidget):
 
         self.prep_title = QLabel("本章准备")
         self.prep_title.setObjectName("sectionTitle")
-        self.summary = QLabel("")
+        self.summary = ElidedLabel("")
         self.summary.setObjectName("mutedLabel")
-        self.summary.setWordWrap(True)
+        self.summary.setMinimumWidth(0)
+        self.summary.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.prep_toggle = QToolButton()
         self.prep_toggle.setObjectName("editorModeButton")
         self.prep_toggle.setText("收起")
@@ -86,6 +94,8 @@ class ChapterWritingPage(QWidget):
 
         self.body_edit = QPlainTextEdit()
         self.body_edit.setObjectName("writingEditor")
+        self.body_edit.setProperty("chapterProse", True)
+        self.body_edit.installEventFilter(self)
         self.body_edit.setPlaceholderText("从这里开始写这一章。")
         self.body_edit.setAccessibleName("正文")
         layout.addWidget(self.body_edit, 1)
@@ -112,9 +122,35 @@ class ChapterWritingPage(QWidget):
             field.textChanged.connect(self._refresh_summary)
         self.outline_rest.textChanged.connect(self._emit)
         self.outline_text.textChanged.connect(self._emit)
+        self.outline_text.textChanged.connect(self._refresh_summary)
         self.plot_brief.textChanged.connect(self._emit)
         self.plot_brief.textChanged.connect(self._refresh_summary)
         self.author_note.textChanged.connect(self._emit)
+
+    def comfortable_width(self) -> bool:
+        return self._comfortable_width
+
+    def set_comfortable_width(self, enabled: bool) -> None:
+        """Reflow existing widgets without touching document content or history."""
+        self._comfortable_width = bool(enabled)
+        self._layout_reading_column()
+
+    def _layout_reading_column(self) -> None:
+        # Bound the reading measure while respecting the author's font choice.
+        measure = max(680, min(820, self.body_edit.fontMetrics().horizontalAdvance("中") * 42))
+        column = measure + 64  # Match the prose editor's horizontal padding.
+        gutter = max(0, (self.contentsRect().width() - column) // 2) if self._comfortable_width else 0
+        if self.layout().contentsMargins().left() != gutter:
+            self.layout().setContentsMargins(gutter, 0, gutter, 0)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._layout_reading_column()
+
+    def eventFilter(self, watched, event):
+        if watched is self.body_edit and event.type() in (QEvent.Type.FontChange, QEvent.Type.StyleChange):
+            self._column_timer.start(0)
+        return super().eventFilter(watched, event)
 
     def load(self, document: ChapterDocument, *, reset_prep: bool) -> None:
         self._loading = True
@@ -243,15 +279,18 @@ class ChapterWritingPage(QWidget):
     def _refresh_summary(self) -> None:
         if self._outline_mode == "freeform":
             outline = "大纲已填" if self.outline_text.toPlainText().strip() else "大纲未填"
+            detail = outline
         else:
             marks = [
                 ("目标", self.fields["goal"].text()),
                 ("冲突", self.fields["conflict"].text()),
                 ("钩子", self.fields["hook"].text()),
             ]
-            outline = " · ".join(f"{name}{'已填' if value.strip() else '未填'}" for name, value in marks)
+            outline = f"大纲 {sum(bool(value.strip()) for _, value in marks)}/3 项有内容"
+            detail = " · ".join(f"{name}{'有内容' if value.strip() else '空白'}" for name, value in marks)
         plot = "剧情简写已填" if self.plot_brief.toPlainText().strip() else "剧情简写未填"
-        self.summary.setText(f"{outline} · {plot}" if self._outline_mode == "freeform" else f"{outline} · {plot}")
+        self.summary.setText(f"{outline} · {plot}")
+        self.summary.setToolTip(f"{detail} · {plot}；各项可选，不代表大纲完整性。")
 
     def _refresh_guide(self) -> None:
         self.guide.setVisible(

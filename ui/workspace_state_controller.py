@@ -58,6 +58,10 @@ class WorkspaceStateController(QObject):
         window.main_splitter.splitterMoved.connect(self.schedule)
         layout = self.data.get("layout", {})
         if isinstance(layout, dict):
+            comfortable = layout.get("comfortable_width", True)
+            if type(comfortable) is bool:
+                window.actions["comfortable_width"].setChecked(comfortable)
+                window.editor.writing_page.set_comfortable_width(comfortable)
             controller = window.window_state_controller
             for name in ("navigation_visible", "inspector_visible"):
                 if type(layout.get(name)) is bool:
@@ -229,6 +233,7 @@ class WorkspaceStateController(QObject):
         controller.remember_panel_sizes(0, 0)
         self.data["layout"] = {"navigation_visible": controller.navigation_visible,
             "inspector_visible": controller.inspector_visible,
+            "comfortable_width": window.editor.writing_page.comfortable_width(),
             "navigation_width": controller._left_panel_width,
             "inspector_width": controller._inspector_width}
         rect = window.normalGeometry() if window.isMaximized() else window.geometry()

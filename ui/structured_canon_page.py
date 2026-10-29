@@ -68,6 +68,8 @@ class StructuredCanonPage(QWidget):
         self.outline_toggle = QToolButton()
         self.outline_toggle.setObjectName("outlineToggleButton")
         set_button_icon(self.outline_toggle, "toc", size=17)
+        self.outline_toggle.setText("分区")
+        self.outline_toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.outline_toggle.setCheckable(True)
         self.outline_toggle.setChecked(True)
         self.outline_toggle.setAccessibleName("分区大纲")
@@ -82,7 +84,7 @@ class StructuredCanonPage(QWidget):
         toolbar_layout.addWidget(self.add_module_button)
 
         self.save_button = QPushButton("保存")
-        self.save_button.setObjectName("accentButton")
+        self.save_button.setObjectName("ghostButton")
         self.save_button.setToolTip("保存当前设定材料（Ctrl+S）")
         self.save_button.setEnabled(False)
         self.save_button.clicked.connect(self.save)

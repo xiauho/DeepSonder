@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import QEvent, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor, QTextDocument
 from PySide6.QtWidgets import (
     QApplication,
@@ -305,6 +305,15 @@ class Editor(QWidget):
         self._find_timer.setSingleShot(True)
         self._find_timer.setInterval(FIND_DEBOUNCE_MS)
         self._find_timer.timeout.connect(self._update_match_count)
+        self._toolbar_layout_timer = QTimer(self)
+        self._toolbar_layout_timer.setSingleShot(True)
+        self._toolbar_layout_timer.timeout.connect(self._layout_document_actions)
+
+    def event(self, event):
+        handled = super().event(event)
+        if event.type() == QEvent.Type.LayoutRequest and hasattr(self, "_toolbar_layout_timer"):
+            self._toolbar_layout_timer.start(0)
+        return handled
 
     def attach_document_actions(self, actions: QWidget) -> None:
         self._document_actions = actions
@@ -316,8 +325,9 @@ class Editor(QWidget):
         if actions is None:
             return
         # Allow the title and mode controls their own row in a narrow editor.
-        needed = (actions.sizeHint().width() + self.source_button.sizeHint().width()
-                  + self.preview_button.sizeHint().width() + self.dirty_badge.sizeHint().width() + 230)
+        controls = (self.source_button, self.preview_button, self.dirty_badge, self.exit_focus_button)
+        needed = actions.sizeHint().width() + 230 + sum(
+            widget.sizeHint().width() + 8 for widget in controls if not widget.isHidden())
         stacked = self.width() < needed
         if stacked == self._actions_stacked:
             return
@@ -937,7 +947,8 @@ class Editor(QWidget):
         verbatim = document.outline_mode == "verbatim"
         self.title_edit.setVisible(not verbatim)
         self.title_label.setVisible(verbatim)
-        self.body_count_label.show()
+        # The footer already carries the complete word count; keep the title clear.
+        self.body_count_label.hide()
         self.source_button.hide()
         self.preview_button.hide()
         self.format_label.hide()

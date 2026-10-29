@@ -391,6 +391,10 @@ class MainWindow(QMainWindow):
         action("focus_directory", "搜索当前目录", self.focus_directory, "Ctrl+Alt+F")
         action("locate_document", "定位当前文档", self._locate_current_document, "Ctrl+Alt+L")
         action("focus", "专注模式", self.toggle_focus_mode, "Ctrl+K")
+        width_action = action("comfortable_width", "正文舒适行宽", self._set_comfortable_width)
+        width_action.setCheckable(True)
+        width_action.setChecked(True)
+        width_action.setToolTip("将章节正文居中到舒适行宽；关闭后铺满可用区域，不修改内容。")
         action("navigation", "显示/隐藏资料面板", self.toggle_navigation_panel, "Ctrl+Shift+L")
         action("inspector", "显示/隐藏写作助手", self.toggle_inspector, "Ctrl+Shift+I")
         action("output", "显示/隐藏 AI 任务", self.toggle_output, "Ctrl+J")
@@ -471,17 +475,20 @@ class MainWindow(QMainWindow):
         action_layout.setContentsMargins(0, 0, 0, 0)
         action_layout.setSpacing(4)
         self.panel_buttons = {}
-        for key, icon, label in (
-            ("navigation", "menu_book", "章节与资料（Ctrl+Shift+L）"),
-            ("inspector", "psychology", "写作助手（Ctrl+Shift+I）"),
-            ("focus", "center_focus_strong", "专注模式（Ctrl+K）"),
-            ("save", "save", "保存（Ctrl+S）"),
+        for key, icon, text, label in (
+            ("navigation", "menu_book", "", "章节与资料（Ctrl+Shift+L）"),
+            ("inspector", "auto_stories", "参考", "写作参考：本章资料、记忆与检查结果（Ctrl+Shift+I）"),
+            ("focus", "center_focus_strong", "专注", "专注模式（Ctrl+K）"),
         ):
             button = QToolButton()
             button.setObjectName("workspaceToggle")
             button.setToolTip(label)
             button.setAccessibleName(label)
             set_button_icon(button, icon)
+            if text:
+                button.setText(text)
+                button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+                button.setProperty("withText", True)
             action = self.actions[key]
             button.setEnabled(action.isEnabled())
             action.changed.connect(lambda item=action, target=button: target.setEnabled(item.isEnabled()))
@@ -490,6 +497,20 @@ class MainWindow(QMainWindow):
                 button.setCheckable(True)
                 self.panel_buttons[key] = button
             action_layout.addWidget(button)
+        self.workspace_more_button = QToolButton()
+        self.workspace_more_button.setObjectName("workspaceToggle")
+        self.workspace_more_button.setText("更多")
+        self.workspace_more_button.setAccessibleName("更多文档与视图操作")
+        self.workspace_more_button.setToolTip("保存、正文行宽与导航操作")
+        self.workspace_more_button.setProperty("withText", True)
+        self.workspace_more_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.workspace_more_menu = QMenu(self.workspace_more_button)
+        self.workspace_more_menu.addAction(self.actions["save"])
+        self.workspace_more_menu.addSeparator()
+        for key in ("comfortable_width", "navigation", "locate_document", "find"):
+            self.workspace_more_menu.addAction(self.actions[key])
+        self.workspace_more_button.setMenu(self.workspace_more_menu)
+        action_layout.addWidget(self.workspace_more_button)
         self.ai_creation_button = QToolButton()
         self.ai_creation_button.setObjectName("accentButton")
         self.ai_creation_button.setText("AI 创作")
@@ -503,9 +524,15 @@ class MainWindow(QMainWindow):
         self.ai_availability_action = self.ai_creation_menu.addAction("打开项目…")
         self.ai_availability_action.triggered.connect(self._resolve_ai_availability)
         self.ai_creation_menu.addSeparator()
-        for key in ("expand", "continuation", "selection_expand", "style_polish", "style_review", "style_library", "style_exceptions", "check", "memory"):
-            self.ai_creation_menu.addAction(self.actions[key])
-            self.actions[key].changed.connect(self._sync_ai_creation_button)
+        for title, keys in (
+            ("创作", ("continuation", "expand", "selection_expand")),
+            ("审校", ("style_polish", "style_review", "check")),
+            ("资料与文风", ("memory", "style_library", "style_exceptions")),
+        ):
+            self.ai_creation_menu.addSection(title)
+            for key in keys:
+                self.ai_creation_menu.addAction(self.actions[key])
+                self.actions[key].changed.connect(self._sync_ai_creation_button)
         self.ai_creation_menu.addSeparator()
         self.ai_creation_menu.addAction(self.actions["output"])
         self.ai_creation_button.setMenu(self.ai_creation_menu)
@@ -590,6 +617,11 @@ class MainWindow(QMainWindow):
         for key, shown in (("navigation", controller.navigation_visible), ("inspector", controller.inspector_visible)):
             self.panel_buttons[key].setChecked(shown)
 
+    def _set_comfortable_width(self, enabled: bool) -> None:
+        self.editor.writing_page.set_comfortable_width(enabled)
+        if hasattr(self, "workspace_state"):
+            self.workspace_state.schedule()
+
     def _sync_ai_creation_button(self) -> None:
         if not hasattr(self, "ai_creation_button"):
             return
@@ -641,6 +673,7 @@ class MainWindow(QMainWindow):
 
         view_menu = self.menuBar().addMenu("视图")
         view_menu.addAction(self.actions["focus"])
+        view_menu.addAction(self.actions["comfortable_width"])
         view_menu.addAction(self.actions["navigation"])
         view_menu.addAction(self.actions["inspector"])
         view_menu.addAction(self.actions["output"])

@@ -69,6 +69,12 @@
       "status": "supported"
     },
     {
+      "id": "workspace.comfortable_prose_width",
+      "requirement": "required",
+      "status": "supported",
+      "notes": "章节正文默认采用随字号调整的居中舒适行宽；视图及文档更多菜单可切换铺满可用区域，偏好随界面状态跨会话保存。调整行宽、窗口和主题复用原输入控件，不改正文、选区和撤销历史。工具栏常显参考、专注、更多和 AI 创作，保存及目录定位复用原有动作与快捷键；AI 菜单按创作、审校、资料与文风分组。准备栏摘要单行省略并保留完整状态提示，字数统一显示在页脚。资料模块以连续表面和分隔线区分，结构固定标签弱化、分区入口带文字；字段焦点、只读同步、保存冲突和 AI 审阅确认保护保持。"
+    },
+    {
       "id": "workspace.chapter_canon_navigation",
       "requirement": "required",
       "status": "supported",
