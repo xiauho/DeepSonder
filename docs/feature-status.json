@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-27",
+  "updated_at": "2026-10-29",
   "product": "DeepSonder-PySide6",
   "maintenance_policy": "independent",
   "features": [
@@ -18,7 +18,8 @@
     {
       "id": "chapter.edit",
       "requirement": "required",
-      "status": "supported"
+      "status": "supported",
+      "notes": "章节只使用写作页：标题、本章准备和正文分开编辑，其他小节显示在正文下方。正文为空时展开准备，已有正文时收起。文件仍是 Markdown；未改动的段落保持原字节。无法可靠拆开的章节在同一页按整章文字编辑，不再提供源码页或预览切换。"
     },
     {
       "id": "memory.extract",

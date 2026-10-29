@@ -104,7 +104,9 @@ class StoryPlanUITests(TestCase):
             self.assertFalse(editor.is_dirty())
             chapter = project.chapters_dir / "chapter_01.md"
             editor.load_document(service.open_document(project, "章节", chapter))
-            self.assertFalse(editor.source_button.isHidden())
+            self.assertTrue(editor.is_writing_page_visible())
+            self.assertEqual(editor.writing_page.body_edit.placeholderText(), "从这里开始写这一章。")
+            self.assertTrue(editor.source_button.isHidden())
             editor.set_view_mode("preview")
             editor.load_document(service.open_document(project, "故事规划", path))
             self.assertIs(editor.editor_stack.currentWidget(), editor.story_plan_form)

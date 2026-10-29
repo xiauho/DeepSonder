@@ -334,7 +334,7 @@ class MainWindow(QMainWindow):
         elif self.editor.view_mode() == "preview":
             self.editor.preview_browser.setFocus()
         else:
-            self.editor.text_edit.setFocus()
+            self.editor.focus_writing_surface()
 
     def focus_directory(self) -> None:
         route = self.window_state_controller.current_route if self._timeline_active() else "canon" if self.window_state_controller.current_route == "canon" else "writing"
@@ -731,7 +731,7 @@ class MainWindow(QMainWindow):
         self.settings_controller.connection_failed.connect(self._on_dsh_test_failed)
         self.settings_controller.connection_finished.connect(self._on_dsh_test_finished)
         self.editor.dirty_changed.connect(self._on_dirty_changed)
-        self.editor.text_edit.selectionChanged.connect(self._refresh_ai_actions)
+        self.editor.selection_changed.connect(self._refresh_ai_actions)
         self.editor.stats_changed.connect(lambda _text: self._refresh_ai_actions())
         self.structured_canon_page.saved.connect(self._on_structured_canon_saved)
         self.structured_canon_page.sync_requested.connect(self.sync_character_card)
@@ -2187,11 +2187,7 @@ class MainWindow(QMainWindow):
         from core.prose_review import validate_scope
         selected_ok = False
         if chapter_open:
-            source = self.editor.text_edit.toPlainText()
-            cursor = self.editor.text_edit.textCursor()
-            encoded = source.encode("utf-16-le")
-            start = len(encoded[:cursor.selectionStart()*2].decode("utf-16-le"))
-            end = len(encoded[:cursor.selectionEnd()*2].decode("utf-16-le"))
+            source, start, end = self.editor.source_selection()
             try:
                 validate_scope(source, start, end)
                 selected_ok = True

@@ -107,7 +107,7 @@ class WindowStateController(QObject):
             if self.editor.is_story_plan():
                 self.editor.story_plan_form.focus_field()
             else:
-                self.editor.text_edit.setFocus()
+                self.editor.focus_writing_surface()
 
     def exit_focus_mode(self) -> None:
         if self._focus_mode:

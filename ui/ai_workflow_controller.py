@@ -226,11 +226,7 @@ class AIWorkflowController(QObject):
         if request is None:
             return
         project, chapter_id, workflow = request
-        source = self.editor.text_edit.toPlainText()
-        cursor = self.editor.text_edit.textCursor()
-        encoded = source.encode("utf-16-le")
-        start = len(encoded[:cursor.selectionStart() * 2].decode("utf-16-le"))
-        end = len(encoded[:cursor.selectionEnd() * 2].decode("utf-16-le"))
+        source, start, end = self.editor.source_selection()
         if start == end and kind == "style_review":
             start, end = prose_bounds(source)
         try:

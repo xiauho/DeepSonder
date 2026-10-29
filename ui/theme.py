@@ -374,6 +374,17 @@ QPlainTextEdit#writingEditor, QTextBrowser#markdownPreview {
     font-size: __EDITOR_FONT_SIZE__px;
 }
 QPlainTextEdit#writingEditor:focus, QTextBrowser#markdownPreview:focus { border-color: __ACCENT__; }
+QLineEdit#documentTitleEdit {
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    padding: 0 2px 2px;
+    font-size: 22px;
+    font-weight: 750;
+    selection-background-color: __SELECTION__;
+    selection-color: __TEXT__;
+}
+QLineEdit#documentTitleEdit:focus { border: none; border-bottom: 1px solid __ACCENT__; }
 QToolButton#editorModeButton {
     background: transparent;
     color: __MUTED__;

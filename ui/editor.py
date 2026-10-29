@@ -6,6 +6,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor, QTextDocument
 from PySide6.QtWidgets import (
+    QApplication,
     QButtonGroup,
     QFrame,
     QHBoxLayout,
@@ -23,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from application.document_service import DocumentService, DocumentSnapshot
+from core.chapter_document import ChapterEdits, compose_chapter, parse_chapter_document
 from core.chapter_sections import chapter_body_bounds, chapter_body_text
 from core.project import NovelProject
 from core.storage import atomic_write_text
@@ -30,19 +32,37 @@ from core.text_metrics import count_content_chars
 from ui.icons import set_button_icon
 from ui.elided_label import ElidedLabel
 from ui.theme import document_css
+from ui.chapter_writing_page import ChapterWritingPage
 from ui.story_plan_form import StoryPlanForm
 
 
 _PARAGRAPH_RE = re.compile(r"\n\s*\n")
 FIND_DEBOUNCE_MS = 240
 STATS_DEBOUNCE_MS = 180
-CHAPTER_PLACEHOLDER = "在这里写下故事。\n\n提示：章节建议保留「## 大纲」「## 剧情简写」和「## 正文」标记，AI 创作会据此理解你的写作意图。"
 MAX_FIND_HIGHLIGHTS = 200
 MAX_FIND_MATCHES_FOR_HIGHLIGHT = 1000
 LARGE_DOCUMENT_CHARS = 200_000
 _NOVALIST_PREVIEW_COMMENT_RE = re.compile(
     r"(?m)^[ \t]*<!--[ \t]*novalist:[^\r\n]*?-->[ \t]*(?:\r?\n|$)"
 )
+
+
+def _qt_index(text: str, position: int) -> int:
+    encoded = str(text or "").encode("utf-16-le")
+    bounded = max(0, min(int(position), len(encoded) // 2))
+    return len(encoded[:bounded * 2].decode("utf-16-le"))
+
+
+def _body_anchor(source: str) -> int:
+    document = parse_chapter_document(source)
+    return 0 if document is None else document.body_anchor
+
+
+def _history_available(widget, redo: bool) -> bool:
+    if isinstance(widget, QPlainTextEdit):
+        document = widget.document()
+        return document.isRedoAvailable() if redo else document.isUndoAvailable()
+    return widget.isRedoAvailable() if redo else widget.isUndoAvailable()
 
 
 def calculate_editor_stats(text: str) -> str:
@@ -107,6 +127,7 @@ class Editor(QWidget):
     file_saved = Signal(str)
     document_about_to_change = Signal()
     document_loaded = Signal()
+    selection_changed = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -118,6 +139,8 @@ class Editor(QWidget):
         self._stats_revision: int | None = None
         self._view_mode = "source"
         self._theme_config: dict = {"theme": "light"}
+        self._chapter_doc = None
+        self._applying_writing = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 14, 18, 12)
@@ -135,12 +158,17 @@ class Editor(QWidget):
         self.title_label.setObjectName("documentTitle")
         self.title_label.setMinimumWidth(0)
         self.title_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.title_edit = QLineEdit()
+        self.title_edit.setObjectName("documentTitleEdit")
+        self.title_edit.setAccessibleName("章节标题")
+        self.title_edit.hide()
         self.path_label = QLabel("从左侧选择文件，或创建一个新章节")
         self.path_label.setObjectName("saveErrorMessage")
         self.path_label.setWordWrap(True)
         self.path_label.setMinimumWidth(0)
         self.path_label.hide()
         title_box.addWidget(self.title_label)
+        title_box.addWidget(self.title_edit)
         header_layout.addLayout(title_box, 1)
 
         self.source_button = QToolButton()
@@ -160,6 +188,11 @@ class Editor(QWidget):
         self.preview_button.clicked.connect(lambda: self.set_view_mode("preview"))
         header_layout.addWidget(self.source_button)
         header_layout.addWidget(self.preview_button)
+
+        self.body_count_label = QLabel("")
+        self.body_count_label.setObjectName("mutedLabel")
+        self.body_count_label.hide()
+        header_layout.addWidget(self.body_count_label, 0, Qt.AlignmentFlag.AlignVCenter)
 
         self.exit_focus_button = QPushButton("退出专注  Esc")
         self.exit_focus_button.setObjectName("focusExitButton")
@@ -226,8 +259,12 @@ class Editor(QWidget):
         self.editor_stack.addWidget(self.text_edit)
         self.editor_stack.addWidget(self.preview_browser)
         self.story_plan_form = StoryPlanForm()
+        self.writing_page = ChapterWritingPage()
         self.editor_stack.addWidget(self.story_plan_form)
+        self.editor_stack.addWidget(self.writing_page)
         self.story_plan_form.changed.connect(self._on_plan_changed)
+        self.writing_page.changed.connect(self._on_writing_changed)
+        self.title_edit.textChanged.connect(self._on_writing_changed)
         layout.addWidget(self.editor_stack, 1)
 
         footer = QFrame()
@@ -241,12 +278,16 @@ class Editor(QWidget):
         self.cursor_label.setObjectName("mutedLabel")
         footer_layout.addWidget(self.stats_label)
         footer_layout.addStretch(1)
-        footer_layout.addWidget(QLabel("Markdown"))
+        self.format_label = QLabel("Markdown")
+        footer_layout.addWidget(self.format_label)
         footer_layout.addWidget(self.cursor_label)
         layout.addWidget(footer)
 
         self.text_edit.textChanged.connect(self._on_text_changed)
         self.text_edit.cursorPositionChanged.connect(self._update_cursor_status)
+        self.text_edit.selectionChanged.connect(self.selection_changed)
+        self.writing_page.body_edit.cursorPositionChanged.connect(self._update_cursor_status)
+        self.writing_page.body_edit.selectionChanged.connect(self.selection_changed)
         self.find_input.textChanged.connect(self._schedule_match_count)
         self.find_input.returnPressed.connect(self.find_next)
         previous_btn.clicked.connect(self.find_previous)
@@ -299,27 +340,79 @@ class Editor(QWidget):
         self._layout_document_actions()
 
     def set_view_mode(self, mode: str) -> None:
-        """Switch between editable source and a read-only in-memory preview."""
+        """Switch a non-chapter document between source and preview.
+
+        Chapters always stay on the writing page.
+        """
         if self.is_story_plan():
             self.editor_stack.setCurrentWidget(self.story_plan_form)
             self.story_plan_form.focus_field()
             return
-        normalized = "preview" if str(mode) == "preview" else "source"
-        self._view_mode = normalized
-        if normalized == "preview":
+        if self._current_category == "章节":
+            document = parse_chapter_document(self.text_edit.toPlainText())
+            self._chapter_doc = document
+            self._enter_writing_page(document, reset_prep=False)
+            return
+        if str(mode) == "preview":
+            self._view_mode = "preview"
             self._find_timer.stop()
             self.find_bar.hide()
             self._clear_find_highlights()
             self._render_preview()
             self.editor_stack.setCurrentWidget(self.preview_browser)
+            self._show_source_controls()
             self.preview_button.setChecked(True)
             self.cursor_label.setText("只读预览")
             self.preview_browser.setFocus()
             return
+        self._view_mode = "source"
         self.editor_stack.setCurrentWidget(self.text_edit)
+        self._show_source_controls()
         self.source_button.setChecked(True)
         self._update_cursor_status()
         self.text_edit.setFocus()
+
+    def is_writing_page_visible(self) -> bool:
+        return self.editor_stack.currentWidget() is self.writing_page
+
+    def focus_writing_surface(self) -> None:
+        """Move focus to the editor the author is actually using."""
+        if self.is_story_plan():
+            self.story_plan_form.focus_field()
+        elif self.is_writing_page_visible():
+            if self._chapter_doc is not None and self._chapter_doc.outline_mode == "verbatim":
+                self.writing_page.body_edit.setFocus()
+                return
+            target = self.writing_page.body_edit
+            if not target.toPlainText().strip():
+                target = (self.writing_page.outline_text
+                          if self.writing_page.outline_text.isVisible()
+                          else self.writing_page.fields["goal"])
+            target.setFocus()
+        elif self._view_mode == "preview":
+            self.preview_browser.setFocus()
+        else:
+            self.text_edit.setFocus()
+
+    def source_selection(self) -> tuple[str, int, int]:
+        """Return the full chapter text and the selected Python indexes."""
+        source = self.text_edit.toPlainText()
+        if self.is_writing_page_visible():
+            edit = self.writing_page.body_edit
+            text = edit.toPlainText()
+            cursor = edit.textCursor()
+            start = _qt_index(text, cursor.selectionStart())
+            end = _qt_index(text, cursor.selectionEnd())
+            if start > end:
+                start, end = end, start
+            anchor = _body_anchor(source)
+            return source, anchor + start, anchor + end
+        cursor = self.text_edit.textCursor()
+        start = _qt_index(source, cursor.selectionStart())
+        end = _qt_index(source, cursor.selectionEnd())
+        if start > end:
+            start, end = end, start
+        return source, start, end
 
     def view_mode(self) -> str:
         return self._view_mode
@@ -337,6 +430,8 @@ class Editor(QWidget):
         if self.is_story_plan():
             self._plan_undo(False)
             return
+        if self._undo_writing(False):
+            return
         self.set_view_mode("source")
         self.text_edit.undo()
 
@@ -344,8 +439,25 @@ class Editor(QWidget):
         if self.is_story_plan():
             self._plan_undo(True)
             return
+        if self._undo_writing(True):
+            return
         self.set_view_mode("source")
         self.text_edit.redo()
+
+    def _undo_writing(self, redo: bool) -> bool:
+        if not self.is_writing_page_visible():
+            return False
+        widget = QApplication.focusWidget()
+        if not self._is_writing_input(widget):
+            widget = self.writing_page.body_edit
+        if _history_available(widget, redo):
+            widget.redo() if redo else widget.undo()
+            return True
+        document = self.text_edit.document()
+        if (document.isRedoAvailable() if redo else document.isUndoAvailable()):
+            self.text_edit.redo() if redo else self.text_edit.undo()
+            return True
+        return True
 
     def _render_preview(self, *, reset_scroll: bool = False) -> None:
         scroll = 0 if reset_scroll else self.preview_browser.verticalScrollBar().value()
@@ -417,9 +529,7 @@ class Editor(QWidget):
         self.preview_button.setVisible(not self.is_story_plan())
         self.footer.setVisible(not self.is_story_plan())
         self.find_bar.hide()
-        self.text_edit.setPlaceholderText(
-            CHAPTER_PLACEHOLDER if category == "章节" else ""
-        )
+        self.text_edit.setPlaceholderText("")
         self.text_edit.setPlainText(content)
         self.text_edit.document().setModified(False)
         self._loading = False
@@ -428,16 +538,7 @@ class Editor(QWidget):
         self.title_label.setToolTip(f"{title}\n{category} / {Path(path).name}")
         self.path_label.hide()
         self.path_label.setText(f"{category}  /  {Path(path).name}")
-        if self.is_story_plan():
-            self.editor_stack.setCurrentWidget(self.story_plan_form)
-            self.story_plan_form.focus_field()
-        elif self._view_mode == "preview":
-            self.editor_stack.setCurrentWidget(self.preview_browser)
-            self._render_preview(reset_scroll=True)
-            self.preview_browser.setFocus()
-        else:
-            self.editor_stack.setCurrentWidget(self.text_edit)
-            self.text_edit.setFocus()
+        self._show_loaded_surface()
         self._update_stats()
         self.document_loaded.emit()
 
@@ -451,9 +552,12 @@ class Editor(QWidget):
         self._loading = False
         self._current_path = None
         self._current_category = ""
+        self._chapter_doc = None
+        self._hide_chapter_chrome()
         self.source_button.show()
         self.preview_button.show()
         self.footer.show()
+        self.format_label.show()
         self.editor_stack.setCurrentWidget(self.text_edit)
         self._loaded_file_revision = None
         self.title_label.setText(message)
@@ -564,7 +668,8 @@ class Editor(QWidget):
 
     def append_chapter_body(self, text: str) -> None:
         """Append one continuation inside ``## 正文`` as one undoable edit."""
-        self.set_view_mode("source")
+        if not self.is_writing_page_visible():
+            self.set_view_mode("source")
         continuation = str(text or "").strip()
         if not continuation:
             return
@@ -584,10 +689,13 @@ class Editor(QWidget):
         cursor.endEditBlock()
         self.text_edit.setTextCursor(cursor)
         self.text_edit.ensureCursorVisible()
+        if self.is_writing_page_visible():
+            self.writing_page.focus_body_end()
 
     def replace_chapter_body(self, text: str) -> None:
         """Replace only the current chapter's ``## 正文`` section."""
-        self.set_view_mode("source")
+        if not self.is_writing_page_visible():
+            self.set_view_mode("source")
         raw = self.text_edit.toPlainText()
         body = str(text or "").strip()
         replacement = NovelProject.replace_chapter_body(raw, body)
@@ -596,9 +704,15 @@ class Editor(QWidget):
         cursor.movePosition(QTextCursor.MoveOperation.End)
         self.text_edit.setTextCursor(cursor)
         self.text_edit.ensureCursorVisible()
+        if self.is_writing_page_visible():
+            self.writing_page.focus_body_end()
 
     def reveal_range(self, start: int, end: int) -> bool:
         """Select and reveal a zero-based character range in the editor."""
+        source = self.text_edit.toPlainText()
+        if self._current_category == "章节" or self.is_writing_page_visible():
+            self._reveal_body(source, start, end)
+            return end > start
         self.set_view_mode("source")
         document_length = self.text_edit.document().characterCount() - 1
         start = max(0, min(int(start), document_length))
@@ -619,7 +733,8 @@ class Editor(QWidget):
         replacement: str,
     ) -> bool:
         """Replace one range only when its current text still matches exactly."""
-        self.set_view_mode("source")
+        if not self.is_writing_page_visible():
+            self.set_view_mode("source")
         current = self.text_edit.toPlainText()
         start = max(0, int(start))
         end = min(len(current), max(start, int(end)))
@@ -636,9 +751,11 @@ class Editor(QWidget):
     def show_find(self) -> None:
         if self.is_story_plan():
             return
-        self.set_view_mode("source")
+        if not self.is_writing_page_visible():
+            self.set_view_mode("source")
         self.find_bar.show()
-        selected = self.text_edit.textCursor().selectedText()
+        edit = self._active_edit()
+        selected = edit.textCursor().selectedText()
         if selected and "\u2029" not in selected and len(selected) < 100:
             self.find_input.setText(selected)
         self._schedule_match_count()
@@ -649,31 +766,30 @@ class Editor(QWidget):
         self._find_timer.stop()
         self.find_bar.hide()
         self._clear_find_highlights()
-        self.text_edit.setFocus()
+        self._active_edit().setFocus()
 
     def find_next(self) -> None:
-        needle = self.find_input.text()
-        if not needle:
-            return
-        if not self.text_edit.find(needle):
-            cursor = self.text_edit.textCursor()
-            cursor.movePosition(QTextCursor.MoveOperation.Start)
-            self.text_edit.setTextCursor(cursor)
-            self.text_edit.find(needle)
+        self._find(backward=False)
 
     def find_previous(self) -> None:
+        self._find(backward=True)
+
+    def _find(self, *, backward: bool) -> None:
         needle = self.find_input.text()
         if not needle:
             return
-        backward = QTextDocument.FindFlag.FindBackward
-        if not self.text_edit.find(needle, backward):
-            cursor = self.text_edit.textCursor()
-            cursor.movePosition(QTextCursor.MoveOperation.End)
-            self.text_edit.setTextCursor(cursor)
-            self.text_edit.find(needle, backward)
+        edit = self._active_edit()
+        flags = QTextDocument.FindFlag.FindBackward if backward else QTextDocument.FindFlag(0)
+        if edit.find(needle, flags):
+            return
+        cursor = edit.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End if backward else QTextCursor.MoveOperation.Start)
+        edit.setTextCursor(cursor)
+        edit.find(needle, flags)
 
     def replace_current(self) -> None:
-        cursor = self.text_edit.textCursor()
+        edit = self._active_edit()
+        cursor = edit.textCursor()
         if cursor.hasSelection() and cursor.selectedText() == self.find_input.text():
             cursor.insertText(self.replace_input.text())
         self.find_next()
@@ -683,10 +799,11 @@ class Editor(QWidget):
         needle = self.find_input.text()
         if not needle:
             return
-        text = self.text_edit.toPlainText()
+        edit = self._active_edit()
+        text = edit.toPlainText()
         count = text.count(needle)
         if count:
-            cursor = self.text_edit.textCursor()
+            cursor = edit.textCursor()
             cursor.beginEditBlock()
             cursor.select(QTextCursor.SelectionType.Document)
             cursor.insertText(text.replace(needle, self.replace_input.text()))
@@ -694,8 +811,17 @@ class Editor(QWidget):
         self.match_label.setText(f"已替换 {count} 处")
 
     def _on_text_changed(self) -> None:
-        if not self._loading:
-            self._set_dirty(True)
+        if self._loading:
+            self._stats_timer.start()
+            return
+        if self._applying_writing:
+            self._stats_timer.start()
+            if self.find_bar.isVisible():
+                self._schedule_match_count()
+            return
+        self._set_dirty(True)
+        if self._current_category == "章节":
+            self._refresh_open_chapter()
         self._stats_timer.start()
         if self.find_bar.isVisible():
             self._schedule_match_count()
@@ -733,10 +859,14 @@ class Editor(QWidget):
         label = calculate_editor_stats(measured)
         self._stats_revision = revision
         self.stats_label.setText(label)
+        self.body_count_label.setText(f"{count_content_chars(measured):,} 字")
         self.stats_changed.emit(label)
 
     def _update_cursor_status(self) -> None:
-        cursor = self.text_edit.textCursor()
+        if self.editor_stack.currentWidget() is self.preview_browser:
+            self.cursor_label.setText("只读预览")
+            return
+        cursor = self._active_edit().textCursor()
         self.cursor_label.setText(
             f"第 {cursor.blockNumber() + 1} 行，第 {cursor.positionInBlock() + 1} 列"
         )
@@ -751,12 +881,12 @@ class Editor(QWidget):
             self._clear_find_highlights()
             return
 
-        text = self.text_edit.toPlainText()
+        text = self._active_edit().toPlainText()
         count = text.count(needle)
         highlight_limit, suffix = find_highlight_config(len(text), count)
         self.match_label.setText(f"{count} 处{suffix}")
         selections = []
-        document = self.text_edit.document()
+        document = self._active_edit().document()
         cursor = QTextCursor(document)
         fmt = QTextCharFormat()
         fmt.setBackground(QColor("#C08A2E"))
@@ -768,10 +898,149 @@ class Editor(QWidget):
             selection.cursor = cursor
             selection.format = fmt
             selections.append(selection)
-        self.text_edit.setExtraSelections(selections)
+        self._active_edit().setExtraSelections(selections)
 
     def _clear_find_highlights(self) -> None:
         self.text_edit.setExtraSelections([])
+        self.writing_page.body_edit.setExtraSelections([])
+
+    def _show_loaded_surface(self) -> None:
+        self.footer.setVisible(not self.is_story_plan())
+        if self.is_story_plan():
+            self._chapter_doc = None
+            self._hide_chapter_chrome()
+            self.editor_stack.setCurrentWidget(self.story_plan_form)
+            self.story_plan_form.focus_field()
+            return
+        if self._current_category == "章节":
+            self._chapter_doc = parse_chapter_document(self.text_edit.toPlainText())
+            self._enter_writing_page(self._chapter_doc, reset_prep=True)
+            return
+        self._chapter_doc = None
+        self._hide_chapter_chrome()
+        if self._view_mode == "preview":
+            self.editor_stack.setCurrentWidget(self.preview_browser)
+            self._render_preview(reset_scroll=True)
+            self.preview_browser.setFocus()
+            return
+        self._view_mode = "source"
+        self.editor_stack.setCurrentWidget(self.text_edit)
+        self.source_button.setChecked(True)
+        self.text_edit.setFocus()
+
+    def _enter_writing_page(self, document, *, reset_prep: bool) -> None:
+        self._loading = True
+        self.writing_page.load(document, reset_prep=reset_prep)
+        self.title_edit.setText(document.title)
+        self._loading = False
+        self._view_mode = "writing"
+        verbatim = document.outline_mode == "verbatim"
+        self.title_edit.setVisible(not verbatim)
+        self.title_label.setVisible(verbatim)
+        self.body_count_label.show()
+        self.source_button.hide()
+        self.preview_button.hide()
+        self.format_label.hide()
+        self.editor_stack.setCurrentWidget(self.writing_page)
+        self.focus_writing_surface()
+        self._update_cursor_status()
+
+    def _show_source_controls(self) -> None:
+        self.title_edit.hide()
+        self.title_label.show()
+        self.source_button.show()
+        self.preview_button.show()
+        self.format_label.show()
+        self.body_count_label.hide()
+
+    def _hide_chapter_chrome(self) -> None:
+        self.title_edit.hide()
+        self.title_label.show()
+        self.body_count_label.hide()
+        self.format_label.setVisible(not self.is_story_plan())
+
+    def _on_writing_changed(self) -> None:
+        if self._loading or self._chapter_doc is None or not self.is_writing_page_visible():
+            return
+        current = self.writing_page.edits()
+        edits = ChapterEdits(
+            title=self.title_edit.text(),
+            goal=current.goal,
+            conflict=current.conflict,
+            hook=current.hook,
+            outline_rest=current.outline_rest,
+            outline_text=current.outline_text,
+            plot_brief=current.plot_brief,
+            body=current.body,
+            author_note=current.author_note,
+            extras=current.extras,
+        )
+        updated = compose_chapter(self._chapter_doc, edits)
+        if updated != self.text_edit.toPlainText():
+            self._applying_writing = True
+            self.text_edit.setPlainText(updated)
+            self._applying_writing = False
+            refreshed = parse_chapter_document(updated)
+            if refreshed.outline_mode != self._chapter_doc.outline_mode:
+                self._chapter_doc = refreshed
+                self._loading = True
+                self.writing_page.load(refreshed, reset_prep=True)
+                self.title_edit.setText(refreshed.title)
+                self.title_edit.setVisible(refreshed.outline_mode != "verbatim")
+                self.title_label.setVisible(refreshed.outline_mode == "verbatim")
+                self._loading = False
+            else:
+                self._chapter_doc = refreshed
+            self._set_dirty(True)
+        self._update_stats()
+
+    def _refresh_open_chapter(self) -> None:
+        if self._current_category != "章节":
+            return
+        document = parse_chapter_document(self.text_edit.toPlainText())
+        self._chapter_doc = document
+        if self.is_writing_page_visible():
+            self._loading = True
+            self.writing_page.load(document, reset_prep=False)
+            self.title_edit.setText(document.title)
+            self.title_edit.setVisible(document.outline_mode != "verbatim")
+            self.title_label.setVisible(document.outline_mode == "verbatim")
+            self._loading = False
+
+    def _active_edit(self) -> QPlainTextEdit:
+        if self.is_writing_page_visible():
+            return self.writing_page.body_edit
+        return self.text_edit
+
+    def _is_writing_input(self, widget) -> bool:
+        page = self.writing_page
+        return widget in {
+            self.title_edit,
+            page.body_edit,
+            page.plot_brief,
+            page.outline_text,
+            page.outline_rest,
+            page.author_note,
+            *page.fields.values(),
+            *(field for _name, field in page._extra_fields),
+        }
+
+    def _reveal_body(self, source: str, start: int, end: int) -> bool:
+        anchor = _body_anchor(source)
+        text = self.writing_page.body_edit.toPlainText()
+        if end <= anchor or start >= anchor + len(text):
+            return False
+        rel_start = max(0, int(start) - anchor)
+        rel_end = min(len(text), int(end) - anchor)
+        if rel_end <= rel_start:
+            return False
+        cursor = self.writing_page.body_edit.textCursor()
+        cursor.setPosition(len(text[:rel_start].encode("utf-16-le")) // 2)
+        cursor.setPosition(len(text[:rel_end].encode("utf-16-le")) // 2, QTextCursor.MoveMode.KeepAnchor)
+        self.writing_page.body_edit.setTextCursor(cursor)
+        self.writing_page.body_edit.ensureCursorVisible()
+        self.writing_page.body_edit.setFocus()
+        return True
 
     @staticmethod
     def _extract_title(content: str, path: Path) -> str:

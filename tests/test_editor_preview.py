@@ -33,7 +33,9 @@ class EditorPreviewTests(TestCase):
             self.addCleanup(editor.close)
             for _ in range(2):
                 editor.load_document(service.open_document(project, "章节", chapter))
-                self.assertIn("章节建议保留", editor.text_edit.placeholderText())
+                self.assertTrue(editor.is_writing_page_visible())
+                self.assertEqual(editor.writing_page.body_edit.placeholderText(), "从这里开始写这一章。")
+                self.assertNotIn("##", editor.writing_page.body_edit.toPlainText())
                 editor.load_document(service.open_document(project, "时间线", path))
                 self.assertEqual(editor.title_label.text(), "时间线笔记")
                 self.assertEqual(editor.text_edit.placeholderText(), "")
