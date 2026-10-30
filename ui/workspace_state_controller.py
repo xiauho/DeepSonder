@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QApplication
 
 from core.storage import atomic_write_text
 from ui.prose_width import reading_width_preferences
+from core.chapter_document import parse_chapter_document
 
 
 def fit_geometry(values, screens):
@@ -44,17 +45,22 @@ class WorkspaceStateController(QObject):
             self.data["projects"] = {}
         self._binding = None
         self._restoring = False
+        self._restore_generation = 0
         self.timer = QTimer(self)
         self.timer.setSingleShot(True)
         self.timer.setInterval(800)
         self.timer.timeout.connect(self.flush)
         editor = window.editor
-        window.project_session.project_about_to_change.connect(self.capture)
-        editor.document_about_to_change.connect(self.capture)
+        window.project_session.project_about_to_change.connect(self._before_document_change)
+        editor.document_about_to_change.connect(self._before_document_change)
         editor.document_loaded.connect(self.restore_document)
         editor.text_edit.cursorPositionChanged.connect(self.schedule)
         editor.text_edit.verticalScrollBar().valueChanged.connect(self.schedule)
         editor.text_edit.horizontalScrollBar().valueChanged.connect(self.schedule)
+        body = editor.writing_page.body_edit
+        body.cursorPositionChanged.connect(self.schedule)
+        body.selectionChanged.connect(self.schedule)
+        body.verticalScrollBar().valueChanged.connect(self.schedule)
         window.window_state_controller.panels_changed.connect(self.schedule)
         window.main_splitter.splitterMoved.connect(self.schedule)
         window.editor.writing_page.reading_width_changed.connect(self.schedule)
@@ -85,6 +91,10 @@ class WorkspaceStateController(QObject):
         if not self._restoring:
             self.timer.start()
 
+    def _before_document_change(self):
+        self.capture()
+        self._restore_generation += 1
+
     def capture(self):
         project = self.window.project
         if project is not None and not self._restoring:
@@ -114,6 +124,8 @@ class WorkspaceStateController(QObject):
         documents[relative] = {"cursor": cursor.position(), "anchor": cursor.anchor(),
             "scroll": editor.text_edit.verticalScrollBar().value(),
             "horizontal": editor.text_edit.horizontalScrollBar().value()}
+        if editor.is_writing_page_visible():
+            documents[relative]["prose"] = editor.writing_page.body_edit.reading_position()
         record.update(last=relative, documents=dict(list(documents.items())[-100:]))
         self.data["projects"].pop(root, None)
         self.data["projects"][root] = record
@@ -131,6 +143,8 @@ class WorkspaceStateController(QObject):
         root = str(project.root.resolve())
         self._binding = (root, relative, editor.current_path())
         binding = self._binding
+        self._restore_generation += 1
+        generation = self._restore_generation
         record = self.data["projects"].get(root, {})
         documents = record.get("documents", {}) if isinstance(record, dict) else {}
         state = documents.get(relative, {}) if isinstance(documents, dict) else {}
@@ -145,13 +159,24 @@ class WorkspaceStateController(QObject):
         cursor.setPosition(min(maximum, number("anchor")))
         cursor.setPosition(min(maximum, number("cursor")), QTextCursor.MoveMode.KeepAnchor)
         editor.text_edit.setTextCursor(cursor)
+        prose_state = state.get("prose")
+        body = editor.writing_page.body_edit
+        if editor.is_writing_page_visible():
+            if not isinstance(prose_state, dict):
+                source = editor.document_text()
+                offset = len(source[:parse_chapter_document(source).body_anchor].encode("utf-16-le")) // 2
+                prose_state = {"cursor": max(0, number("cursor") - offset),
+                               "anchor": max(0, number("anchor") - offset), "top_position": 0}
+            body.restore_reading_position(prose_state)
         self._restoring = False
         def scroll():
-            if self._binding != binding or editor.current_path() != binding[2]:
+            if self._restore_generation != generation or self._binding != binding or editor.current_path() != binding[2]:
                 return
             self._restoring = True
             editor.text_edit.verticalScrollBar().setValue(number("scroll"))
             editor.text_edit.horizontalScrollBar().setValue(number("horizontal"))
+            if editor.is_writing_page_visible() and isinstance(prose_state, dict):
+                body.restore_reading_position(prose_state, selection=False)
             self._restoring = False
             self.schedule()
         QTimer.singleShot(0, self, scroll)

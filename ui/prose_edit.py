@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import math
 
-from PySide6.QtCore import QPointF
+from PySide6.QtCore import QEvent, QPoint, QPointF
+from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import QPlainTextDocumentLayout, QPlainTextEdit
 
 
@@ -54,6 +55,79 @@ class ProseTextEdit(QPlainTextEdit):
         self.spacing_layout = SpacedPlainTextLayout(self.document())
         self.document().setDocumentLayout(self.spacing_layout)
         self._requested_factor = 1.0
+        self._restoring_view = False
+        self._loading_view = False
+        self._reflowing = False
+        self._capturing_anchor = False
+        self._reading_cursor = QTextCursor(self.document())
+        self.verticalScrollBar().valueChanged.connect(self._track_reading_anchor)
+
+    def _track_reading_anchor(self, *_args) -> None:
+        if self._restoring_view or self._loading_view or self._reflowing or self._capturing_anchor:
+            return
+        self._capturing_anchor = True
+        try:
+            self._reading_cursor.setPosition(self.cursorForPosition(QPoint(0, 0)).position())
+        finally:
+            self._capturing_anchor = False
+
+    def reading_anchor(self) -> int:
+        return self._reading_cursor.position()
+
+    def restore_reading_anchor(self, position: int) -> None:
+        if self._restoring_view:
+            return
+        self._restoring_view = True
+        try:
+            document = self.document()
+            position = max(0, min(document.characterCount() - 1, position))
+            self._reading_cursor.setPosition(position)
+            block = document.findBlock(position)
+            self.blockBoundingRect(block)
+            line = block.layout().lineForTextPosition(position - block.position())
+            visual_line = line.lineNumber() if line.isValid() else 0
+            self.verticalScrollBar().setValue(block.firstLineNumber() + visual_line)
+        finally:
+            self._restoring_view = False
+
+    def reading_position(self) -> dict:
+        cursor = self.textCursor()
+        return {"cursor": cursor.position(), "anchor": cursor.anchor(), "top_position": self.reading_anchor()}
+
+    def restore_reading_position(self, state: dict, *, selection=True) -> None:
+        maximum = self.document().characterCount() - 1
+        def bounded(key):
+            value = state.get(key, 0)
+            return max(0, min(maximum, value)) if type(value) is int else 0
+        if selection:
+            cursor = self.textCursor()
+            cursor.setPosition(bounded("anchor"))
+            cursor.setPosition(bounded("cursor"), QTextCursor.MoveMode.KeepAnchor)
+            self.setTextCursor(cursor)
+        self.restore_reading_anchor(bounded("top_position"))
+
+    def resizeEvent(self, event):  # noqa: N802 - Qt virtual
+        anchor = self.reading_anchor() if hasattr(self, "_restoring_view") and not self._loading_view else None
+        previous = getattr(self, "_reflowing", False)
+        self._reflowing = True
+        try:
+            super().resizeEvent(event)
+        finally:
+            self._reflowing = previous
+        if anchor is not None:
+            self.restore_reading_anchor(anchor)
+
+    def changeEvent(self, event):  # noqa: N802 - Qt virtual
+        anchor = (self.reading_anchor() if event.type() in (QEvent.Type.FontChange, QEvent.Type.StyleChange)
+                  and hasattr(self, "_restoring_view") and not self._loading_view else None)
+        previous = getattr(self, "_reflowing", False)
+        self._reflowing = True
+        try:
+            super().changeEvent(event)
+        finally:
+            self._reflowing = previous
+        if anchor is not None:
+            self.restore_reading_anchor(anchor)
 
     def line_spacing(self) -> float:
         return self._requested_factor
@@ -68,9 +142,9 @@ class ProseTextEdit(QPlainTextEdit):
         self._requested_factor = factor
         if self._has_preedit() or factor == self.spacing_layout.factor:
             return
-        scroll = self.verticalScrollBar().value()
+        anchor = self.reading_anchor()
         self.spacing_layout.set_factor(factor)
-        self.verticalScrollBar().setValue(scroll)
+        self.restore_reading_anchor(anchor)
         self.viewport().update()
 
     def inputMethodEvent(self, event):  # noqa: N802 - Qt virtual
@@ -79,13 +153,25 @@ class ProseTextEdit(QPlainTextEdit):
             self.set_line_spacing(self._requested_factor)
 
     def setPlainText(self, text):  # noqa: N802 - Qt API
-        super().setPlainText(text)
+        self._loading_view = True
+        try:
+            super().setPlainText(text)
+        finally:
+            self._loading_view = False
+        if hasattr(self, "_reading_cursor"):
+            self._reading_cursor.setPosition(0)
         # A document load can clear composition without a final IME event.
         # Apply its pending display preference to the newly loaded document.
         if hasattr(self, "_requested_factor"):
             self.set_line_spacing(self._requested_factor)
 
     def clear(self):
-        super().clear()
+        self._loading_view = True
+        try:
+            super().clear()
+        finally:
+            self._loading_view = False
+        if hasattr(self, "_reading_cursor"):
+            self._reading_cursor.setPosition(0)
         if hasattr(self, "_requested_factor"):
             self.set_line_spacing(self._requested_factor)

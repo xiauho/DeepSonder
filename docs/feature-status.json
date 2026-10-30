@@ -114,7 +114,7 @@
       "id": "workspace.persistent_layout_and_reading_position",
       "requirement": "required",
       "status": "supported",
-      "notes": "Profile-local window geometry, sidebar preferences and per-project document/cursor/scroll restoration; missing-document fallback."
+      "notes": "界面偏好保存窗口、侧栏和每个项目的文档位置；章节额外保存真实正文的光标、反向选区和字符阅读锚点。切章及重启恢复实际正文，字号、行距和行宽重排使用持久字符锚点，避免连续重排累计漂移。旧内部文本偏移按正文起点和UTF-16位置转换；损坏及缩短文档的位置限制在有效范围，延迟恢复绑定文档代次。偏好不保存正文，不修改草稿、撤销、修订或保存错误；缺失文档回退保持。"
     },
     {
       "id": "workspace.actionable_ai_availability",

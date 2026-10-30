@@ -21,6 +21,13 @@ from ui.main_window import MainWindow
 
 
 class TypographyConfigTests(TestCase):
+    def test_bundled_example_is_a_current_new_profile(self):
+        example = json.loads((Path(__file__).resolve().parents[1] / "config.example.json").read_text(encoding="utf-8"))
+        normalized = normalize_config(example)
+        self.assertEqual(example["config_schema_version"], CONFIG_SCHEMA_VERSION)
+        self.assertEqual((normalized["editor_font_size"], normalized["editor_line_spacing"]), (18, 1.8))
+        self.assertEqual(normalized["theme"], "light")
+
     def test_new_profile_uses_recommended_defaults_without_writing_a_file(self):
         with TemporaryDirectory() as temporary:
             target = Path(temporary) / "profile.json"
