@@ -1,4 +1,4 @@
-"""Render the isolated prototype on a temporary chapter, never a user project.
+"""Render the production spacing editor on a temporary chapter, never a user project.
 
 Example (set QT_SCALE_FACTOR before launching for each scale):
     python scripts/validate_prose_spacing.py --output output/ui-implementation-spacing
@@ -13,7 +13,6 @@ from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
 from time import perf_counter
-from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -29,7 +28,7 @@ from core.config import DEFAULT_CONFIG
 from core.project import NovelProject
 from core.task_context import AIContextSnapshot
 from core.theme_tokens import DARK_COLORS, LIGHT_COLORS
-from scripts.prototypes.prose_spacing import SpacedProseEdit
+from ui.prose_edit import ProseTextEdit
 from ui.editor import Editor
 from ui.theme import apply_theme
 
@@ -59,8 +58,7 @@ def main():
         path = project.chapters_dir / "chapter_01.md"
         original = path.read_bytes()
         snapshot = DocumentService().open_document(project, "章节", path)
-        with patch("ui.chapter_writing_page.QPlainTextEdit", SpacedProseEdit):
-            editor = Editor()
+        editor = Editor()
         try:
             # Match the real shell's opaque appRoot surface when capturing an
             # Editor alone; otherwise its transparent top level grabs black.
@@ -110,7 +108,7 @@ def main():
             editor.close()
             editor.deleteLater()
         # Record actual local costs; no timing threshold tied to a machine.
-        probe = SpacedProseEdit()
+        probe = ProseTextEdit()
         probe.resize(760, 600)
         probe.show()
         try:
@@ -130,7 +128,7 @@ def main():
             probe.close()
             probe.deleteLater()
     report = {"pyside": pyside_version, "scale": scale, "cases": cases, "timings": timings,
-              "source_unchanged": True, "production_integration": False,
+              "source_unchanged": True, "production_integration": True,
               "ime_scope": "synthetic QInputMethodEvent tests; native candidate window not verified"}
     (output / f"layout-scale{scale}.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({"cases": len(cases), "scale": scale, "timings": timings}, ensure_ascii=False))

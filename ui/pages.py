@@ -8,6 +8,8 @@ from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QAbstractSpinBox,
+    QDoubleSpinBox,
     QFormLayout,
     QFrame,
     QGridLayout,
@@ -33,6 +35,7 @@ from core.config import (
     normalize_config,
 )
 from core.history_context import resolve_history_count, history_token_budget
+from core.typography import RECOMMENDED_PROSE_FONT_SIZE, RECOMMENDED_PROSE_LINE_SPACING
 from core.context_capacity import (
     CONTEXT_STRATEGY_BALANCED,
     CONTEXT_STRATEGY_COMPATIBLE,
@@ -50,7 +53,8 @@ from core.project_data import ProjectDataStore
 from core.text_metrics import count_content_chars
 from ui.export_controller import ExportController
 from ui.icons import IconTextButton
-from ui.theme import DARK_COLORS, LIGHT_COLORS
+from ui.theme import DARK_COLORS, LIGHT_COLORS, PROSE_FONT_FAMILIES
+from ui.prose_edit import ProseTextEdit
 
 
 def _words(text: str) -> int:
@@ -844,6 +848,7 @@ class SettingsPage(QWidget):
     """Application settings with one explicit DeepSeek Harness integration."""
 
     save_requested = Signal(object)
+    draft_changed = Signal(bool)
     test_requested = Signal(object)
 
     def __init__(self, config: dict, parent=None):
@@ -896,6 +901,38 @@ class SettingsPage(QWidget):
         self.editor_font_size = QSpinBox()
         self.editor_font_size.setRange(12, 36)
         self.editor_font_size.setSuffix(" px")
+        self.editor_line_spacing = QDoubleSpinBox()
+        self.editor_line_spacing.setRange(1.0, 2.4)
+        self.editor_line_spacing.setDecimals(1)
+        self.editor_line_spacing.setSingleStep(0.1)
+        self.editor_line_spacing.setSuffix(" 倍")
+        self.editor_line_spacing.setToolTip("1.0 为自然行距；只调整章节正文的显示。")
+        preview_host = QWidget()
+        preview_layout = QVBoxLayout(preview_host)
+        preview_layout.setContentsMargins(0, 0, 0, 0)
+        preview_layout.setSpacing(8)
+        self.typography_preview = ProseTextEdit()
+        self.typography_preview.setObjectName("proseTypographyPreview")
+        self.typography_preview.setReadOnly(True)
+        self.typography_preview.setAccessibleName("正文排版预览")
+        self.typography_preview.setMinimumWidth(0)
+        self.typography_preview.setMinimumHeight(180)
+        self.typography_preview.setMaximumHeight(220)
+        self.typography_preview.setPlainText(
+            "旧站的灯还亮着。林舟推开门，潮湿的风跟着他走进大厅。"
+            "远处传来列车的鸣笛，像是有人终于回答了多年前的问题。\n\n"
+            "他把那封信放在窗边，望向山后的灯塔。")
+        preview_layout.addWidget(self.typography_preview)
+        preview_hint = QLabel("在此预览，保存设置后应用到正文。")
+        preview_hint.setObjectName("mutedLabel")
+        preview_hint.setWordWrap(True)
+        preview_layout.addWidget(preview_hint)
+        self.typography_reset = QPushButton("恢复推荐排版")
+        self.typography_reset.setObjectName("ghostButton")
+        self.typography_reset.clicked.connect(self._restore_typography)
+        preview_layout.addWidget(self.typography_reset, 0, Qt.AlignmentFlag.AlignLeft)
+        self.editor_font_size.valueChanged.connect(self._update_typography_preview)
+        self.editor_line_spacing.valueChanged.connect(self._update_typography_preview)
         self.chapter_target_chars = QSpinBox()
         self.chapter_target_chars.setRange(
             CHAPTER_TARGET_CHARS_MIN,
@@ -927,6 +964,8 @@ class SettingsPage(QWidget):
         writing_form.addRow("自动保存", self.auto_save)
         writing_form.addRow("保存间隔", self.auto_save_interval)
         writing_form.addRow("正文字号", self.editor_font_size)
+        writing_form.addRow("正文行距", self.editor_line_spacing)
+        writing_form.addRow("排版预览", preview_host)
         writing_form.addRow("目标章节字数", self.chapter_target_chars)
         writing_form.addRow("AI 创作前文参考", self.ai_history_mode)
         writing_form.addRow("自定义最近章节数", self.ai_context_history_chapters)
@@ -1132,16 +1171,27 @@ class SettingsPage(QWidget):
         self.ai_history_mode.currentIndexChanged.connect(self._update_context_budget_preview)
         self.ai_context_history_chapters.valueChanged.connect(self._update_context_budget_preview)
         self.history_remote.toggled.connect(self._update_context_budget_preview)
-        self._fields = self.findChildren(QLineEdit) + self.findChildren(QSpinBox) + self.findChildren(QComboBox) + self.findChildren(QCheckBox)
+        self._fields = self.findChildren(QLineEdit) + self.findChildren(QSpinBox) + self.findChildren(QDoubleSpinBox) + self.findChildren(QComboBox) + self.findChildren(QCheckBox)
         # Spin-box line edits are implementation details, not independent fields.
-        self._fields = [field for field in self._fields if not (isinstance(field, QLineEdit) and isinstance(field.parent(), QSpinBox))]
+        self._fields = [field for field in self._fields if not (isinstance(field, QLineEdit) and isinstance(field.parent(), QAbstractSpinBox))]
         for field in self._fields:
-            signal = field.textChanged if isinstance(field, QLineEdit) else field.valueChanged if isinstance(field, QSpinBox) else field.currentIndexChanged if isinstance(field, QComboBox) else field.toggled
+            signal = field.textChanged if isinstance(field, QLineEdit) else field.valueChanged if isinstance(field, (QSpinBox, QDoubleSpinBox)) else field.currentIndexChanged if isinstance(field, QComboBox) else field.toggled
             signal.connect(self._update_draft)
         self.set_config(config)
 
     def _snapshot(self):
-        return tuple(field.text() if isinstance(field, QLineEdit) else field.value() if isinstance(field, QSpinBox) else field.currentData() if isinstance(field, QComboBox) else field.isChecked() for field in self._fields)
+        return tuple(field.text() if isinstance(field, QLineEdit) else field.value() if isinstance(field, (QSpinBox, QDoubleSpinBox)) else field.currentData() if isinstance(field, QComboBox) else field.isChecked() for field in self._fields)
+
+    def _update_typography_preview(self, *_args):
+        self.typography_preview.setStyleSheet(
+            "QPlainTextEdit#proseTypographyPreview {"
+            f"font-size: {self.editor_font_size.value()}px; font-family: {PROSE_FONT_FAMILIES};"
+            "padding: 12px 16px; }")
+        self.typography_preview.set_line_spacing(self.editor_line_spacing.value())
+
+    def _restore_typography(self):
+        self.editor_font_size.setValue(RECOMMENDED_PROSE_FONT_SIZE)
+        self.editor_line_spacing.setValue(RECOMMENDED_PROSE_LINE_SPACING)
 
     def has_unsaved_changes(self):
         return hasattr(self, "_baseline") and self._snapshot() != self._baseline
@@ -1156,6 +1206,7 @@ class SettingsPage(QWidget):
         self.feedback.style().unpolish(self.feedback)
         self.feedback.style().polish(self.feedback)
         self.feedback.setText(self._save_error or ("有未保存的修改；切换页面会保留草稿，保存后生效。" if dirty else "设置已保存"))
+        self.draft_changed.emit(dirty)
 
     def show_save_error(self, message):
         self._save_error = "设置保存失败：" + str(message)
@@ -1177,7 +1228,9 @@ class SettingsPage(QWidget):
         self._latest_config = dict(config)
         self.auto_save.setChecked(bool(config.get("auto_save", True)))
         self.auto_save_interval.setValue(int(config.get("auto_save_interval", 30)))
-        self.editor_font_size.setValue(int(config.get("editor_font_size", 16)))
+        self.editor_font_size.setValue(config["editor_font_size"])
+        self.editor_line_spacing.setValue(config["editor_line_spacing"])
+        self._update_typography_preview()
         self.chapter_target_chars.setValue(
             int(
                 config.get(
@@ -1291,6 +1344,7 @@ class SettingsPage(QWidget):
                 "auto_save": self.auto_save.isChecked(),
                 "auto_save_interval": self.auto_save_interval.value(),
                 "editor_font_size": self.editor_font_size.value(),
+                "editor_line_spacing": self.editor_line_spacing.value(),
                 "chapter_target_chars": self.chapter_target_chars.value(),
                 "ai_context_history_chapters": self.ai_context_history_chapters.value(),
                 "ai_history_mode": self.ai_history_mode.currentData(),

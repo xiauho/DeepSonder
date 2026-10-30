@@ -8,6 +8,9 @@ from PySide6.QtGui import QColor, QPalette
 
 from core.resources import resource_path
 from core.theme_tokens import DARK_COLORS, LIGHT_COLORS
+from core.typography import prose_font_size
+
+PROSE_FONT_FAMILIES = '"Microsoft YaHei UI", "Source Serif 4", "霞鹜文楷", "LXGW WenKai", sans-serif'
 
 QSS_TEMPLATE = r"""
 * {
@@ -371,10 +374,11 @@ QPlainTextEdit#writingEditor, QTextBrowser#markdownPreview {
     padding: 24px 32px;
     selection-background-color: __PRIMARY__;
     selection-color: __ACCENT_TEXT__;
-    font-family: "Microsoft YaHei UI", "Source Serif 4", "霞鹜文楷", "LXGW WenKai", sans-serif;
+    font-family: __PROSE_FONT_FAMILIES__;
     font-size: __EDITOR_FONT_SIZE__px;
 }
 QPlainTextEdit#writingEditor:focus, QTextBrowser#markdownPreview:focus { border-color: __ACCENT__; }
+QPlainTextEdit#proseTypographyPreview { background: __FIELD__; color: __TEXT__; border: 1px solid __BORDER__; border-radius: 8px; }
 QWidget#chapterWritingPage { background: __PANEL__; }
 QToolButton#proseWidthHandle { background: transparent; border: none; color: __MUTED__; padding: 0; min-width: 0; }
 QToolButton#proseWidthHandle:hover { color: __ACCENT__; background: __HOVER__; }
@@ -818,10 +822,7 @@ def build_qss(config: dict | None = None) -> str:
         font_size = max(10, min(26, int(config.get("ui_font_size", 14) or 14)))
     except (TypeError, ValueError):
         font_size = 14
-    try:
-        editor_size = max(12, min(36, int(config.get("editor_font_size", 16) or 16)))
-    except (TypeError, ValueError):
-        editor_size = 16
+    editor_size = prose_font_size(config.get("editor_font_size"))
     accent_text = colors["primary_text_color"]
     asset_root = resource_path("assets")
     replacements = {
@@ -829,6 +830,7 @@ def build_qss(config: dict | None = None) -> str:
         "__SMALL_FONT_SIZE__": str(max(10, font_size - 2)),
         "__CANON_TITLE_SIZE__": str(font_size + 2),
         "__EDITOR_FONT_SIZE__": str(editor_size),
+        "__PROSE_FONT_FAMILIES__": PROSE_FONT_FAMILIES,
         "__TREE_ITEM_HEIGHT__": str(max(30, font_size + 15)),
         "__BG__": colors["background_color"],
         "__PANEL__": colors["panel_color"],

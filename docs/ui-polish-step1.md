@@ -2,6 +2,8 @@
 
 日期：2026-10-30。基线提交：`d90f700`。
 
+本文记录最初的隔离原型验证；该实现现已转为正式组件，接入与迁移情况见[第四步排版设置](ui-prose-typography.md)。
+
 ## 结论与范围
 
 已验证一条可继续接入的纯显示行距路径：保留 `QPlainTextEdit`，使用 `QPlainTextDocumentLayout` 子类调整视觉行的位置和块边界，不修改 `QTextBlockFormat` 或正文。

@@ -28,6 +28,7 @@ from core.chapter_document import ChapterEdits, compose_chapter, parse_chapter_d
 from core.chapter_sections import chapter_body_bounds, chapter_body_text
 from core.project import NovelProject
 from core.storage import atomic_write_text
+from core.typography import prose_line_spacing
 from core.text_metrics import count_content_chars
 from ui.icons import set_button_icon
 from ui.elided_label import ElidedLabel
@@ -456,6 +457,7 @@ class Editor(QWidget):
     def set_theme(self, config: dict | None = None) -> None:
         """Refresh theme-aware document CSS without changing the source."""
         self._theme_config = dict(config or {"theme": "light"})
+        self.writing_page.body_edit.set_line_spacing(prose_line_spacing(self._theme_config.get("editor_line_spacing")))
         self.preview_browser.document().setDefaultStyleSheet(
             document_css(self._theme_config)
         )

@@ -12,6 +12,11 @@ from .app_paths import app_config_dir
 from .theme_tokens import DARK_COLORS, LIGHT_COLORS, PREVIOUS_DARK_COLORS, PREVIOUS_LIGHT_COLORS
 from .storage import atomic_write_text
 from .memory_task import DEFAULT_MEMORY_TIMEOUT
+from .typography import (
+    RECOMMENDED_PROSE_FONT_SIZE, RECOMMENDED_PROSE_LINE_SPACING,
+    LEGACY_PROSE_FONT_SIZE, LEGACY_PROSE_LINE_SPACING,
+    prose_font_size, prose_line_spacing,
+)
 from .token_budget import (
     DEFAULT_CHUNK_OVERLAP_TOKENS,
     DEFAULT_CHUNK_TOKEN_BUDGET,
@@ -32,7 +37,7 @@ AI_CONTEXT_HISTORY_CHAPTERS_MAX = 200
 CHAPTER_TARGET_CHARS_DEFAULT = 3000
 CHAPTER_TARGET_CHARS_MIN = 300
 CHAPTER_TARGET_CHARS_MAX = 10_000
-CONFIG_SCHEMA_VERSION = 6
+CONFIG_SCHEMA_VERSION = 7
 DSH_FILE_PROMPT_BUDGET_MIN = MIN_FILE_PROMPT_CHARS
 DSH_FILE_PROMPT_BUDGET_MAX = 300_000
 _DEFAULT_CONTEXT_CAPACITY = derive_context_capacity(
@@ -65,7 +70,8 @@ DEFAULT_CONFIG = {
     "theme": "light",
     "ui_language": "zh-CN",
     "ui_font_size": 14,
-    "editor_font_size": 16,
+    "editor_font_size": RECOMMENDED_PROSE_FONT_SIZE,
+    "editor_line_spacing": RECOMMENDED_PROSE_LINE_SPACING,
     **LIGHT_COLORS,
     # Writing preferences
     "auto_save": True,
@@ -151,6 +157,11 @@ def _merge_config(config: dict, path: Path) -> bool:
                 )
             if "config_schema_version" not in data:
                 config["config_schema_version"] = 0
+            # Preserve raw key presence for typography migration: defaults
+            # merged above must not replace an absent legacy preference.
+            for key in ("editor_font_size", "editor_line_spacing"):
+                if key not in data:
+                    config.pop(key, None)
             # Defaults are merged before persisted values. Preserve the raw
             # key-presence rule needed by the v0 -> v1 rename.
             if "chapter_target_chars" not in data:
@@ -251,10 +262,8 @@ def _normalize_config(config: dict[str, Any]) -> None:
         config["ui_font_size"] = max(10, min(22, int(config.get("ui_font_size", 14))))
     except (TypeError, ValueError):
         config["ui_font_size"] = 14
-    try:
-        config["editor_font_size"] = max(12, min(36, int(config.get("editor_font_size", 16))))
-    except (TypeError, ValueError):
-        config["editor_font_size"] = 16
+    config["editor_font_size"] = prose_font_size(config.get("editor_font_size"))
+    config["editor_line_spacing"] = prose_line_spacing(config.get("editor_line_spacing"))
     try:
         config["auto_save_interval"] = max(5, min(600, int(config.get("auto_save_interval", 30))))
     except (TypeError, ValueError):
@@ -347,6 +356,11 @@ def _migrate_config_schema(config: dict[str, Any], schema: int) -> int:
             config.pop("expand_target_chars", None)
             config.pop("continue_target_chars", None)
             schema = 6
+            continue
+        if schema == 6:
+            config["editor_font_size"] = prose_font_size(config.get("editor_font_size"), LEGACY_PROSE_FONT_SIZE)
+            config["editor_line_spacing"] = prose_line_spacing(config.get("editor_line_spacing"), LEGACY_PROSE_LINE_SPACING)
+            schema = 7
             continue
         raise ValueError(
             f"缺少从配置格式 {schema} 到 {schema + 1} 的迁移步骤。"

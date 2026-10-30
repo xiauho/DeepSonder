@@ -1,4 +1,4 @@
-"""Safety gate for the isolated line-spacing experiment, not a shipped setting."""
+"""Safety gates carried forward from the isolated line-spacing experiment."""
 
 import os
 from pathlib import Path
@@ -18,7 +18,7 @@ from core.config import DEFAULT_CONFIG
 from core.project import NovelProject
 from core.task_context import AIContextSnapshot
 from core.theme_tokens import DARK_COLORS, LIGHT_COLORS
-from scripts.prototypes.prose_spacing import SpacedProseEdit
+from ui.prose_edit import ProseTextEdit as SpacedProseEdit
 from ui.editor import Editor
 from ui.theme import apply_theme
 
@@ -261,10 +261,7 @@ class ProseSpacingPrototypeTests(TestCase):
             original = path.read_bytes()
             service = DocumentService()
             snapshot = service.open_document(project, "章节", path)
-            # Test-only substitution; the application still instantiates the
-            # standard QPlainTextEdit in every production code path.
-            with patch("ui.chapter_writing_page.QPlainTextEdit", SpacedProseEdit):
-                editor = Editor()
+            editor = Editor()
             try:
                 editor.resize(1000, 700)
                 editor.show()

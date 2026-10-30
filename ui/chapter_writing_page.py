@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 
 from core.chapter_document import ChapterDocument, ChapterEdits, rejection_reason
 from ui.elided_label import ElidedLabel
+from ui.prose_edit import ProseTextEdit
 from ui.prose_width import DEFAULT_PROSE_WIDTH, MIN_PROSE_WIDTH, MAX_PROSE_WIDTH, PROSE_WIDTH_MODES, ProseWidthHandle
 
 
@@ -97,7 +98,7 @@ class ChapterWritingPage(QWidget):
         self.notice.hide()
         layout.addWidget(self.notice)
 
-        self.body_edit = QPlainTextEdit()
+        self.body_edit = ProseTextEdit()
         self.body_edit.setObjectName("writingEditor")
         self.body_edit.setProperty("chapterProse", True)
         self.body_edit.installEventFilter(self)

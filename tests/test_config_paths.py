@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from core.app_paths import app_cache_dir, app_config_dir
 from core.config import (
+    CONFIG_SCHEMA_VERSION,
     get_chapter_target_chars,
     load_config,
     normalize_config,
@@ -73,7 +74,7 @@ class ConfigMigrationTests(TestCase):
 
             self.assertEqual(loaded["chapter_target_chars"], 4200)
             self.assertNotIn("expand_target_chars", loaded)
-            self.assertEqual(loaded["config_schema_version"], 6)
+            self.assertEqual(loaded["config_schema_version"], CONFIG_SCHEMA_VERSION)
 
     def test_legacy_install_config_is_not_consumed(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -108,7 +109,7 @@ class ConfigMigrationTests(TestCase):
 
             saved = json.loads(target.read_text(encoding="utf-8"))
             self.assertEqual(saved["theme"], "dark")
-            self.assertEqual(saved["config_schema_version"], 6)
+            self.assertEqual(saved["config_schema_version"], CONFIG_SCHEMA_VERSION)
 
     def test_retired_update_preferences_are_removed(self) -> None:
         config = normalize_config(

@@ -45,7 +45,7 @@ from core.character_card_sync import (
     apply_character_card_sync,
     build_character_card_sync_proposal,
 )
-from core.config import get_chapter_target_chars, load_config
+from core.config import get_chapter_target_chars, load_config, normalize_config
 from core.continuation import MIN_CONTINUATION_CHARS
 from core.project import NovelProject
 from core.project_data import ChapterIdConflictError, ProjectDataStore, sanitize_filename
@@ -111,7 +111,7 @@ class MainWindow(QMainWindow):
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
         self.project_session = ProjectSession(self)
         self.ai_controller = AIController(self)
-        self.config = dict(config) if config is not None else load_config()
+        self.config = normalize_config(config) if config is not None else load_config()
         self.project_setup_dialog: ProjectSetupDialog | None = None
         self.legacy_import_service = LegacyProjectImportService()
         self.ai_engine_controller = AIEngineController(
@@ -849,6 +849,7 @@ class MainWindow(QMainWindow):
         self.reports_page.repair_requested.connect(self.ai_workflow_controller.repair_issue)
         self.export_page.export_requested.connect(self.export_manuscript)
         self.settings_page.save_requested.connect(self._apply_settings)
+        self.settings_page.draft_changed.connect(self._on_settings_draft_changed)
         self.settings_page.test_requested.connect(self._test_dsh)
         self.settings_controller.config_changed.connect(self._on_settings_changed)
         self.settings_controller.connection_started.connect(self._on_dsh_test_started)
@@ -2286,6 +2287,10 @@ class MainWindow(QMainWindow):
         self._update_page_header(self.window_state_controller.current_route)
         self._refresh_ai_actions()
         self.status_message.setText(message)
+
+    def _on_settings_draft_changed(self, dirty: bool) -> None:
+        if dirty and self.status_message.text() == "设置已保存":
+            self.status_message.clear()
 
     def _test_dsh(self, config: object) -> None:
         if not isinstance(config, dict):
