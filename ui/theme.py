@@ -376,6 +376,9 @@ QPlainTextEdit#writingEditor, QTextBrowser#markdownPreview {
 }
 QPlainTextEdit#writingEditor:focus, QTextBrowser#markdownPreview:focus { border-color: __ACCENT__; }
 QWidget#chapterWritingPage { background: __PANEL__; }
+QToolButton#proseWidthHandle { background: transparent; border: none; color: __MUTED__; padding: 0; min-width: 0; }
+QToolButton#proseWidthHandle:hover { color: __ACCENT__; background: __HOVER__; }
+QToolButton#proseWidthHandle:focus { color: __ACCENT__; border: 1px solid __ACCENT__; }
 QPlainTextEdit#writingEditor[chapterProse="true"] {
     border: 1px solid transparent;
     border-bottom: 1px solid __BORDER__;

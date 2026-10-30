@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QTimer, Qt, Signal
+from PySide6.QtCore import QEvent, QPoint, QTimer, Qt, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 
 from core.chapter_document import ChapterDocument, ChapterEdits, rejection_reason
 from ui.elided_label import ElidedLabel
+from ui.prose_width import DEFAULT_PROSE_WIDTH, MIN_PROSE_WIDTH, MAX_PROSE_WIDTH, PROSE_WIDTH_MODES, ProseWidthHandle
 
 
 _FIELDS = (
@@ -29,6 +30,8 @@ class ChapterWritingPage(QWidget):
     """Editable chapter view. Callers own the Markdown and decide when to save it."""
 
     changed = Signal()
+    reading_width_changed = Signal()
+    width_value_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -38,7 +41,9 @@ class ChapterWritingPage(QWidget):
         self._outline_mode = "fields"
         self._author_present = False
         self._prep_expanded = True
-        self._comfortable_width = True
+        self._width_mode = "recommended"
+        self._custom_width = DEFAULT_PROSE_WIDTH
+        self._width_drag = None
         self._column_timer = QTimer(self)
         self._column_timer.setSingleShot(True)
         self._column_timer.timeout.connect(self._layout_reading_column)
@@ -96,6 +101,8 @@ class ChapterWritingPage(QWidget):
         self.body_edit.setObjectName("writingEditor")
         self.body_edit.setProperty("chapterProse", True)
         self.body_edit.installEventFilter(self)
+        self.body_edit.viewport().installEventFilter(self)
+        self.body_edit.verticalScrollBar().installEventFilter(self)
         self.body_edit.setPlaceholderText("从这里开始写这一章。")
         self.body_edit.setAccessibleName("正文")
         layout.addWidget(self.body_edit, 1)
@@ -126,22 +133,93 @@ class ChapterWritingPage(QWidget):
         self.plot_brief.textChanged.connect(self._emit)
         self.plot_brief.textChanged.connect(self._refresh_summary)
         self.author_note.textChanged.connect(self._emit)
+        self.width_handles = {}
+        for side in ("left", "right"):
+            handle = ProseWidthHandle(side, self)
+            handle.drag_started.connect(self._start_width_drag)
+            handle.dragged.connect(lambda delta, edge=side: self._drag_width(edge, delta))
+            handle.drag_finished.connect(self._finish_width_drag)
+            handle.drag_cancelled.connect(self._cancel_width_drag)
+            handle.stepped.connect(self._step_width)
+            handle.reset_requested.connect(lambda: self.set_reading_width("recommended"))
+            handle.clicked.connect(self.width_value_requested)
+            self.width_handles[side] = handle
 
     def comfortable_width(self) -> bool:
-        return self._comfortable_width
+        return self._width_mode != "fill"
 
     def set_comfortable_width(self, enabled: bool) -> None:
         """Reflow existing widgets without touching document content or history."""
-        self._comfortable_width = bool(enabled)
+        self.set_reading_width("recommended" if enabled else "fill")
+
+    def reading_width_preferences(self) -> dict:
+        return {"mode": self._width_mode, "custom_width": self._custom_width}
+
+    def recommended_prose_width(self) -> int:
+        return max(680, min(820, self.body_edit.fontMetrics().horizontalAdvance("中") * 42))
+
+    def set_reading_width(self, mode: str, custom_width: int | None = None) -> None:
+        if not isinstance(mode, str) or mode not in PROSE_WIDTH_MODES:
+            raise ValueError("unknown reading-width mode")
+        if custom_width is not None and type(custom_width) is not int:
+            raise ValueError("custom prose width must be an integer")
+        before = self.reading_width_preferences()
+        self._width_mode = mode
+        if custom_width is not None:
+            self._custom_width = max(MIN_PROSE_WIDTH, min(MAX_PROSE_WIDTH, custom_width))
         self._layout_reading_column()
+        if before != self.reading_width_preferences():
+            self.reading_width_changed.emit()
+
+    def _start_width_drag(self) -> None:
+        self._width_drag = (self.reading_width_preferences(), max(1, self.body_edit.width() - 64))
+
+    def _drag_width(self, side: str, delta: int) -> None:
+        if self._width_drag is not None:
+            self.set_reading_width("custom", self._width_drag[1] + delta * (2 if side == "right" else -2))
+
+    def _finish_width_drag(self) -> None:
+        self._width_drag = None
+
+    def _cancel_width_drag(self) -> None:
+        if self._width_drag is not None:
+            previous, _width = self._width_drag
+            self._width_drag = None
+            self.set_reading_width(previous["mode"], previous["custom_width"])
+
+    def _step_width(self, delta: int) -> None:
+        width = self._custom_width if self._width_mode == "custom" else max(1, self.body_edit.width() - 64)
+        self.set_reading_width("custom", width + delta)
 
     def _layout_reading_column(self) -> None:
         # Bound the reading measure while respecting the author's font choice.
-        measure = max(680, min(820, self.body_edit.fontMetrics().horizontalAdvance("中") * 42))
+        measure = self._custom_width if self._width_mode == "custom" else self.recommended_prose_width()
         column = measure + 64  # Match the prose editor's horizontal padding.
-        gutter = max(0, (self.contentsRect().width() - column) // 2) if self._comfortable_width else 0
+        gutter = max(0, (self.contentsRect().width() - column) // 2) if self.comfortable_width() else 0
         if self.layout().contentsMargins().left() != gutter:
             self.layout().setContentsMargins(gutter, 0, gutter, 0)
+        self.layout().activate()
+        self._position_width_handles()
+
+    def _position_width_handles(self) -> None:
+        if not hasattr(self, "width_handles"):
+            return
+        edit = self.body_edit
+        viewport = edit.viewport()
+        top = viewport.mapTo(self, QPoint(0, 0))
+        scrollbar = edit.verticalScrollBar()
+        right_edge = top.x() + viewport.width()
+        if scrollbar.isVisibleTo(edit):
+            right_edge = scrollbar.mapTo(self, QPoint(0, 0)).x() + scrollbar.width()
+        for side, handle in self.width_handles.items():
+            # Stay in the existing 32px padding, outside text and scrollbars.
+            x = edit.x() + 8 if side == "left" else right_edge + 8
+            x = max(edit.x(), min(x, edit.geometry().right() - 13))
+            handle.setGeometry(x, top.y(), 14, max(1, viewport.height()))
+            mode = {"recommended": "推荐", "custom": "自定义", "fill": "铺满"}[self._width_mode]
+            handle.setAccessibleDescription(f"当前模式：{mode}；可见行宽约 {max(1, edit.width() - 64)} px。方向键调整，Enter 输入数值。")
+            handle.setVisible(edit.isVisibleTo(self))
+            handle.raise_()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -149,6 +227,9 @@ class ChapterWritingPage(QWidget):
 
     def eventFilter(self, watched, event):
         if watched is self.body_edit and event.type() in (QEvent.Type.FontChange, QEvent.Type.StyleChange):
+            self._column_timer.start(0)
+        elif watched in (self.body_edit, self.body_edit.viewport(), self.body_edit.verticalScrollBar()) and event.type() in (
+                QEvent.Type.Resize, QEvent.Type.Move, QEvent.Type.Show, QEvent.Type.Hide):
             self._column_timer.start(0)
         return super().eventFilter(watched, event)
 

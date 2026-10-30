@@ -6,6 +6,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import (
     QAction,
+    QActionGroup,
     QCloseEvent,
     QKeySequence,
     QShortcut,
@@ -68,6 +69,7 @@ from ui.quick_access_controller import QuickAccessController
 from ui.export_controller import ExportController
 from ui.editor import Editor
 from ui.elided_label import ElidedLabel
+from ui.prose_width import MIN_PROSE_WIDTH, MAX_PROSE_WIDTH
 from ui.icons import set_button_icon
 from ui.inspector import Inspector
 from ui.left_panel import LeftPanel
@@ -411,6 +413,14 @@ class MainWindow(QMainWindow):
         width_action.setCheckable(True)
         width_action.setChecked(True)
         width_action.setToolTip("将章节正文居中到舒适行宽；关闭后铺满可用区域，不修改内容。")
+        self.prose_width_actions = QActionGroup(self)
+        for mode, label in (("recommended", "正文行宽：推荐"), ("custom", "正文行宽：自定义"), ("fill", "正文行宽：铺满")):
+            item = action(f"width_{mode}", label, lambda _checked=False, selected=mode: self._set_reading_width(selected))
+            item.setCheckable(True)
+            self.prose_width_actions.addAction(item)
+        self.actions["width_recommended"].setChecked(True)
+        action("width_value", "设置正文行宽…", self._choose_prose_width)
+        action("width_reset", "恢复推荐正文行宽", lambda: self._set_reading_width("recommended"))
         action("navigation", "显示/隐藏资料面板", self.toggle_navigation_panel, "Ctrl+Shift+L")
         action("inspector", "显示/隐藏写作助手", self.toggle_inspector, "Ctrl+Shift+I")
         action("output", "显示/隐藏 AI 任务", self.toggle_output, "Ctrl+J")
@@ -543,7 +553,8 @@ class MainWindow(QMainWindow):
         self.workspace_more_menu = QMenu(self.workspace_more_button)
         self.workspace_more_menu.addAction(self.actions["save"])
         self.workspace_more_menu.addSeparator()
-        for key in ("comfortable_width", "navigation", "locate_document", "find"):
+        self.prose_width_menu = self._add_prose_width_menu(self.workspace_more_menu)
+        for key in ("navigation", "locate_document", "find"):
             self.workspace_more_menu.addAction(self.actions[key])
         self.workspace_more_button.setMenu(self.workspace_more_menu)
         action_layout.addWidget(self.workspace_more_button)
@@ -653,6 +664,35 @@ class MainWindow(QMainWindow):
 
     def _set_comfortable_width(self, enabled: bool) -> None:
         self.editor.writing_page.set_comfortable_width(enabled)
+
+    def _add_prose_width_menu(self, menu):
+        submenu = menu.addMenu("正文行宽")
+        for key in ("width_recommended", "width_custom", "width_fill"):
+            submenu.addAction(self.actions[key])
+        submenu.addSeparator()
+        submenu.addAction(self.actions["width_value"])
+        submenu.addAction(self.actions["width_reset"])
+        return submenu
+
+    def _set_reading_width(self, mode: str) -> None:
+        self.editor.writing_page.set_reading_width(mode)
+
+    def _choose_prose_width(self) -> None:
+        page = self.editor.writing_page
+        preferences = page.reading_width_preferences()
+        value = (page.recommended_prose_width() if preferences["mode"] == "recommended"
+                 else preferences["custom_width"])
+        width, accepted = QInputDialog.getInt(self, "正文行宽", "正文文字区域宽度（px）：",
+                                               value, MIN_PROSE_WIDTH, MAX_PROSE_WIDTH, 16)
+        if accepted:
+            page.set_reading_width("custom", width)
+
+    def _sync_reading_width_actions(self) -> None:
+        preferences = self.editor.writing_page.reading_width_preferences()
+        for mode in ("recommended", "custom", "fill"):
+            self.actions[f"width_{mode}"].setChecked(preferences["mode"] == mode)
+        self.actions["comfortable_width"].setChecked(preferences["mode"] != "fill")
+        self.actions["width_custom"].setText(f"正文行宽：自定义（{preferences['custom_width']} px）")
         if hasattr(self, "workspace_state"):
             self.workspace_state.schedule()
 
@@ -719,7 +759,7 @@ class MainWindow(QMainWindow):
 
         view_menu = self.menuBar().addMenu("视图")
         view_menu.addAction(self.actions["focus"])
-        view_menu.addAction(self.actions["comfortable_width"])
+        self._add_prose_width_menu(view_menu)
         view_menu.addAction(self.actions["navigation"])
         view_menu.addAction(self.actions["inspector"])
         view_menu.addAction(self.actions["output"])
@@ -816,6 +856,9 @@ class MainWindow(QMainWindow):
         self.settings_controller.connection_failed.connect(self._on_dsh_test_failed)
         self.settings_controller.connection_finished.connect(self._on_dsh_test_finished)
         self.editor.dirty_changed.connect(self._on_dirty_changed)
+        self.editor.writing_page.reading_width_changed.connect(self._sync_reading_width_actions)
+        self.editor.writing_page.width_value_requested.connect(self._choose_prose_width)
+        self._sync_reading_width_actions()
         self.editor.save_state_changed.connect(self._refresh_save_feedback)
         self.structured_canon_page.save_state_changed.connect(self._refresh_save_feedback)
         self.content_stack.currentChanged.connect(self._refresh_save_feedback)

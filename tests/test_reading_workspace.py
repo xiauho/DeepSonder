@@ -124,7 +124,8 @@ class ReadingWorkspaceTests(TestCase):
         w = self.window
         self.assertEqual(w.panel_buttons["inspector"].text(), "参考")
         self.assertIn(w.actions["save"], w.workspace_more_menu.actions())
-        self.assertIn(w.actions["comfortable_width"], w.workspace_more_menu.actions())
+        self.assertIn(w.prose_width_menu.menuAction(), w.workspace_more_menu.actions())
+        self.assertIn(w.actions["width_recommended"], w.prose_width_menu.actions())
         self.assertIn(w.actions["locate_document"], w.workspace_more_menu.actions())
         self.assertEqual(w.actions["save"].shortcut().toString(), "Ctrl+S")
         self.assertIn(w.actions["output"], w.ai_creation_menu.actions())

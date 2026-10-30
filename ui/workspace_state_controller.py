@@ -9,6 +9,7 @@ from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import QApplication
 
 from core.storage import atomic_write_text
+from ui.prose_width import reading_width_preferences
 
 
 def fit_geometry(values, screens):
@@ -56,12 +57,11 @@ class WorkspaceStateController(QObject):
         editor.text_edit.horizontalScrollBar().valueChanged.connect(self.schedule)
         window.window_state_controller.panels_changed.connect(self.schedule)
         window.main_splitter.splitterMoved.connect(self.schedule)
+        window.editor.writing_page.reading_width_changed.connect(self.schedule)
         layout = self.data.get("layout", {})
         if isinstance(layout, dict):
-            comfortable = layout.get("comfortable_width", True)
-            if type(comfortable) is bool:
-                window.actions["comfortable_width"].setChecked(comfortable)
-                window.editor.writing_page.set_comfortable_width(comfortable)
+            preference = reading_width_preferences(layout.get("reading_width"), layout.get("comfortable_width", True))
+            window.editor.writing_page.set_reading_width(preference["mode"], preference["custom_width"])
             controller = window.window_state_controller
             for name in ("navigation_visible", "inspector_visible"):
                 if type(layout.get(name)) is bool:
@@ -234,6 +234,7 @@ class WorkspaceStateController(QObject):
         self.data["layout"] = {"navigation_visible": controller.navigation_visible,
             "inspector_visible": controller.inspector_visible,
             "comfortable_width": window.editor.writing_page.comfortable_width(),
+            "reading_width": window.editor.writing_page.reading_width_preferences(),
             "navigation_width": controller._left_panel_width,
             "inspector_width": controller._inspector_width}
         rect = window.normalGeometry() if window.isMaximized() else window.geometry()
