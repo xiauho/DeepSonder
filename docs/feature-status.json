@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-29",
+  "updated_at": "2026-10-30",
   "product": "DeepSonder-PySide6",
   "maintenance_policy": "independent",
   "features": [
@@ -90,7 +90,13 @@
       "id": "ai.task_panel_and_deferred_review",
       "requirement": "required",
       "status": "supported",
-      "note": "Session-local task summary and logs; explicit review/discard, retained context snapshot, guarded commit, pending-result protection on new tasks/project switches/exit. Existing confirmation dialogs remain authoritative."
+      "note": "Session-local task summary and logs; explicit review/discard, retained context snapshot, guarded commit, pending-result protection on new tasks/project switches/exit. Embedded review reuses the existing confirmation controls and coordinator guards."
+    },
+    {
+      "id": "ai.embedded_result_review",
+      "requirement": "required",
+      "status": "supported",
+      "notes": "扩写、续写、一致性修复、文风建议及记忆提案复用原审阅控件与业务确认，宽窗口侧栏并排、窄窗口完整审阅页；明确展示目标章节与写入范围。确认操作固定在可滚动内容之外。支持候选稿、续写补写、伏笔选择、文风勾选及例外，记忆冲突展示完整证据与锚点并保留重试和二次部分采用确认。正文类提供基于当前选择的只读差异；大内容或展示超限明确说明，不截断待写入数据。收起、Esc、F6或导航保留本次会话的控件选择和结果快照，可从任务面板、视图或命令搜索继续审阅；待审期间仍阻止新任务、切换项目和退出。来源变化后禁用采用并保留候选可读，采用前再次校验；扩写和续写在篇幅二次确认之后也重新检查来源。未增加自动写入、永久任务历史或跨会话候选保存。"
     },
     {
       "id": "workspace.persistent_layout_and_reading_position",

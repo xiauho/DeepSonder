@@ -422,6 +422,10 @@ QFrame#outputContainer {
     background: __PANEL__;
     border-top: 1px solid __BORDER__;
 }
+QFrame#aiReviewPanel {
+    background: __PANEL__;
+    border-left: 1px solid __BORDER__;
+}
 QPlainTextEdit#outputPanel, QTextBrowser#inspectorBrowser, QTextBrowser#pageBrowser {
     background: __FIELD__;
     border: 1px solid __BORDER__;

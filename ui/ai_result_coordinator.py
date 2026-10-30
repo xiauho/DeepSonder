@@ -157,16 +157,19 @@ class ExpansionPreviewDialog(QDialog):
         buttons = QHBoxLayout()
         under_length = length_status in {LENGTH_SEVERELY_UNDER, LENGTH_UNDER}
         confirm = QPushButton("仍然采用" if under_length else confirm_label)
+        confirm.setProperty("reviewNeedsContext", True)
         confirm.setObjectName("accentButton")
         confirm.setAutoDefault(False)
         copy = QPushButton("复制")
         cancel = QPushButton("放弃")
+        cancel.setProperty("reviewDiscard", True)
         cancel.setAutoDefault(False)
         confirm.clicked.connect(self._confirm)
         copy.clicked.connect(lambda: self._copy(self._candidate_text))
         cancel.clicked.connect(self.reject)
         if under_length and can_retry_supplement:
             retry = QPushButton("重新补写")
+            retry.setProperty("reviewNeedsContext", True)
             retry.setObjectName("accentButton")
             retry.setAutoDefault(False)
             retry.clicked.connect(self._retry)
@@ -350,10 +353,12 @@ class ContinuationPreviewDialog(QDialog):
         buttons = QHBoxLayout()
         under_length = length_status in {LENGTH_SEVERELY_UNDER, LENGTH_UNDER}
         confirm = QPushButton("仍然采用" if under_length else "追加到正文")
+        confirm.setProperty("reviewNeedsContext", True)
         confirm.setObjectName("accentButton")
         confirm.setAutoDefault(False)
         copy = QPushButton("复制")
         cancel = QPushButton("放弃")
+        cancel.setProperty("reviewDiscard", True)
         cancel.setAutoDefault(False)
         confirm.clicked.connect(self._confirm)
         copy.clicked.connect(
@@ -362,6 +367,7 @@ class ContinuationPreviewDialog(QDialog):
         cancel.clicked.connect(self.reject)
         if under_length and can_retry_supplement:
             retry = QPushButton("重新补写")
+            retry.setProperty("reviewNeedsContext", True)
             retry.setObjectName("accentButton")
             retry.setAutoDefault(False)
             retry.clicked.connect(self._retry)
@@ -430,9 +436,11 @@ class RepairPreviewDialog(QDialog):
             layout.addWidget(facts)
         buttons = QHBoxLayout()
         confirm = QPushButton("确认应用")
+        confirm.setProperty("reviewNeedsContext", True)
         confirm.setObjectName("accentButton")
         confirm.setAutoDefault(False)
         cancel = QPushButton("放弃")
+        cancel.setProperty("reviewDiscard", True)
         cancel.setAutoDefault(False)
         confirm.clicked.connect(self._confirm)
         cancel.clicked.connect(self.reject)
@@ -511,7 +519,9 @@ class MemoryPreviewDialog(QDialog):
         buttons = QHBoxLayout()
         copy = QPushButton("复制全部")
         cancel = QPushButton("取消")
+        cancel.setProperty("reviewDiscard", True)
         confirm = QPushButton("确认写入")
+        confirm.setProperty("reviewNeedsContext", True)
         confirm.setObjectName("accentButton")
         confirm.setAutoDefault(False)
         cancel.setAutoDefault(False)
@@ -544,6 +554,17 @@ class AIResultCoordinator:
 
     def __init__(self, parent=None):
         self.parent = parent
+        self.presenter = None
+        self.context_guard = None
+
+    def present(self, dialog, *, context_matches=None, diff_provider=None, effect=""):
+        if self.presenter is not None:
+            return self.presenter(dialog, context_matches=context_matches,
+                                  diff_provider=diff_provider, effect=effect)
+        return dialog.exec()
+
+    def context_current(self, matches) -> bool:
+        return bool(matches()) and (self.context_guard is None or bool(self.context_guard()))
 
     def confirm_expansion(
         self,
@@ -572,6 +593,7 @@ class AIResultCoordinator:
         foreshadowing_feedback: tuple[ForeshadowingSuggestion, ...] = (),
         foreshadowing_titles: dict[str, str] | None = None,
         foreshadowing_warning: str = "",
+        original_text: str = "",
     ) -> CommitOutcome:
         dialog = ExpansionPreviewDialog(
             text=text,
@@ -598,11 +620,14 @@ class AIResultCoordinator:
             foreshadowing_warning=foreshadowing_warning,
             parent=self.parent,
         )
-        dialog.exec()
+        self.present(dialog, context_matches=context_matches,
+                     diff_provider=lambda: (original_text, dialog.selected_text()),
+                     effect="替换当前章节正文；确认后仍需保存。" if has_existing_content
+                     else "写入当前章节的空白正文；确认后仍需保存。")
         retry_requested = bool(getattr(dialog, "retry_requested", False))
         if not dialog.confirmed and not retry_requested:
             return CommitOutcome(status="cancelled")
-        if not context_matches():
+        if not self.context_current(context_matches):
             QMessageBox.warning(
                 self.parent,
                 "章节已发生变化",
@@ -632,6 +657,9 @@ class AIResultCoordinator:
             )
             if answer != QMessageBox.StandardButton.Yes:
                 return CommitOutcome(status="cancelled")
+        # A length warning runs another event loop; recheck immediately before writing.
+        if not self.context_current(context_matches):
+            return CommitOutcome(status="stale")
         replace_body(selected_text)
         selected_resolutions = getattr(dialog, "selected_resolution_ids", None)
         resolution_ids = (
@@ -694,11 +722,13 @@ class AIResultCoordinator:
             correction_history=correction_history,
             parent=self.parent,
         )
-        dialog.exec()
+        self.present(dialog, context_matches=context_matches,
+                     diff_provider=lambda: (current_tail, current_tail + "\n\n" + dialog.selected_text()),
+                     effect="追加至目标章节正文末尾；差异仅比较正文结尾与本次续写，确认后仍需保存。")
         retry_requested = bool(getattr(dialog, "retry_requested", False))
         if not dialog.confirmed and not retry_requested:
             return CommitOutcome(status="cancelled")
-        if not context_matches():
+        if not self.context_current(context_matches):
             QMessageBox.warning(
                 self.parent,
                 "章节已发生变化",
@@ -728,6 +758,8 @@ class AIResultCoordinator:
             )
             if answer != QMessageBox.StandardButton.Yes:
                 return CommitOutcome(status="cancelled")
+        if not self.context_current(context_matches):
+            return CommitOutcome(status="stale")
         append_body(selected_text)
         return CommitOutcome(status="committed", action="追加")
 
@@ -748,10 +780,11 @@ class AIResultCoordinator:
             conflict_count,
             self.parent,
         )
-        dialog.exec()
+        self.present(dialog, context_matches=context_matches,
+                     effect="确认后写入章节摘要和故事状态；请核对变更、排除项及后续章节失效范围。")
         if not dialog.confirmed:
             return CommitOutcome(status="cancelled")
-        if not context_matches():
+        if not self.context_current(context_matches):
             QMessageBox.warning(
                 self.parent,
                 "项目内容已变化",
@@ -781,10 +814,12 @@ class AIResultCoordinator:
             preserved_facts,
             self.parent,
         )
-        dialog.exec()
+        self.present(dialog, context_matches=context_matches,
+                     diff_provider=lambda: (expected_original, replacement),
+                     effect="只替换下方唯一匹配的连续正文；确认后仍需保存。")
         if not dialog.confirmed:
             return CommitOutcome(status="cancelled")
-        if not context_matches():
+        if not self.context_current(context_matches):
             QMessageBox.warning(
                 self.parent,
                 "章节已发生变化",

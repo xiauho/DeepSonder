@@ -142,7 +142,7 @@ class DeferredAIReviewTests(TestCase):
         self.workflow.ai_result_service.downstream_memory_chapters = Mock(return_value=())
         buttons = {}
         def add_button(text, role):
-            buttons[text] = object()
+            buttons[text] = Mock()
             return buttons[text]
         with patch('ui.ai_workflow_controller.QMessageBox') as box:
             box.return_value.addButton.side_effect = add_button

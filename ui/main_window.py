@@ -53,7 +53,8 @@ from core.version import load_current_version
 from ui.ai_controller import AIController
 from ui.ai_engine_controller import AIEngineController
 from ui.ai_task_view_controller import AITaskViewController
-from ui.ai_task_panel import AITaskPanel
+from ui.ai_task_panel import AITaskPanel, TASK_LABELS as AI_TASK_LABELS
+from ui.ai_review_panel import AIReviewPanel, ReviewWorkspace
 from ui.ai_workflow_controller import AIWorkflowController
 from ui.appearance_controller import AppearanceController
 from ui.character_card_sync_dialog import (
@@ -238,6 +239,12 @@ class MainWindow(QMainWindow):
         self.ai_workflow_controller.pending_review_changed.connect(self._refresh_delete_action)
         self.ai_workflow_controller.review_finished.connect(self._ai_review_finished)
         self.ai_workflow_controller.check_report_ready.connect(lambda: setattr(self.task_panel, "report_ready", True))
+        self.ai_workflow_controller.ai_result_coordinator.presenter = self.review_panel.present
+        self.ai_workflow_controller.ai_result_coordinator.context_guard = self.review_panel.context_current
+        self.review_panel.postponed.connect(lambda: self.task_panel.set_state(
+            "pending", "审阅已收起，选择与候选仍保留；点击审阅结果继续。"))
+        self.review_panel.resumed.connect(lambda: self.task_panel.set_state(
+            "reviewing", "正在审阅结果，确认前不会写入。"))
         self.task_panel.review_requested.connect(self._review_ai_result)
         self.task_panel.discard_requested.connect(self._discard_ai_result)
         self.task_panel.cancel_requested.connect(self.cancel_ai_task)
@@ -321,6 +328,8 @@ class MainWindow(QMainWindow):
                 self.editor.show_find()
 
     def focus_editor(self) -> None:
+        if self.review_panel.active:
+            self.review_panel.postpone()
         context = self.current_document()
         if context.path is None:
             self.status_message.setText("请先打开章节或资料文档。")
@@ -403,6 +412,8 @@ class MainWindow(QMainWindow):
         action("navigation", "显示/隐藏资料面板", self.toggle_navigation_panel, "Ctrl+Shift+L")
         action("inspector", "显示/隐藏写作助手", self.toggle_inspector, "Ctrl+Shift+I")
         action("output", "显示/隐藏 AI 任务", self.toggle_output, "Ctrl+J")
+        action("review_result", "审阅 AI 结果", self._review_ai_result)
+        self.actions["review_result"].setEnabled(False)
         action("expand", "按章纲生成正文", self.expand_chapter, "Ctrl+Enter")
         action("continuation", "AI 续写", self.continue_chapter, "Ctrl+Alt+Enter")
         action("selection_expand", "选区扩写…", lambda: self.ai_workflow_controller.prose_task("selection_expand"))
@@ -580,7 +591,9 @@ class MainWindow(QMainWindow):
             self.settings_page,
         ):
             self.page_stack.addWidget(page)
-        content_layout.addWidget(self.page_stack, 1)
+        self.review_panel = AIReviewPanel()
+        self.review_workspace = ReviewWorkspace(self.page_stack, self.review_panel)
+        content_layout.addWidget(self.review_workspace, 1)
 
     def _build_writing_page(self) -> QWidget:
         page = QWidget()
@@ -706,6 +719,7 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.actions["navigation"])
         view_menu.addAction(self.actions["inspector"])
         view_menu.addAction(self.actions["output"])
+        view_menu.addAction(self.actions["review_result"])
         view_menu.addSeparator()
         view_menu.addAction(self.actions["show_reports"])
         view_menu.addAction(self.actions["show_memory"])
@@ -844,6 +858,8 @@ class MainWindow(QMainWindow):
             self.view_refresh_controller.refresh_route(route)
         else:
             self.settings_page.synchronize_config(self.config)
+        if route != previous_route and self.review_panel.active and self.review_panel.isVisible():
+            self.review_panel.postpone()
         keep_canon = route == "canon" and self._canon_page_active()
         self.window_state_controller.activate_route(route)
         if keep_canon:
@@ -1073,6 +1089,8 @@ class MainWindow(QMainWindow):
 
     def _on_project_changed(self, project: NovelProject | None) -> None:
         """Update shell state after the view refresh controller switches projects."""
+        if self.review_panel.active:
+            self.review_panel.discard()
         self.structured_canon_page.reset()  # 项目切换后旧项目的页面内存态一律失效
         self.primary_nav.set_project(project.name if project else None)
         self.task_panel.reset()
@@ -1947,6 +1965,8 @@ class MainWindow(QMainWindow):
         self.left_panel.select_path(path)
 
     def _on_file_selected(self, category: str, path_str: str) -> None:
+        if self.review_panel.active and self.review_panel.isVisible():
+            self.review_panel.postpone()
         previous = getattr(self, "_opening_document", False)
         self._opening_document = True
         try:
@@ -2052,6 +2072,8 @@ class MainWindow(QMainWindow):
     # Focus, panels and preferences
     # ------------------------------------------------------------------
     def toggle_focus_mode(self) -> None:
+        if self.review_panel.active:
+            self.review_panel.postpone()
         if self._timeline_active():
             return
         if self.window_state_controller.current_route not in {"writing", "canon", "timeline"}:
@@ -2061,6 +2083,9 @@ class MainWindow(QMainWindow):
             self.structured_canon_page.form.focus_editor()
 
     def _exit_focus_mode(self) -> None:
+        if self.review_panel.active and self.review_panel.isVisible():
+            self.review_panel.postpone()
+            return
         self.window_state_controller.exit_focus_mode()
 
     def toggle_navigation_panel(self) -> None:
@@ -2069,6 +2094,8 @@ class MainWindow(QMainWindow):
     def toggle_inspector(self) -> None:
         if self._timeline_active():
             return
+        if self.review_panel.active:
+            self.review_panel.postpone()
         self.window_state_controller.toggle_inspector()
 
     def toggle_output(self) -> None:
@@ -2083,6 +2110,7 @@ class MainWindow(QMainWindow):
         label = {"running": "AI 正在处理", "cancelling": "AI 正在取消", "pending": "AI 结果待审阅", "failed": "AI 任务失败"}.get(self.task_panel.state, "AI 任务")
         self.task_entry.setText(label)
         self.task_entry.setAccessibleName(label + "，打开任务面板")
+        self.actions["review_result"].setEnabled(self.ai_workflow_controller.has_pending_result)
 
     def _resize_task_panel(self) -> None:
         if not self.task_panel.isVisible():
@@ -2100,22 +2128,49 @@ class MainWindow(QMainWindow):
     def _review_ai_result(self) -> None:
         if not self.ai_workflow_controller.has_pending_result:
             return
+        self.window_state_controller.exit_focus_mode()
+        if self.review_panel.active:
+            self.review_panel.resume()
+            return
+        token = self.ai_workflow_controller.pending_review_token
+        if token is None:
+            return
+        chapter_title = token.chapter_id
+        if self.project is not None:
+            try:
+                chapter_title = self.project.load_chapter(token.chapter_id).title or chapter_title
+            except (OSError, ValueError):
+                chapter_title = "目标章节已不可用"
+        self.review_panel.begin(AI_TASK_LABELS.get(token.kind, "AI 结果"), chapter_title)
         self.task_panel.set_state("reviewing", "正在审阅结果，确认前不会写入。")
         try:
             self.ai_workflow_controller.review_pending_result()
         except Exception as exc:  # Keep Qt signal callbacks from hiding review failures.
+            self.review_panel.finish()
             self.ai_task_view_controller.append_output(f"结果审阅失败：{exc}")
             self.task_panel.set_state("failed", "结果审阅失败，请展开工作记录查看原因。")
 
     def _ai_review_finished(self) -> None:
+        discarded, stale = self.review_panel.discarded, self.review_panel.stale
+        self.review_panel.finish()
         if self.task_panel.task_id is not None:
-            self.task_panel.set_state("reviewed")
+            if stale:
+                self.task_panel.set_state("discarded", "来源已变化，本次结果未写入，请重新生成。")
+            elif discarded:
+                self.task_panel.set_state("discarded", "结果已放弃，未写入正文或故事记忆。")
+            else:
+                self.task_panel.set_state("reviewed")
 
     def _discard_ai_result(self) -> None:
+        if self.review_panel.active:
+            self.review_panel.discard()
+            return
         self.ai_workflow_controller.discard_pending_result()
         self.task_panel.set_state("discarded", "结果已放弃，未写入正文或故事记忆。")
 
     def _show_task_context(self) -> None:
+        if self.review_panel.active:
+            self.review_panel.postpone()
         if not self.window_state_controller.inspector_visible:
             self.window_state_controller.toggle_inspector()
         self.inspector.show_task_context()

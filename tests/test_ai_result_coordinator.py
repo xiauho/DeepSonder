@@ -12,6 +12,33 @@ from ui.ai_result_coordinator import (
 
 
 class AIResultCoordinatorTests(TestCase):
+    def test_expansion_rechecks_sources_after_the_length_confirmation(self):
+        dialog = SimpleNamespace(confirmed=True, exec=Mock(), retry_requested=False)
+        current = Mock(side_effect=[True, False])
+        replace = Mock()
+        with patch("ui.ai_result_coordinator.ExpansionPreviewDialog", return_value=dialog), patch(
+                "ui.ai_result_coordinator.QMessageBox.question", return_value=QMessageBox.StandardButton.Yes):
+            result = AIResultCoordinator().confirm_expansion(
+                text="短正文", char_count=3, length_ok=False, has_existing_content=True,
+                target_chars=1000, context_matches=current, replace_body=replace)
+        self.assertEqual(result.status, "stale")
+        replace.assert_not_called()
+        self.assertEqual(current.call_count, 2)
+
+    def test_continuation_rechecks_sources_after_the_length_confirmation(self):
+        dialog = SimpleNamespace(confirmed=True, exec=Mock(), retry_requested=False)
+        current = Mock(side_effect=[True, False])
+        append = Mock()
+        with patch("ui.ai_result_coordinator.ContinuationPreviewDialog", return_value=dialog), patch(
+                "ui.ai_result_coordinator.QMessageBox.question", return_value=QMessageBox.StandardButton.Yes):
+            result = AIResultCoordinator().confirm_continuation(
+                text="短续写", current_tail="原文结尾", current_chars=100, requested_chars=900,
+                generated_chars=3, target_chapter_chars=1000, length_ok=False,
+                context_matches=current, append_body=append)
+        self.assertEqual(result.status, "stale")
+        append.assert_not_called()
+        self.assertEqual(current.call_count, 2)
+
     def test_every_selected_foreshadowing_gets_a_review_row(self) -> None:
         rows = build_foreshadowing_review_rows(
             (

@@ -293,10 +293,15 @@ class AIWorkflowController(QObject):
             self._emit_status("正文或资料已变化，文风建议未写入。")
             return
         dialog = ProseReviewDialog(result, self.parent)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
+        if self.ai_result_coordinator.present(
+                dialog, context_matches=lambda: self._task_context_matches(token),
+                diff_provider=lambda: (result.source, apply_patches(result.source, dialog.selected_patches())),
+                effect="仅应用勾选的修改及文风例外；未勾选的原文保留，正文可撤销、仍需保存。"
+        ) != QDialog.DialogCode.Accepted:
             self._emit_status("已保留原文，未保存文风例外。")
             return
-        if not self._task_context_matches(token) or self.editor.text_edit.toPlainText() != result.source:
+        if (not self.ai_result_coordinator.context_current(lambda: self._task_context_matches(token))
+                or self.editor.text_edit.toPlainText() != result.source):
             self._emit_status("正文或资料已变化，修改未写入。")
             QMessageBox.warning(self.parent, "结果已过期", "请重新生成建议，正文和文风例外均未修改。")
             return
@@ -766,6 +771,10 @@ class AIWorkflowController(QObject):
     def has_pending_result(self) -> bool:
         return self._pending_review is not None or self._reviewing
 
+    @property
+    def pending_review_token(self):
+        return self._pending_review[0] if self._pending_review is not None else None
+
     def _on_task_succeeded(self, token, result) -> None:
         if not self.defer_result_review:
             self._review_task_result(token, result)
@@ -874,6 +883,7 @@ class AIWorkflowController(QObject):
             char_count=parsed.char_count,
             length_ok=parsed.length_ok,
             has_existing_content=has_existing_content,
+            original_text=chapter.content if chapter is not None else "",
             context_matches=lambda: self._task_context_matches(token),
             replace_body=self.editor.replace_chapter_body,
             target_chars=result.target_chars,
@@ -1451,13 +1461,21 @@ class AIWorkflowController(QObject):
             refresh_button = box.addButton("重提事实", QMessageBox.ButtonRole.ActionRole)
             partial_button = (box.addButton("审阅可用部分", QMessageBox.ButtonRole.ActionRole)
                               if partial is not None else None)
-            box.addButton("关闭", QMessageBox.ButtonRole.RejectRole)
+            for button in (retry_button, refresh_button, partial_button):
+                if button is not None:
+                    button.setProperty("reviewNeedsContext", True)
+            close_button = box.addButton("关闭", QMessageBox.ButtonRole.RejectRole)
+            close_button.setProperty("reviewDiscard", True)
+            box.review_actions = [button for button in (retry_button, refresh_button, partial_button, close_button)
+                                  if button is not None]
             box.setDefaultButton(retry_button)
             # Stacked actions remain readable on narrow/high-DPI desktop screens.
             button_box = box.findChild(QDialogButtonBox)
             if button_box is not None:
                 button_box.setOrientation(Qt.Orientation.Vertical)
-            box.exec()
+            self.ai_result_coordinator.present(
+                box, context_matches=lambda: self._task_context_matches(token),
+                effect="阻断项不会写入。部分采用需要排除失败项后，再审阅并明确确认。")
             self._emit_output(
                 "记忆提案存在阻断冲突，故事状态未写入。\n"
                 + details + "\n\n引用事实与正文锚点：\n" + proposal.conflict_evidence_text()
