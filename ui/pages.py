@@ -900,14 +900,37 @@ class SettingsPage(QWidget):
         self.auto_save_interval.setSuffix(" 秒")
         self.editor_font_size = QSpinBox()
         self.editor_font_size.setRange(12, 36)
+        self.editor_font_size.setPrefix("字号 ")
         self.editor_font_size.setSuffix(" px")
+        self.editor_font_size.setAccessibleName("正文字号")
         self.editor_line_spacing = QDoubleSpinBox()
         self.editor_line_spacing.setRange(1.0, 2.4)
         self.editor_line_spacing.setDecimals(1)
         self.editor_line_spacing.setSingleStep(0.1)
+        self.editor_line_spacing.setPrefix("行距 ")
         self.editor_line_spacing.setSuffix(" 倍")
+        self.editor_line_spacing.setAccessibleName("正文行距")
         self.editor_line_spacing.setToolTip("1.0 为自然行距；只调整章节正文的显示。")
-        preview_host = QWidget()
+        typography_controls = QWidget()
+        typography_layout = QVBoxLayout(typography_controls)
+        typography_layout.setContentsMargins(0, 0, 0, 0)
+        typography_values = QHBoxLayout()
+        typography_values.addWidget(self.editor_font_size, 1)
+        typography_values.addWidget(self.editor_line_spacing, 1)
+        typography_layout.addLayout(typography_values)
+        typography_actions = QHBoxLayout()
+        self.typography_reset = QPushButton("恢复推荐排版")
+        self.typography_reset.setObjectName("ghostButton")
+        self.typography_reset.clicked.connect(self._restore_typography)
+        typography_actions.addWidget(self.typography_reset)
+        self.typography_preview_toggle = QPushButton("收起预览")
+        self.typography_preview_toggle.setObjectName("ghostButton")
+        self.typography_preview_toggle.setCheckable(True)
+        self.typography_preview_toggle.setChecked(True)
+        typography_actions.addWidget(self.typography_preview_toggle)
+        typography_actions.addStretch(1)
+        typography_layout.addLayout(typography_actions)
+        preview_host = self.typography_preview_host = QWidget()
         preview_layout = QVBoxLayout(preview_host)
         preview_layout.setContentsMargins(0, 0, 0, 0)
         preview_layout.setSpacing(8)
@@ -916,8 +939,8 @@ class SettingsPage(QWidget):
         self.typography_preview.setReadOnly(True)
         self.typography_preview.setAccessibleName("正文排版预览")
         self.typography_preview.setMinimumWidth(0)
-        self.typography_preview.setMinimumHeight(180)
-        self.typography_preview.setMaximumHeight(220)
+        self.typography_preview.setMinimumHeight(140)
+        self.typography_preview.setMaximumHeight(160)
         self.typography_preview.setPlainText(
             "旧站的灯还亮着。林舟推开门，潮湿的风跟着他走进大厅。"
             "远处传来列车的鸣笛，像是有人终于回答了多年前的问题。\n\n"
@@ -927,10 +950,6 @@ class SettingsPage(QWidget):
         preview_hint.setObjectName("mutedLabel")
         preview_hint.setWordWrap(True)
         preview_layout.addWidget(preview_hint)
-        self.typography_reset = QPushButton("恢复推荐排版")
-        self.typography_reset.setObjectName("ghostButton")
-        self.typography_reset.clicked.connect(self._restore_typography)
-        preview_layout.addWidget(self.typography_reset, 0, Qt.AlignmentFlag.AlignLeft)
         self.editor_font_size.valueChanged.connect(self._update_typography_preview)
         self.editor_line_spacing.valueChanged.connect(self._update_typography_preview)
         self.chapter_target_chars = QSpinBox()
@@ -961,16 +980,21 @@ class SettingsPage(QWidget):
         self.history_remote = QCheckBox("补充更早相关剧情（仅已采用且版本有效的记忆）")
         self.history_preview.setObjectName("mutedLabel")
         self.history_preview.setWordWrap(True)
-        writing_form.addRow("自动保存", self.auto_save)
-        writing_form.addRow("保存间隔", self.auto_save_interval)
-        writing_form.addRow("正文字号", self.editor_font_size)
-        writing_form.addRow("正文行距", self.editor_line_spacing)
+        writing_form.addRow("正文排版", typography_controls)
         writing_form.addRow("排版预览", preview_host)
-        writing_form.addRow("目标章节字数", self.chapter_target_chars)
-        writing_form.addRow("AI 创作前文参考", self.ai_history_mode)
-        writing_form.addRow("自定义最近章节数", self.ai_context_history_chapters)
-        writing_form.addRow("前文参考说明", self.history_preview)
-        writing_form.addRow("远期参考（扩写/续写/检查）", self.history_remote)
+        for heading, rows in (
+            ("保存", (("自动保存", self.auto_save), ("保存间隔", self.auto_save_interval))),
+            ("AI 写作参考", (("目标章节字数", self.chapter_target_chars),
+                ("AI 创作前文参考", self.ai_history_mode),
+                ("自定义最近章节数", self.ai_context_history_chapters),
+                ("前文参考说明", self.history_preview),
+                ("远期参考（扩写/续写/检查）", self.history_remote))),
+        ):
+            section_label = QLabel(heading)
+            section_label.setObjectName("sectionTitle")
+            writing_form.addRow(section_label)
+            for label, field in rows:
+                writing_form.addRow(label, field)
         writing_layout.addLayout(writing_form)
 
         ai = QFrame()
@@ -1139,6 +1163,7 @@ class SettingsPage(QWidget):
             self.section_scrolls.append(section_scroll)
             section.layout().addStretch(1)
         self.writing_form = writing_form
+        self.typography_preview_toggle.toggled.connect(self._toggle_typography_preview)
         self.ai_form = ai_form
         for form in (writing_form, ai_form, advanced_form, appearance_form):
             form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
@@ -1192,6 +1217,10 @@ class SettingsPage(QWidget):
     def _restore_typography(self):
         self.editor_font_size.setValue(RECOMMENDED_PROSE_FONT_SIZE)
         self.editor_line_spacing.setValue(RECOMMENDED_PROSE_LINE_SPACING)
+
+    def _toggle_typography_preview(self, expanded):
+        self.writing_form.setRowVisible(self.typography_preview_host, expanded)
+        self.typography_preview_toggle.setText("收起预览" if expanded else "展开预览")
 
     def has_unsaved_changes(self):
         return hasattr(self, "_baseline") and self._snapshot() != self._baseline

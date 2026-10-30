@@ -5,8 +5,15 @@ from __future__ import annotations
 import math
 
 from PySide6.QtCore import QEvent, QPoint, QPointF
-from PySide6.QtGui import QTextCursor
+from PySide6.QtGui import QTextBlockUserData, QTextCursor
 from PySide6.QtWidgets import QPlainTextDocumentLayout, QPlainTextEdit
+
+
+class _SpacingState(QTextBlockUserData):
+    """Ephemeral geometry only; Qt owns its lifetime with the text block."""
+
+    signature = None
+    last_y = None
 
 
 class SpacedPlainTextLayout(QPlainTextDocumentLayout):
@@ -21,18 +28,39 @@ class SpacedPlainTextLayout(QPlainTextDocumentLayout):
         if not block.isValid() or not block.isVisible():
             return rect
         layout = block.layout()
-        y = 0.0
+        count = layout.lineCount()
         trailing = 0.0
-        for index in range(layout.lineCount()):
-            line = layout.lineAt(index)
-            natural = line.height() + min(0, math.ceil(line.leading()))
-            line.setPosition(QPointF(line.x(), y))
+        if count:
+            last = layout.lineAt(count - 1)
+            natural = last.height() + min(0, math.ceil(last.leading()))
             trailing = natural * (self.factor - 1.0)
-            y += natural * self.factor
+            state = block.userData()
+            if state is None:
+                state = _SpacingState()
+                block.setUserData(state)
+            signature = (block.revision(), count, self.factor)
+            # Qt may lay out again with unchanged text (font, width, preedit).
+            # Native layout restores natural y positions, invalidating last_y.
+            # Never replace user data owned by another document feature.
+            cached = (isinstance(state, _SpacingState)
+                      and state.signature == signature and state.last_y == last.y())
+            if not cached:
+                self._space_lines(layout)
+                if isinstance(state, _SpacingState):
+                    state.signature = signature
+                    state.last_y = last.y()
         rect.setHeight(layout.boundingRect().height() + trailing)
         if not block.next().isValid():
             rect.setHeight(rect.height() + self.document().documentMargin())
         return rect
+
+    def _space_lines(self, layout):
+        y = 0.0
+        for index in range(layout.lineCount()):
+            line = layout.lineAt(index)
+            natural = line.height() + min(0, math.ceil(line.leading()))
+            line.setPosition(QPointF(line.x(), y))
+            y += natural * self.factor
 
     def set_factor(self, factor: float) -> None:
         self.factor = factor

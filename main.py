@@ -81,6 +81,19 @@ def run_self_test() -> int:
 
 
 def main() -> int:
+    if "--ui-self-test" in sys.argv[1:]:
+        import os
+        from pathlib import Path
+        from ui.runtime_self_test import run_ui_self_test
+
+        index = sys.argv.index("--ui-self-test")
+        report = Path(sys.argv[index + 1]).resolve()
+        os.environ["QT_QPA_PLATFORM"] = "offscreen"
+        app = QApplication([sys.argv[0]])
+        _configure_application(app)
+        validate_runtime_resources()
+        run_ui_self_test(app, report)
+        return 0
     if "--self-test" in sys.argv[1:]:
         return run_self_test()
 

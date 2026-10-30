@@ -1,5 +1,6 @@
 """Safety gates carried forward from the isolated line-spacing experiment."""
 
+import math
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -9,7 +10,7 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtGui import QFont, QFontDatabase, QInputMethodEvent, QPalette, QTextBlockFormat, QTextCursor
+from PySide6.QtGui import QFont, QFontDatabase, QInputMethodEvent, QPalette, QTextBlockFormat, QTextBlockUserData, QTextCursor
 from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import QApplication, QPlainTextEdit, QTextEdit
 
@@ -126,6 +127,47 @@ class ProseSpacingPrototypeTests(TestCase):
                 self.assertEqual(self.edit.cursorForPosition(pixel).position(), cursor.position())
                 QTest.mouseClick(self.edit.viewport(), Qt.MouseButton.LeftButton, pos=pixel)
                 self.assertEqual(self.edit.textCursor().position(), cursor.position())
+
+    def test_repeated_geometry_queries_reuse_positions_without_compounding_spacing(self):
+        self.edit.set_line_spacing(1.8)
+        block = self.edit.document().firstBlock()
+        expected = self.edit.blockBoundingRect(block)
+        positions = [block.layout().lineAt(i).y() for i in range(block.layout().lineCount())]
+        with patch.object(self.edit.spacing_layout, "_space_lines", wraps=self.edit.spacing_layout._space_lines) as space:
+            for _ in range(25):
+                self.assertEqual(self.edit.blockBoundingRect(block), expected)
+            self.assertEqual(space.call_count, 0)
+        self.assertEqual([block.layout().lineAt(i).y() for i in range(block.layout().lineCount())], positions)
+
+    def test_native_relayout_and_text_edits_invalidate_reused_positions(self):
+        self.edit.setPlainText("中文 Mixed 😀 e\u0301 " * 1500)
+        self.edit.set_line_spacing(1.8)
+        for width, size, factor in ((450, 24, 2.4), (700, 18, 1.8), (640, 16, 1.0), (640, 16, 1.8)):
+            self.edit.resize(width, 420)
+            font = self.edit.font()
+            font.setPixelSize(size)
+            self.edit.setFont(font)
+            self.edit.set_line_spacing(factor)
+            self.edit.insertPlainText("新行\n")
+            self.edit.undo()
+            self.settle()
+            block = self.edit.document().firstBlock()
+            self.edit.blockBoundingRect(block)
+            layout = block.layout()
+            y = 0.0
+            for index in range(layout.lineCount()):
+                line = layout.lineAt(index)
+                self.assertAlmostEqual(line.y(), y, delta=.02)  # Qt uses 1/64-pixel positions.
+                y += (line.height() + min(0, math.ceil(line.leading()))) * factor
+
+    def test_geometry_cache_preserves_foreign_block_user_data(self):
+        block = self.edit.document().firstBlock()
+        foreign = QTextBlockUserData()
+        block.setUserData(foreign)
+        self.edit.set_line_spacing(1.8)
+        for _ in range(3):
+            self.edit.blockBoundingRect(block)
+        self.assertIs(block.userData(), foreign)
 
     def test_scroll_anchor_and_last_line_remain_reachable(self):
         bar = self.edit.verticalScrollBar()

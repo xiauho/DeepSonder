@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QCoreApplication, QEvent
+from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QRect
 from PySide6.QtGui import QFontDatabase, QInputMethodEvent, QTextCursor
 from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import QApplication
@@ -149,6 +149,32 @@ class TypographySettingsTests(TestCase):
         saved = json.loads(self.config_path.read_text(encoding="utf-8"))
         self.assertEqual((saved["editor_font_size"], saved["editor_line_spacing"]), (18, 1.8))
         self.assertEqual(self.path.read_bytes(), self.original)
+
+    def test_preview_visibility_is_view_only_and_preserves_draft_values(self):
+        self.page.typography_preview_toggle.click()
+        self.assertFalse(self.page.has_unsaved_changes())
+        self.assertFalse(self.page.writing_form.isRowVisible(self.page.typography_preview_host))
+        self.set_draft()
+        self.page.chapter_target_chars.setValue(4200)
+        self.page.typography_preview_toggle.click()
+        self.assertTrue(self.page.writing_form.isRowVisible(self.page.typography_preview_host))
+        self.assertEqual((self.page.editor_font_size.value(), self.page.editor_line_spacing.value()), (24, 2.0))
+        self.assertEqual(self.page.chapter_target_chars.value(), 4200)
+        self.assertTrue(self.page.has_unsaved_changes())
+        self.assertEqual((self.edit.font().pixelSize(), self.edit.line_spacing()), (16, 1.0))
+        self.assertEqual(self.path.read_bytes(), self.original)
+
+    def test_typography_controls_are_reachable_at_narrow_width_and_large_ui_font(self):
+        self.window.appearance_controller.apply({**self.window.config, "ui_font_size": 22})
+        self.window.resize(1100, 900)
+        self.window._show_route("settings")
+        self.page.tabs.setCurrentIndex(0)
+        self.settle()
+        viewport = self.page.section_scrolls[0].viewport()
+        for control in (self.page.editor_font_size, self.page.editor_line_spacing,
+                        self.page.typography_reset, self.page.typography_preview_toggle):
+            self.assertTrue(viewport.rect().contains(QRect(control.mapTo(viewport, QPoint()), control.size())))
+        self.assertEqual(self.page.section_scrolls[0].horizontalScrollBar().maximum(), 0)
 
     def test_saved_typography_preserves_live_draft_selection_undo_and_revision(self):
         self.edit.moveCursor(QTextCursor.MoveOperation.End)

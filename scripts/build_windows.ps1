@@ -85,6 +85,29 @@ try {
         throw "打包程序自检失败，退出码：$($Smoke.ExitCode)"
     }
 
+    $UiSmokeReport = Join-Path $BuildRoot "ui-self-test.json"
+    if (Test-Path -LiteralPath $UiSmokeReport) {
+        Remove-Item -LiteralPath $UiSmokeReport -Force
+    }
+    $UiSmoke = Start-Process -FilePath $BundleExecutable `
+        -ArgumentList @("--ui-self-test", ('"{0}"' -f $UiSmokeReport)) `
+        -WindowStyle Hidden -PassThru
+    try {
+        Wait-Process -Id $UiSmoke.Id -Timeout 60 -ErrorAction Stop
+    }
+    catch {
+        Stop-Process -Id $UiSmoke.Id -Force -ErrorAction SilentlyContinue
+        throw "打包程序界面自检超过 60 秒，已终止。"
+    }
+    $UiSmoke.Refresh()
+    if ($UiSmoke.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $UiSmokeReport -PathType Leaf)) {
+        throw "打包程序界面自检失败，退出码：$($UiSmoke.ExitCode)"
+    }
+    $UiSmokeResult = Get-Content -LiteralPath $UiSmokeReport -Raw | ConvertFrom-Json
+    if (-not $UiSmokeResult.successful -or -not $UiSmokeResult.temporary_data_only) {
+        throw "打包程序界面自检未通过。"
+    }
+
     if (Test-Path -LiteralPath $ReleaseRoot) {
         Remove-Item -LiteralPath $ReleaseRoot -Recurse -Force
     }

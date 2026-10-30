@@ -1,3 +1,4 @@
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -38,6 +39,21 @@ class PackagedResourceTests(TestCase):
                 resource_path("assets/app_icon.ico"),
                 Path(tmp).resolve() / "assets/app_icon.ico",
             )
+
+    def test_ui_self_test_uses_temporary_profiles_and_reports_real_controller_checks(self):
+        entry = Path(__file__).resolve().parents[1] / "main.py"
+        with TemporaryDirectory() as tmp:
+            report = Path(tmp) / "ui smoke.json"
+            result = subprocess.run([sys.executable, "-B", str(entry), "--ui-self-test", str(report)],
+                                    cwd=tmp, capture_output=True, text=True, timeout=45)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            data = json.loads(report.read_text(encoding="utf-8"))
+            self.assertTrue(data["successful"])
+            self.assertTrue(data["temporary_data_only"])
+            self.assertFalse(data["native_ime_tested"])
+            self.assertEqual(set(data["checks"]), {"fresh_profile", "legacy_profile", "prose_position",
+                             "settings_apply", "ai_explicit_review", "save_conflict"})
+            self.assertEqual(list(Path(tmp).iterdir()), [report])
 
     def test_required_runtime_resources_are_present_in_source_tree(self) -> None:
         validate_runtime_resources()
