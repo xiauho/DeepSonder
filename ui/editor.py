@@ -34,6 +34,7 @@ from ui.elided_label import ElidedLabel
 from ui.theme import document_css
 from ui.chapter_writing_page import ChapterWritingPage
 from ui.story_plan_form import StoryPlanForm
+from ui.save_feedback import save_feedback
 
 
 _PARAGRAPH_RE = re.compile(r"\n\s*\n")
@@ -128,12 +129,20 @@ class Editor(QWidget):
     document_about_to_change = Signal()
     document_loaded = Signal()
     selection_changed = Signal()
+    save_state_changed = Signal()
+    retry_save_requested = Signal()
+    draft_copy_requested = Signal()
+    reload_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._current_path: str | None = None
         self._current_category = ""
         self._dirty = False
+        self._saving = False
+        self._save_error_message = ""
+        self._save_conflict = False
+        self._embedded_save_feedback = False
         self._loading = False
         self._loaded_file_revision: str | tuple[int, int, int] | None = None
         self._stats_revision: int | None = None
@@ -165,6 +174,7 @@ class Editor(QWidget):
         self.path_label = QLabel("从左侧选择文件，或创建一个新章节")
         self.path_label.setObjectName("saveErrorMessage")
         self.path_label.setWordWrap(True)
+        self.path_label.setTextFormat(Qt.TextFormat.PlainText)
         self.path_label.setMinimumWidth(0)
         self.path_label.hide()
         title_box.addWidget(self.title_label)
@@ -209,6 +219,22 @@ class Editor(QWidget):
         header_layout.addWidget(self.dirty_badge, 0, Qt.AlignmentFlag.AlignVCenter)
         layout.addWidget(header)
         layout.addWidget(self.path_label)
+        self.save_recovery_bar = QWidget()
+        recovery = QHBoxLayout(self.save_recovery_bar)
+        recovery.setContentsMargins(0, 0, 0, 0)
+        self.retry_save_button = QPushButton("重试保存")
+        self.retry_save_button.clicked.connect(self.retry_save_requested)
+        self.draft_copy_button = QPushButton("另存草稿")
+        self.draft_copy_button.clicked.connect(self.draft_copy_requested)
+        self.reload_button = QPushButton("重新载入")
+        self.reload_button.clicked.connect(self.reload_requested)
+        self.reload_button.setToolTip("重新载入前会确认是否放弃未保存的内容")
+        for button in (self.retry_save_button, self.draft_copy_button, self.reload_button):
+            button.setObjectName("ghostButton")
+            recovery.addWidget(button)
+        recovery.addStretch()
+        self.save_recovery_bar.hide()
+        layout.addWidget(self.save_recovery_bar)
 
         self.find_bar = QFrame()
         self.find_bar.setObjectName("findBar")
@@ -529,6 +555,9 @@ class Editor(QWidget):
     ) -> None:
         self.document_about_to_change.emit()
         self._save_failed = False
+        self._saving = False
+        self._save_error_message = ""
+        self._save_conflict = False
         self._loading = True
         self._current_path = str(path)
         self._current_category = str(category)
@@ -555,6 +584,9 @@ class Editor(QWidget):
     def clear_document(self, message: str = "未打开文件") -> None:
         self.document_about_to_change.emit()
         self._save_failed = False
+        self._saving = False
+        self._save_error_message = ""
+        self._save_conflict = False
         self._loading = True
         self.text_edit.setPlaceholderText("")
         self.text_edit.clear()
@@ -619,23 +651,37 @@ class Editor(QWidget):
         self.text_edit.document().setModified(False)
         self._loaded_file_revision = revision
         self._save_failed = False
+        self._saving = False
+        self._save_error_message = ""
+        self._save_conflict = False
         self._set_dirty(False)
         self.path_label.hide()
         self.file_saved.emit(self._current_path)
 
     def show_saving(self) -> None:
-        self.dirty_badge.setText("正在保存…")
-        self.dirty_badge.setObjectName("dirtyBadge")
-        self.dirty_badge.style().unpolish(self.dirty_badge)
-        self.dirty_badge.style().polish(self.dirty_badge)
-        self.dirty_badge.show()
-        self.dirty_badge.repaint()
+        self._saving = True
+        self._set_dirty(self._dirty)
 
     def show_save_error(self, message: str) -> None:
         self._save_failed = True
+        self._saving = False
+        self._save_error_message = str(message)
         self._set_dirty(self._dirty)
-        self.path_label.setText(f"保存失败：{message}")
+        prefix = "外部版本变化" if self._save_conflict else "保存失败"
+        self.path_label.setText(f"{prefix}：{message}")
         self.path_label.show()
+
+    def show_save_conflict(self, message: str) -> None:
+        self._save_conflict = True
+        self.show_save_error(message)
+
+    def save_feedback(self):
+        return save_feedback(self._current_path, dirty=self._dirty, saving=self._saving,
+                             error=self._save_error_message, conflict=self._save_conflict)
+
+    def set_embedded_save_feedback(self, enabled: bool) -> None:
+        self._embedded_save_feedback = bool(enabled)
+        self._set_dirty(self._dirty)
 
     def has_external_change(self) -> bool:
         """Return whether the loaded file changed outside this editor."""
@@ -841,7 +887,9 @@ class Editor(QWidget):
         self._dirty = dirty
         # 徽章只在需要用户注意时出现；干净状态由状态栏的保存提示承担反馈。
         if getattr(self, "_save_failed", False):
-            state = ("保存失败", "saveErrorBadge")
+            state = ("外部版本变化" if self._save_conflict else "保存失败", "saveErrorBadge")
+        elif self._saving:
+            state = ("正在保存…", "dirtyBadge")
         elif dirty:
             state = ("未保存", "dirtyBadge")
         else:
@@ -851,11 +899,15 @@ class Editor(QWidget):
         else:
             self.dirty_badge.setText(state[0])
             self.dirty_badge.setObjectName(state[1])
-            self.dirty_badge.show()
+            self.dirty_badge.setVisible(not self._embedded_save_feedback or self.save_feedback().needs_attention)
+        attention = self.save_feedback().needs_attention
+        self.save_recovery_bar.setVisible(self._embedded_save_feedback and attention)
+        self.retry_save_button.setText("处理版本冲突" if self._save_conflict else "重试保存")
         self.dirty_badge.style().unpolish(self.dirty_badge)
         self.dirty_badge.style().polish(self.dirty_badge)
         if changed:
             self.dirty_changed.emit(dirty)
+        self.save_state_changed.emit()
 
     def _update_stats(self) -> None:
         if self.is_story_plan():

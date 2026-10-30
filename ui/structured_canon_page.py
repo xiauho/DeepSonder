@@ -25,6 +25,7 @@ from ui.canon_layout import CanonModuleHeader
 from ui.elided_label import ElidedLabel
 from ui.icons import set_button_icon, refresh_button_icons
 from ui.theme import colors_for
+from ui.save_feedback import save_feedback
 
 
 class StructuredCanonPage(QWidget):
@@ -34,10 +35,12 @@ class StructuredCanonPage(QWidget):
     saved = Signal(str)  # 实际写盘成功后发出（参数为保存路径）
     sync_requested = Signal(str)
     chapter_requested = Signal(str)
+    save_state_changed = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("canonPage")
+        self._embedded_save_feedback = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -94,7 +97,8 @@ class StructuredCanonPage(QWidget):
         adaptive_header.setObjectName("canonPageToolbar")
         header_layout.addWidget(adaptive_header)
         # 状态独占固定的一行，长度和颜色变化不再挤动标题及操作按钮。
-        status_row = QHBoxLayout()
+        self.status_row = QWidget()
+        status_row = QHBoxLayout(self.status_row)
         status_row.setContentsMargins(0, 0, 0, 0)
         self.modified_badge = QLabel("已保存")
         self.modified_badge.setAccessibleName("资料保存状态")
@@ -103,7 +107,13 @@ class StructuredCanonPage(QWidget):
         self.modified_badge.setSizePolicy(policy)
         status_row.addWidget(self.modified_badge)
         status_row.addStretch()
-        header_layout.addLayout(status_row)
+        header_layout.addWidget(self.status_row)
+        self.save_error_banner = QLabel()
+        self.save_error_banner.setObjectName("saveErrorMessage")
+        self.save_error_banner.setWordWrap(True)
+        self.save_error_banner.setTextFormat(Qt.TextFormat.PlainText)
+        self.save_error_banner.hide()
+        header_layout.addWidget(self.save_error_banner)
         layout.addWidget(header)
 
         self._saved_revision = None
@@ -168,7 +178,10 @@ class StructuredCanonPage(QWidget):
         # 恢复类操作只在版本冲突或保存失败时浮现，不常驻页面底部。
         self.recovery_bar = QWidget()
         recovery = QHBoxLayout(self.recovery_bar)
-        recovery.setContentsMargins(18, 0, 18, 8)
+        recovery.setContentsMargins(0, 0, 0, 0)
+        self.retry_save_button = QPushButton("重试保存")
+        self.retry_save_button.clicked.connect(self.save)
+        recovery.addWidget(self.retry_save_button)
         self.diff_button = QPushButton("查看差异")
         self.diff_button.clicked.connect(self.show_revision_diff)
         recovery.addWidget(self.diff_button)
@@ -180,7 +193,7 @@ class StructuredCanonPage(QWidget):
         self.reload_button.setToolTip("从磁盘重新载入当前资料；有未保存内容时会先确认")
         self.reload_button.clicked.connect(self.reload_from_disk)
         recovery.addWidget(self.reload_button)
-        layout.addWidget(self.recovery_bar)
+        header_layout.addWidget(self.recovery_bar)
 
         self._sync_header()
 
@@ -214,6 +227,15 @@ class StructuredCanonPage(QWidget):
     def set_sync_available(self, available: bool, reason: str = "") -> None:
         self.form.set_sync_available(available, reason)
 
+    def save_feedback(self):
+        return save_feedback(self.current_path(), dirty=self.is_modified(),
+                             saving=self.form.saving, error=self.form.save_error,
+                             conflict=self.form.external_changed)
+
+    def set_embedded_save_feedback(self, enabled: bool) -> None:
+        self._embedded_save_feedback = bool(enabled)
+        self._sync_header()
+
     def _prompt_new_module(self) -> None:
         """页头“＋ 新建模块”入口：委托给表单的新建模块对话框。"""
         self.form.prompt_new_module()
@@ -233,6 +255,8 @@ class StructuredCanonPage(QWidget):
             state = ("外部版本变化", "saveErrorBadge")
         elif path is not None and self.form.save_error:
             state = ("保存失败", "saveErrorBadge")
+        elif path is not None and self.form.saving:
+            state = ("正在保存…", "dirtyBadge")
         elif path is not None and self.form.is_modified():
             state = ("待保存", "dirtyBadge")
         elif path is not None:
@@ -258,6 +282,14 @@ class StructuredCanonPage(QWidget):
         self.diff_button.setVisible(self.form.external_changed)
         self.draft_button.setVisible(bool(self.form.external_changed or self.form.save_error))
         self.recovery_bar.setVisible(bool(self.form.external_changed or self.form.save_error))
+        feedback = self.save_feedback()
+        self.status_row.setVisible(not self._embedded_save_feedback or feedback.needs_attention)
+        self.save_error_banner.setText(f"{feedback.label}：{feedback.detail}")
+        self.save_error_banner.setVisible(self._embedded_save_feedback and feedback.needs_attention)
+        self.retry_save_button.setVisible(feedback.state == "error")
+        self.form.feedback.setVisible(not (self._embedded_save_feedback and self.form.save_error
+                                          and self.form.feedback.text() == self.form.save_error))
+        self.save_state_changed.emit()
 
     # ---------- 页内大纲 ----------
 
@@ -425,6 +457,7 @@ class StructuredCanonPage(QWidget):
                 QMessageBox.warning(self, "另存草稿失败", error)
             else:
                 self.form.feedback.setText("草稿副本已保存；当前资料的版本冲突仍需处理。")
+                self.form.feedback.show()
 
     def show_revision_diff(self) -> None:
         if self.current_path() is None:

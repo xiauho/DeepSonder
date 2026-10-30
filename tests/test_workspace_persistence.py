@@ -167,18 +167,19 @@ class WorkspacePersistenceTests(unittest.TestCase):
         self.assertTrue(window.editor.path_label.isHidden())
         self.assertIn("新内容", self.first.read_text(encoding="utf-8"))
 
-    def test_editor_dirty_badge_appears_only_when_attention_is_needed(self):
+    def test_routine_editor_save_state_uses_statusbar_without_header_duplicate(self):
         window = self.window()
         badge = window.editor.dirty_badge
         self.assertTrue(badge.isHidden())  # 载入即干净：页头不显示状态徽章
         window.editor.text_edit.insertPlainText("改动")
         self.events()
-        self.assertFalse(badge.isHidden())
-        self.assertEqual(badge.text(), "未保存")
-        self.assertEqual(badge.objectName(), "dirtyBadge")
+        self.assertTrue(badge.isHidden())
+        self.assertEqual(window.save_status.text(), "未保存")
+        self.assertEqual(window.save_status.property("saveState"), "dirty")
         self.assertTrue(window.document_controller.save())
         self.events()
         self.assertTrue(badge.isHidden())
+        self.assertEqual(window.save_status.text(), "已保存")
 
     def test_canon_module_collapse_state_survives_restart(self):
         from tests.test_canon_schema import character_text

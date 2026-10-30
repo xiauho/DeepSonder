@@ -762,6 +762,9 @@ QMenu::item:selected { background: __SELECTION__; }
 QMenu::item:disabled { color: __MUTED__; }
 QStatusBar { background: __PANEL__; border-top: 1px solid __BORDER__; padding: 3px 10px; }
 QStatusBar::item { border: none; }
+QLabel#documentSaveStatus { color: __MUTED__; }
+QLabel#documentSaveStatus[saveState="dirty"], QLabel#documentSaveStatus[saveState="saving"] { color: __ACCENT__; }
+QLabel#documentSaveStatus[saveState="error"], QLabel#documentSaveStatus[saveState="conflict"] { color: __DANGER__; }
 QProgressBar { background: __FIELD__; border: none; border-radius: 4px; }
 QProgressBar::chunk { background: __PRIMARY__; border-radius: 4px; }
 QSplitter::handle { background: __BORDER__; width: 1px; height: 1px; }

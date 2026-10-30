@@ -97,7 +97,9 @@ class DocumentController(QObject):
                 force=force,
             )
         except DocumentRevisionConflict as exc:
-            show_error = getattr(self.editor, "show_save_error", None)
+            show_error = getattr(self.editor, "show_save_conflict", None)
+            if not callable(show_error):
+                show_error = getattr(self.editor, "show_save_error", None)
             if callable(show_error):
                 show_error("文件已在外部修改，请选择重新加载或确认覆盖。")
             self._save_conflict_path = exc.path

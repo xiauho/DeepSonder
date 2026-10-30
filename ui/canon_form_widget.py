@@ -214,6 +214,7 @@ class CanonFormWidget(QWidget):
         self.kind: str | None = None
         self._on_saved = None  # 实际写盘成功后回调（参数为保存路径）
         self._modified = False
+        self.saving = False
         self._last_editor = None
         self._expected_hash = ""
         self.external_changed = False
@@ -575,6 +576,18 @@ class CanonFormWidget(QWidget):
         self.state_changed.emit()
 
     def write_changes(self) -> tuple[bool, str]:
+        """Publish progress around the existing conflict-safe write boundary."""
+        if self.path is None or self.entry is None:
+            return False, "尚未打开设定材料。"
+        self.saving = True
+        self.state_changed.emit()
+        try:
+            return self._write_changes()
+        finally:
+            self.saving = False
+            self.state_changed.emit()
+
+    def _write_changes(self) -> tuple[bool, str]:
         """Commit collected input and update the revision only after a successful write."""
         if self.path is None or self.entry is None:
             return False, "尚未打开设定材料。"

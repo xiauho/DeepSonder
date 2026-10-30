@@ -49,6 +49,7 @@ from core.continuation import MIN_CONTINUATION_CHARS
 from core.project import NovelProject
 from core.project_data import ChapterIdConflictError, ProjectDataStore, sanitize_filename
 from core.text_metrics import count_content_chars
+from core.storage import atomic_write_text
 from core.version import load_current_version
 from ui.ai_controller import AIController
 from ui.ai_engine_controller import AIEngineController
@@ -66,6 +67,7 @@ from ui.document_context import DocumentContext
 from ui.quick_access_controller import QuickAccessController
 from ui.export_controller import ExportController
 from ui.editor import Editor
+from ui.elided_label import ElidedLabel
 from ui.icons import set_button_icon
 from ui.inspector import Inspector
 from ui.left_panel import LeftPanel
@@ -611,6 +613,7 @@ class MainWindow(QMainWindow):
         self.main_splitter.setChildrenCollapsible(False)
         self.left_panel = LeftPanel()
         self.editor = Editor()
+        self.editor.set_embedded_save_feedback(True)
         self.editor.attach_document_actions(self.action_bar)
         self.inspector = Inspector()
         self.main_splitter.addWidget(self.left_panel)
@@ -619,6 +622,7 @@ class MainWindow(QMainWindow):
         self.content_stack = QStackedWidget()
         self.content_stack.addWidget(self.editor)
         self.structured_canon_page = StructuredCanonPage()
+        self.structured_canon_page.set_embedded_save_feedback(True)
         self.content_stack.addWidget(self.structured_canon_page)
         self.content_stack.addWidget(self.timeline_page)
         self.main_splitter.addWidget(self.content_stack)
@@ -732,8 +736,10 @@ class MainWindow(QMainWindow):
         help_menu.addAction(self.actions["about"])
 
     def _build_statusbar(self) -> None:
-        self.status_message = QLabel("打开或创建一个项目，开始今天的写作")
+        self.status_message = ElidedLabel("打开或创建一个项目，开始今天的写作")
         self.status_message.setObjectName("mutedLabel")
+        self.status_message.setMinimumWidth(0)
+        self.status_message.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.task_progress = QProgressBar()
         self.task_progress.setRange(0, 0)
         self.task_progress.setFixedSize(110, 8)
@@ -743,12 +749,14 @@ class MainWindow(QMainWindow):
         self.cancel_task_button.setAutoDefault(False)
         self.cancel_task_button.clicked.connect(self.cancel_ai_task)
         self.cancel_task_button.hide()
-        self.auto_save_status = QLabel("自动保存已开启")
-        self.auto_save_status.setObjectName("mutedLabel")
+        self.save_status = ElidedLabel()
+        self.save_status.setObjectName("documentSaveStatus")
+        self.save_status.setTextFormat(Qt.TextFormat.PlainText)
+        self.save_status.hide()
         self.statusBar().addWidget(self.status_message, 1)
         self.statusBar().addPermanentWidget(self.task_progress)
         self.statusBar().addPermanentWidget(self.cancel_task_button)
-        self.statusBar().addPermanentWidget(self.auto_save_status)
+        self.statusBar().addPermanentWidget(self.save_status)
         self.statusBar().addPermanentWidget(self.ai_indicator)
         self.task_entry = QToolButton()
         self.task_entry.setText("AI 任务")
@@ -808,6 +816,13 @@ class MainWindow(QMainWindow):
         self.settings_controller.connection_failed.connect(self._on_dsh_test_failed)
         self.settings_controller.connection_finished.connect(self._on_dsh_test_finished)
         self.editor.dirty_changed.connect(self._on_dirty_changed)
+        self.editor.save_state_changed.connect(self._refresh_save_feedback)
+        self.structured_canon_page.save_state_changed.connect(self._refresh_save_feedback)
+        self.content_stack.currentChanged.connect(self._refresh_save_feedback)
+        self.page_stack.currentChanged.connect(self._refresh_save_feedback)
+        self.editor.retry_save_requested.connect(lambda: self.save_current_file(notify=False))
+        self.editor.draft_copy_requested.connect(self._save_editor_draft_copy)
+        self.editor.reload_requested.connect(self._reload_editor_draft)
         self.editor.selection_changed.connect(self._refresh_ai_actions)
         self.editor.stats_changed.connect(lambda _text: self._refresh_ai_actions())
         self.structured_canon_page.saved.connect(self._on_structured_canon_saved)
@@ -1162,11 +1177,7 @@ class MainWindow(QMainWindow):
             if not ok:
                 if notify:
                     QMessageBox.warning(self, "保存失败", error)
-                else:
-                    self.status_message.setText(f"保存失败：{error}")
                 return False
-            if notify:
-                self.status_message.setText("已保存")
             self._update_window_title()
             return True
         if not self.editor.current_path():
@@ -1179,10 +1190,41 @@ class MainWindow(QMainWindow):
             if notify:
                 QMessageBox.warning(self, "保存失败", "文件未能保存，请检查写入权限。")
             return False
-        if notify:
-            self.status_message.setText("已保存")
         self._update_window_title()
         return True
+
+    def _save_editor_draft_copy(self) -> None:
+        if self.current_document().structured or not self.editor.current_path():
+            return
+        source = Path(self.editor.current_path())
+        suffix = source.suffix or ".md"
+        file_filter = "JSON (*.json)" if suffix.lower() == ".json" else "Markdown (*.md)"
+        destination, _filter = QFileDialog.getSaveFileName(
+            self, "另存文档草稿", str(source.with_name(source.stem + "-草稿" + suffix)), file_filter)
+        if not destination:
+            return
+        try:
+            if Path(destination).resolve() == source.resolve():
+                QMessageBox.warning(self, "另存草稿失败", "请为草稿选择其他文件，原文档不会被覆盖。")
+                return
+            atomic_write_text(Path(destination), self.editor.document_text(), encoding="utf-8")
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, "另存草稿失败", str(exc))
+            return
+        self.status_message.setText("草稿副本已保存，原文档的保存问题仍需处理。")
+
+    def _reload_editor_draft(self) -> None:
+        if self.current_document().structured or not self.editor.current_path():
+            return
+        if self.editor.is_dirty():
+            answer = QMessageBox.question(
+                self, "重新载入文档", "重新载入会放弃当前未保存的内容。需要保留时，请先另存草稿。是否继续？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No)
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        if not self.document_controller.reload_current_file():
+            self.editor.show_save_error("重新载入失败，本地内容仍保留，请检查文件或另存草稿。")
 
     def _resolve_save_conflict(self) -> bool:
         path = self.document_controller.save_conflict_path
@@ -1728,7 +1770,6 @@ class MainWindow(QMainWindow):
         # 通用 md 编辑器仅在 AI 任务回退时承载设定材料；同一文件时需跟随刷新
         if current and Path(current).resolve() == Path(path).resolve():
             self.editor.reload_current_file()
-        self.status_message.setText(f"设定材料已更新 · {Path(path).stem}")
 
     def sync_character_card(self, card_path: str | None = None) -> None:
         """Preview and apply an evidence-bound sync to one character card."""
@@ -2246,14 +2287,36 @@ class MainWindow(QMainWindow):
         page = getattr(self, "structured_canon_page", None)
         if page is not None:
             page.configure_auto_save(enabled, seconds)
-        self.auto_save_status.setText("自动保存已开启" if enabled else "自动保存已关闭")
+        self._refresh_save_feedback()
 
     def _on_auto_saved(self, _path: str) -> None:
-        self.auto_save_status.setText("刚刚自动保存")
+        self._refresh_save_feedback()
 
     def _on_save_conflict_detected(self, path: str) -> None:
-        self.auto_save_status.setText("检测到外部修改，尚未覆盖")
-        self.status_message.setText(f"文件已被外部修改：{Path(path).name}")
+        self._refresh_save_feedback()
+
+    def _refresh_save_feedback(self, *_args) -> None:
+        """Re-read the visible document; event payloads never become save truth."""
+        context = self.current_document()
+        owner = self.structured_canon_page if context.structured else self.editor
+        feedback = owner.save_feedback()
+        active = (self.page_stack.currentWidget() is self.writing_page
+                  and context.path is not None and feedback.path is not None)
+        self.save_status.setVisible(active)
+        self.save_status.setText(feedback.label if active else "")
+        state = feedback.state if active else "empty"
+        previous_state = self.save_status.property("saveState")
+        self.save_status.setProperty("saveState", state)
+        self.save_status.setFixedWidth(self.save_status.fontMetrics().horizontalAdvance("外部版本变化") + 16)
+        self.save_status.setAccessibleName(f"文档保存状态：{feedback.label}" if active else "文档保存状态")
+        auto = "自动保存已开启" if self.config.get("auto_save", True) else "自动保存已关闭"
+        detail = f"{feedback.path}\n{feedback.detail}".strip() if active else ""
+        self.save_status.setToolTip(f"{feedback.label}\n{detail}\n{auto}" if active else auto)
+        if state != previous_state:
+            self.save_status.style().unpolish(self.save_status)
+            self.save_status.style().polish(self.save_status)
+        if active and feedback.state == "saving":
+            self.save_status.repaint()
 
     def _on_dirty_changed(self, _dirty: bool) -> None:
         self._update_window_title()
