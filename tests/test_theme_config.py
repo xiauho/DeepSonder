@@ -45,6 +45,29 @@ class ThemeConfigTests(TestCase):
         self.assertIn(LIGHT_COLORS["panel_color"], light_qss)
         self.assertIn(DARK_COLORS["field_color"], dark_qss)
 
+    def test_chapter_writing_fields_share_the_page_surface(self) -> None:
+        for theme, colors in (("light", LIGHT_COLORS), ("dark", DARK_COLORS)):
+            qss = build_qss({"theme": theme})
+            line = qss.split("QWidget#chapterWritingPage QLineEdit {", 1)[1][:240]
+            self.assertIn("background: transparent", line)
+            self.assertIn(f"border-color: {colors['border_color']}", line)
+            focused = qss.split("QWidget#chapterWritingPage QLineEdit:focus {", 1)[1][:180]
+            self.assertIn(f"border-color: {colors['accent_color']}", focused)
+            brief = qss.split("QWidget#chapterWritingPage QPlainTextEdit#storyPlanField {", 1)[1][:220]
+            self.assertIn(f"background: {colors['panel_color']}", brief)
+            self.assertIn("border-style: none", brief)
+            story = qss.split("QPlainTextEdit#storyPlanField {", 1)[1][:180]
+            self.assertIn(f"background: {colors['field_color']}", story)
+            toggle = qss.split("QWidget#chapterWritingPage QToolButton#editorModeButton:checked {", 1)[1][:180]
+            self.assertIn("background: transparent", toggle)
+            self.assertNotIn(colors["selection_color"], toggle)
+            prose = qss.split('QPlainTextEdit#writingEditor[chapterProse="true"] {', 1)[1][:220]
+            self.assertIn(f"background: {colors['panel_color']}", prose)
+            self.assertIn("border-width: 1px 0 0 0", prose)
+            paper = qss.split("QFrame#chapterPaper {", 1)[1][:180]
+            self.assertIn(f"background: {colors['panel_color']}", paper)
+            self.assertIn("border-radius: 12px", paper)
+
     def test_message_box_qss_uses_theme_colors(self) -> None:
         qss = build_qss({"theme": "light"})
         self.assertIn("QMessageBox", qss)

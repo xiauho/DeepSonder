@@ -379,17 +379,26 @@ QPlainTextEdit#writingEditor, QTextBrowser#markdownPreview {
 }
 QPlainTextEdit#writingEditor:focus, QTextBrowser#markdownPreview:focus { border-color: __ACCENT__; }
 QPlainTextEdit#proseTypographyPreview { background: __FIELD__; color: __TEXT__; border: 1px solid __BORDER__; border-radius: 8px; }
-QWidget#chapterWritingPage { background: __PANEL__; }
+QWidget#chapterWritingPage { background: __BG__; }
+QFrame#chapterPaper {
+    background: __PANEL__;
+    border: 1px solid __BORDER__;
+    border-radius: 12px;
+}
 QToolButton#proseWidthHandle { background: transparent; border: none; color: __MUTED__; padding: 0; min-width: 0; }
 QToolButton#proseWidthHandle:hover { color: __ACCENT__; background: __HOVER__; }
 QToolButton#proseWidthHandle:focus { color: __ACCENT__; border: 1px solid __ACCENT__; }
 QPlainTextEdit#writingEditor[chapterProse="true"] {
-    border: 1px solid transparent;
-    border-bottom: 1px solid __BORDER__;
+    background: __PANEL__;
+    border-width: 1px 0 0 0;
+    border-style: solid;
+    border-color: __BORDER__;
     border-radius: 0;
 }
 QPlainTextEdit#writingEditor[chapterProse="true"]:focus {
-    border-color: transparent;
+    border-width: 1px 0 1px 0;
+    border-style: solid;
+    border-top-color: __BORDER__;
     border-bottom-color: __ACCENT__;
 }
 QLineEdit#documentTitleEdit {
@@ -787,6 +796,41 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 QScrollBar:horizontal { background: transparent; height: 9px; }
 QScrollBar::handle:horizontal { background: __BORDER__; border-radius: 4px; min-width: 30px; }
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
+
+/* Chapter writing fields sit on the page surface. Story-plan fields keep their own fill. */
+QWidget#chapterWritingPage QLineEdit {
+    background: transparent;
+    border-width: 0 0 1px 0;
+    border-style: solid;
+    border-color: __BORDER__;
+    border-radius: 0;
+}
+QWidget#chapterWritingPage QLineEdit:focus {
+    border-width: 0 0 1px 0;
+    border-style: solid;
+    border-color: __ACCENT__;
+}
+QWidget#chapterWritingPage QPlainTextEdit#storyPlanField {
+    background: __PANEL__;
+    border-width: 0;
+    border-style: none;
+    border-radius: 0;
+    padding: 4px 9px 8px;
+}
+QWidget#chapterWritingPage QPlainTextEdit#storyPlanField:focus {
+    border-width: 0 0 1px 0;
+    border-style: solid;
+    border-color: __ACCENT__;
+}
+QWidget#chapterWritingPage QToolButton#editorModeButton:checked {
+    background: transparent;
+    color: __MUTED__;
+    border: 1px solid __BORDER__;
+}
+QWidget#chapterWritingPage QToolButton#editorModeButton:checked:hover {
+    background: __HOVER__;
+    color: __TEXT__;
+}
 """
 
 

@@ -86,7 +86,7 @@ class ReadingWorkspaceTests(TestCase):
         edit.setTextCursor(cursor)
         selection = cursor.selectedText()
         undo_steps = edit.document().availableUndoSteps()
-        self.assertGreater(page.layout().contentsMargins().left(), 0)
+        self.assertGreater(page.paper.layout().contentsMargins().left(), 24)
         comfortable = edit.width()
         w.actions["comfortable_width"].trigger()
         self.settle()
@@ -117,8 +117,26 @@ class ReadingWorkspaceTests(TestCase):
         restored = self.make_window()
         self.assertFalse(restored.actions["comfortable_width"].isChecked())
         self.assertFalse(restored.editor.writing_page.comfortable_width())
-        self.assertEqual(restored.editor.writing_page.layout().contentsMargins().left(), 0)
+        restored_page = restored.editor.writing_page
+        self.assertEqual(restored_page.paper.layout().contentsMargins().left(), 24)
+        self.assertEqual(restored_page.layout().contentsMargins().left(), 16)
         self.assertEqual(self.path.read_bytes(), self.original)
+
+    def test_full_width_sheet_stays_inset_and_holds_the_toggle(self):
+        w = self.window
+        page = w.editor.writing_page
+        w.actions["width_fill"].trigger()
+        self.settle()
+        paper = page.paper.geometry()
+        toggle = page.prep_toggle
+        top_left = toggle.mapTo(page, toggle.rect().topLeft())
+        bottom_right = toggle.mapTo(page, toggle.rect().bottomRight())
+        self.assertGreaterEqual(paper.left(), 16)
+        self.assertLessEqual(paper.right(), page.width() - 16)
+        self.assertGreaterEqual(top_left.y(), paper.top() + 8)
+        self.assertLessEqual(bottom_right.y(), paper.bottom() - 8)
+        self.assertGreaterEqual(top_left.x(), paper.left() + 8)
+        self.assertLessEqual(bottom_right.x(), paper.right() - 8)
 
     def test_toolbar_save_and_reference_reuse_guarded_actions(self):
         w = self.window

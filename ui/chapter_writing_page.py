@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QEvent, QPoint, QTimer, Qt, Signal
 from PySide6.QtWidgets import (
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -25,6 +26,12 @@ _FIELDS = (
     ("conflict", "核心冲突", "谁和谁发生了什么对立"),
     ("hook", "章节钩子", "章末留下什么未解的事"),
 )
+
+# The sheet stays inset from the editor edges. Inner padding remains when the column is full.
+PAPER_MARGIN = 16
+PAPER_PADDING_X = 24
+PAPER_PADDING_TOP = 18
+PAPER_PADDING_BOTTOM = 16
 
 
 class ChapterWritingPage(QWidget):
@@ -51,8 +58,15 @@ class ChapterWritingPage(QWidget):
         self._extra_fields: list[tuple[str, QPlainTextEdit]] = []
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(12)
+        layout.setContentsMargins(PAPER_MARGIN, PAPER_MARGIN, PAPER_MARGIN, PAPER_MARGIN)
+        layout.setSpacing(0)
+        self.paper = QFrame()
+        self.paper.setObjectName("chapterPaper")
+        self.paper.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        paper_layout = QVBoxLayout(self.paper)
+        paper_layout.setContentsMargins(PAPER_PADDING_X, PAPER_PADDING_TOP, PAPER_PADDING_X, PAPER_PADDING_BOTTOM)
+        paper_layout.setSpacing(12)
+        layout.addWidget(self.paper)
 
         self.prep_title = QLabel("本章准备")
         self.prep_title.setObjectName("sectionTitle")
@@ -89,14 +103,14 @@ class ChapterWritingPage(QWidget):
         bar.addWidget(self.prep_title)
         bar.addWidget(self.summary, 1)
         bar.addWidget(self.prep_toggle)
-        layout.addWidget(self.prep_bar)
-        layout.addWidget(self.prep)
+        paper_layout.addWidget(self.prep_bar)
+        paper_layout.addWidget(self.prep)
 
         self.notice = QLabel("")
         self.notice.setObjectName("mutedLabel")
         self.notice.setWordWrap(True)
         self.notice.hide()
-        layout.addWidget(self.notice)
+        paper_layout.addWidget(self.notice)
 
         self.body_edit = ProseTextEdit()
         self.body_edit.setObjectName("writingEditor")
@@ -106,16 +120,16 @@ class ChapterWritingPage(QWidget):
         self.body_edit.verticalScrollBar().installEventFilter(self)
         self.body_edit.setPlaceholderText("从这里开始写这一章。")
         self.body_edit.setAccessibleName("正文")
-        layout.addWidget(self.body_edit, 1)
+        paper_layout.addWidget(self.body_edit, 1)
 
         self.extras_host = QWidget()
         self.extras_layout = QVBoxLayout(self.extras_host)
         self.extras_layout.setContentsMargins(0, 0, 0, 0)
         self.extras_layout.setSpacing(8)
         self.extras_host.hide()
-        layout.addWidget(self.extras_host)
+        paper_layout.addWidget(self.extras_host)
 
-        self.author_note = self._text(layout, "作者备注", "只留给自己的提醒，不会写成正文", 88)
+        self.author_note = self._text(paper_layout, "作者备注", "只留给自己的提醒，不会写成正文", 88)
         self.outline_rest.hide()
         self._outline_rest_caption.hide()
         self.outline_text.hide()
@@ -196,10 +210,13 @@ class ChapterWritingPage(QWidget):
         # Bound the reading measure while respecting the author's font choice.
         measure = self._custom_width if self._width_mode == "custom" else self.recommended_prose_width()
         column = measure + 64  # Match the prose editor's horizontal padding.
-        gutter = max(0, (self.contentsRect().width() - column) // 2) if self.comfortable_width() else 0
-        if self.layout().contentsMargins().left() != gutter:
-            self.layout().setContentsMargins(gutter, 0, gutter, 0)
-        self.layout().activate()
+        available = self.paper.contentsRect().width()
+        centered = max(0, (available - column) // 2)
+        gutter = max(PAPER_PADDING_X, centered) if self.comfortable_width() else PAPER_PADDING_X
+        margins = self.paper.layout().contentsMargins()
+        if margins.left() != gutter or margins.top() != PAPER_PADDING_TOP:
+            self.paper.layout().setContentsMargins(gutter, PAPER_PADDING_TOP, gutter, PAPER_PADDING_BOTTOM)
+        self.paper.layout().activate()
         self._position_width_handles()
 
     def _position_width_handles(self) -> None:
